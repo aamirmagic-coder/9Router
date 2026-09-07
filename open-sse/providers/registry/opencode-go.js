@@ -46,15 +46,30 @@ export default {
     { id: "glm-5", name: "GLM 5", supportedFormats: ["openai"] },
     { id: "kimi-k2.7-code", name: "Kimi K2.7 Code", supportedFormats: ["openai"] },
     { id: "kimi-k2.6", name: "Kimi K2.6", supportedFormats: ["openai"] },
+<<<<<<< HEAD
     { id: "kimi-k2.5", name: "Kimi K2.5", supportedFormats: ["openai"] },
     { id: "kimi-k3", name: "Kimi K3", supportedFormats: ["openai"] },
-    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", supportedFormats: ["openai", "claude", "openai-responses"] },
-    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", supportedFormats: ["openai", "claude", "openai-responses"] },
-    { id: "deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision (Exp)", supportedFormats: ["openai", "claude", "openai-responses"] },
-    { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", supportedFormats: ["openai", "claude", "openai-responses"] },
+     // DeepSeek V4: openai-responses removed — upstream /responses endpoint requires
+    // multi-turn reasoning_text continuity that clients don't provide. Falls back to
+    // responses→chat translation via /chat/completions which handles it natively.
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", supportedFormats: ["openai", "claude"] },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", supportedFormats: ["openai", "claude"] },
+    { id: "deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision (Exp)", supportedFormats: ["openai", "claude"] },
+    { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", supportedFormats: ["openai", "claude"] },
     { id: "longcat-2.0", name: "LongCat 2.0", supportedFormats: ["openai"] },
     { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash", supportedFormats: ["openai"] },
     { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro", supportedFormats: ["openai"] },
+=======
+    // DeepSeek V4: openai-responses removed — upstream /responses endpoint requires
+    // multi-turn reasoning_text continuity that clients don't provide. Falls back to
+    // responses→chat translation via /chat/completions which handles it natively.
+     // DeepSeek V4: openai-responses removed — upstream /responses endpoint requires
+    // multi-turn reasoning_text continuity that clients don't provide. Falls back to
+    // responses→chat translation via /chat/completions which handles it natively.
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", supportedFormats: ["openai", "claude"] },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", supportedFormats: ["openai", "claude"] },
+    { id: "deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision (Exp)", supportedFormats: ["openai", "claude"] },
+>>>>>>> 3fb3aeaa (fix(opencode-go): remove Responses passthrough for DeepSeek V4 models)
     { id: "mimo-v2.5", name: "MiMo V2.5", supportedFormats: ["openai"] },
     { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro", supportedFormats: ["openai"] },
     { id: "mimo-v2-pro", name: "MiMo V2 Pro", supportedFormats: ["openai"] },

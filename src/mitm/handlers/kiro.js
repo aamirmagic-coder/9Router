@@ -5,13 +5,29 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-// Debug trace log — written to data/logs/mitm/kiro-debug.log (dev only)
+// Debug trace log — written to data/logs/mitm/kiro-debug.log.
+// Enabled when NODE_ENV=development OR MITM_KIRO_DEBUG is truthy ("1"/"true"/"on"/"yes").
+// When MITM_KIRO_DEBUG is on, traces are ALSO echoed to the MITM console log so the
+// root cause is visible without opening the file (useful in production/packaged runs).
 const DEBUG_LOG = path.join(__dirname, "../../../data/logs/mitm/kiro-debug.log");
+
+function kiroDebugEnabled() {
+  const v = (process.env.MITM_KIRO_DEBUG || "").trim().toLowerCase();
+  return IS_DEV || v === "1" || v === "true" || v === "on" || v === "yes";
+}
+
 function dbg(msg) {
-  if (!IS_DEV) return;
+  if (!kiroDebugEnabled()) return;
+  const line = `${new Date().toISOString()} ${msg}`;
   try {
-    fs.appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${msg}\n`);
+    fs.mkdirSync(path.dirname(DEBUG_LOG), { recursive: true });
+    fs.appendFileSync(DEBUG_LOG, `${line}\n`);
   } catch {}
+  // Echo to console only when explicitly requested via MITM_KIRO_DEBUG (avoid dev spam).
+  const v = (process.env.MITM_KIRO_DEBUG || "").trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on" || v === "yes") {
+    log(`[Kiro DBG] ${msg}`);
+  }
 }
 
 // ─── Duplicate-request guard (defensive stopgap, toggleable) ──────────────────
@@ -680,11 +696,17 @@ function emitFinish(state) {
 async function intercept(req, res, bodyBuffer, mappedModel) {
   let fp = null;
   let inFlightMarked = false;
+  const reqId = Math.random().toString(36).slice(2, 8); // correlate log lines for one turn
+  const t0 = Date.now();
+  dbg(`[${reqId}] ── intercept START model=${mappedModel} bodyBytes=${bodyBuffer?.length ?? 0} ` +
+      `host=${req.headers?.host || "?"} x-amz-target=${req.headers?.["x-amz-target"] || "-"} ` +
+      `dedup=${dedupEnabled()} windowMs=${dedupWindowMs()}`);
   try {
     // Detect and handle binary data (e.g., continuation requests with EventStream frames)
     if (isBinaryEventStream(bodyBuffer)) {
       // Binary EventStream requests are typically continuation/streaming frames
       // that don't contain model info - pass them through directly to avoid JSON.parse crash
+      dbg(`[${reqId}] REJECT: binary EventStream body (${bodyBuffer.length}B) reached intercept`);
       throw new Error(`Binary EventStream format detected (${bodyBuffer.length}B) - request should use passthrough instead of intercept`);
     }
 
@@ -693,23 +715,35 @@ async function intercept(req, res, bodyBuffer, mappedModel) {
     if (dedupEnabled()) {
       const dupCheck = isDuplicateRequest(bodyBuffer);
       fp = dupCheck.fp;
+      dbg(`[${reqId}] dedup check: fp=${fp?.slice(0, 12)} isDup=${dupCheck.isDup} reason=${dupCheck.reason || "-"} ` +
+          `inFlight=${inFlightRequests.size} completed=${completedRequests.size}`);
       if (dupCheck.isDup) {
         log(`[Kiro MITM] Suppressed duplicate request (dedup guard, reason=${dupCheck.reason || "duplicate"})`);
+        dbg(`[${reqId}] SUPPRESSED as duplicate (reason=${dupCheck.reason || "duplicate"}) → empty EventStream`);
         return writeSuppressedDuplicateResponse(res);
       }
       markInFlight(fp);
       inFlightMarked = true;
     }
 
-    const body = JSON.parse(bodyBuffer.toString());
+    let body;
+    try {
+      body = JSON.parse(bodyBuffer.toString());
+    } catch (parseErr) {
+      dbg(`[${reqId}] JSON.parse FAILED: ${parseErr.message}. bodyHead=${JSON.stringify(bodyBuffer.toString("utf8").slice(0, 200))}`);
+      throw parseErr;
+    }
 
     // 1 + 2: CodeWhisperer → OpenAI messages + tools
     const messages = codeWhispererToMessages(body);
     if (messages.length === 0) {
+      dbg(`[${reqId}] 0 messages produced. conversationState keys=${JSON.stringify(Object.keys(body.conversationState || {}))} ` +
+          `hasCurrent=${!!body.conversationState?.currentMessage} historyLen=${(body.conversationState?.history || []).length}`);
       throw new Error("codeWhispererToMessages produced 0 messages — check request body");
     }
 
     const tools = extractTools(body);
+    dbg(`[${reqId}] converted: messages=${messages.length} tools=${tools.length} roles=[${messages.map(m => m.role).join(",")}]`);
 
     const openaiBody = {
       model: mappedModel,
@@ -720,14 +754,37 @@ async function intercept(req, res, bodyBuffer, mappedModel) {
     };
 
     // 3: Forward to 9router
+    dbg(`[${reqId}] → fetchRouter POST /v1/chat/completions (stream=true)`);
     const routerRes = await fetchRouter(openaiBody, "/v1/chat/completions", req.headers);
+    const routerCt = routerRes.headers.get("content-type") || "";
+    dbg(`[${reqId}] ← router status=${routerRes.status} content-type="${routerCt}" hasBody=${!!routerRes.body}`);
+
+    // Router returned a non-2xx OR a non-stream body — this is the usual cause of Kiro
+    // "internal error": Kiro expects an EventStream but gets a JSON error object.
+    // Peek the error body so the root cause (auth, quota, no-account, upstream 4xx/5xx)
+    // is captured instead of being silently re-encoded as an empty stream.
+    if (routerRes.status < 200 || routerRes.status >= 300 || !routerCt.includes("text/event-stream")) {
+      let preview = "";
+      try {
+        const clone = routerRes.clone();
+        preview = (await clone.text()).slice(0, 500);
+      } catch (e) {
+        preview = `<failed to read body: ${e.message}>`;
+      }
+      dbg(`[${reqId}] ⚠ router did NOT return an SSE stream. status=${routerRes.status} ct="${routerCt}" bodyPreview=${JSON.stringify(preview)}`);
+    }
 
     // 4 + 5: Re-encode response as AWS EventStream binary using standard pipeline
     const state = initKiroState(mappedModel);
 
     await pipeTransformedEventStream(routerRes, res, convertOpenAIToKiro, state);
+    dbg(`[${reqId}] ✓ stream complete in ${Date.now() - t0}ms ` +
+        `initialSent=${state.initialSent} finishSent=${state.finishSent} hasToolCalls=${state.hasToolCalls} ` +
+        `headersSent=${res.headersSent} writableEnded=${res.writableEnded}`);
   } catch (error) {
     err(`[Kiro MITM] Request processing failed: ${error.message}`);
+    dbg(`[${reqId}] ✗ FAILED after ${Date.now() - t0}ms: ${error.message}\n${error.stack || "(no stack)"}\n` +
+        `headersSent=${res.headersSent} (if true, the 500 body below cannot reach Kiro → Kiro sees a truncated/invalid stream)`);
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json" });
     }

@@ -111,10 +111,12 @@ function ClineUsageListPicker({ picker, busy, onClose, onSave }) {
   }, [search]);
 
   const needle = search.trim().toLowerCase();
+  // Rows stay put while editing: a tick only flips the checkbox, the left
+  // column still shows what is saved until Save recomputes it.
   const candidates = picker.candidates.filter(
-    (id) => !checked.has(id) && (!needle || id.toLowerCase().includes(needle))
+    (id) => !needle || id.toLowerCase().includes(needle)
   );
-  const selected = [...checked];
+  const selected = picker.checked;
 
   const toggle = (id) => {
     setDirty(true);
@@ -140,7 +142,7 @@ function ClineUsageListPicker({ picker, busy, onClose, onSave }) {
       footer={
         <div className="flex w-full items-center justify-between gap-2">
           <span className="text-xs text-text-muted">
-            {translate("Selected")} {selected.length} / {picker.candidates.length}
+            {translate("Selected")} {checked.size} / {picker.candidates.length}
           </span>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => {
@@ -149,7 +151,7 @@ function ClineUsageListPicker({ picker, busy, onClose, onSave }) {
             }}>
               {translate("Cancel")}
             </Button>
-            <Button onClick={() => onSave(selected)} disabled={!dirty || busy}>
+            <Button onClick={() => onSave([...checked])} disabled={!dirty || busy}>
               {translate("Save")}
             </Button>
           </div>
@@ -175,14 +177,14 @@ function ClineUsageListPicker({ picker, busy, onClose, onSave }) {
                 <p className="text-xs text-text-muted">{translate("Nothing selected")}</p>
               )}
               {selected.map((id) => (
-                <PickerRow key={id} id={id} checked onToggle={toggle} />
+                <PickerRow key={id} id={id} checked={checked.has(id)} onToggle={toggle} />
               ))}
             </div>
           </div>
           <div className="flex min-h-0 flex-col gap-1">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-text-muted">
-                {translate("Candidates")} ({candidates.length})
+              {translate("Candidates")} ({candidates.filter((id) => !checked.has(id)).length})
               </p>
               {candidates.length > 0 && (
                 <div className="flex gap-1">
@@ -216,11 +218,11 @@ function ClineUsageListPicker({ picker, busy, onClose, onSave }) {
             <div className="flex max-h-[55vh] flex-col gap-1 overflow-y-auto">
               {candidates.length === 0 && (
                 <p className="text-xs text-text-muted">
-                  {needle ? translate(`No models match "${search.trim()}"`) : translate("All models selected")}
+                  {translate(`No models match "${search.trim()}"`)}
                 </p>
               )}
               {candidates.slice(0, visible).map((id) => (
-                <PickerRow key={id} id={id} onToggle={toggle} />
+                <PickerRow key={id} id={id} checked={checked.has(id)} onToggle={toggle} />
               ))}
               {candidates.length > visible && (
                 <button

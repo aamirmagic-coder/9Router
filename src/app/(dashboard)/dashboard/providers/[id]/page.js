@@ -85,6 +85,7 @@ export default function ProviderDetailPage() {
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
   const [importingClineModels, setImportingClineModels] = useState(false);
+  const [refreshingSuggestedModels, setRefreshingSuggestedModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -181,6 +182,7 @@ export default function ProviderDetailPage() {
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
+  const providerModelsFetcher = (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId] || WEB_COOKIE_PROVIDERS[providerId])?.modelsFetcher;
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -640,9 +642,12 @@ export default function ProviderDetailPage() {
       setImportingQoderModels(false);
     }
   };
-  // Fetch the live Cline /models catalog and add every model not yet present.
-  // Cline and ClinePass share the same catalog endpoint (api.cline.bot/api/v1/models).
-  const handleImportClineModels = async () => {
+  // Cline /models catalog (shared by Cline and ClinePass, api.cline.bot/api/v1/models).
+  // freeOnly=false adds whatever the catalog has; freeOnly=true syncs the list to
+  // exactly the free set — stale custom rows are deleted in one bulk request,
+  // legacy alias rows are dropped, and built-in registry rows (which the
+  // custom-models API can't delete) are hidden via disabled models.
+  const handleImportClineModels = async (freeOnly) => {
     if (importingClineModels) return;
     const activeConnection = connections.find((conn) => conn.isActive !== false);
     if (!activeConnection) {
@@ -651,7 +656,7 @@ export default function ProviderDetailPage() {
     }
     setImportingClineModels(true);
     try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const res = await fetch(`/api/providers/${activeConnection.id}/models${freeOnly ? "?filter=free" : ""}`);
       const data = await res.json();
       if (!res.ok) {
         alert(data.error || translate("Failed to fetch models"));
@@ -661,6 +666,55 @@ export default function ProviderDetailPage() {
       if (models.length === 0) {
         alert(translate("No models returned"));
         return;
+      }
+      const freeIds = new Set(models.map((model) => model.id || model.name).filter(Boolean));
+      let removedCount = 0;
+      if (freeOnly) {
+        if (!confirm(translate("Sync Free Models keeps only free models and removes the rest. Continue?"))) return;
+        const staleCustomIds = customModels
+          .filter((entry) => entry.providerAlias === providerStorageAlias && (entry.kind || entry.type || "llm") === "llm")
+          .map((entry) => entry.id)
+          .filter((id) => !freeIds.has(id));
+        for (let i = 0; i < staleCustomIds.length; i += 100) {
+          const chunk = staleCustomIds.slice(i, i + 100);
+          const delRes = await fetch(`/api/models/custom?providerAlias=${encodeURIComponent(providerStorageAlias)}&type=llm&ids=${encodeURIComponent(chunk.join(","))}`, { method: "DELETE" });
+          if (!delRes.ok) break;
+          removedCount += chunk.length;
+        }
+        if (removedCount) {
+          await fetchCustomModels();
+          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+        }
+        const aliasPrefix = `${providerStorageAlias}/`;
+        for (const [alias, fullModel] of Object.entries(modelAliases)) {
+          if (typeof fullModel !== "string" || !fullModel.startsWith(aliasPrefix)) continue;
+          if (freeIds.has(fullModel.slice(aliasPrefix.length))) continue;
+          await handleDeleteAlias(alias);
+          removedCount += 1;
+        }
+        // Registry rows and the connection's live catalog both have to go: the
+        // custom-models API can't delete them, but /v1/models and the picker
+        // both honour the disabled list, so hiding is the only lever.
+        const fullRes = await fetch(`/api/providers/${activeConnection.id}/models`, { cache: "no-store" });
+        const fullData = fullRes.ok ? await fullRes.json() : { models: [] };
+        const hideIds = [...new Set([
+          ...staticModels.map((model) => model.id),
+          ...(fullData.models || []).map((model) => model.id || model.name),
+        ].filter(Boolean))].filter((id) => !freeIds.has(id) && !disabledModelIds.includes(id));
+        for (let i = 0; i < hideIds.length; i += 200) {
+          const chunk = hideIds.slice(i, i + 200);
+          const disRes = await fetch("/api/models/disabled", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerAlias: providerStorageAlias, ids: chunk }),
+          });
+          if (!disRes.ok) break;
+          removedCount += chunk.length;
+        }
+        if (hideIds.length) await fetchDisabledModels();
+        for (const id of freeIds) {
+          if (disabledModelIds.includes(id)) await handleEnableModel(id);
+        }
       }
       let importedCount = 0;
       for (const model of models) {
@@ -675,16 +729,47 @@ export default function ProviderDetailPage() {
         await handleAddCustomModel(modelId, "llm", providerStorageAlias);
         importedCount += 1;
       }
-      if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
+      if (importedCount === 0 && removedCount === 0) {
+        alert(translate("Cline free models are already up to date"));
       } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+        alert(`${translate("Successfully added")} ${importedCount} ${translate("models")}, ${translate("removed")} ${removedCount}`);
       }
     } catch (error) {
       console.log("Error importing Cline models:", error);
       alert(translate("Error fetching models") + ": " + error.message);
     } finally {
       setImportingClineModels(false);
+    }
+  };
+
+  // /models catalog → suggested models, then add every one that isn't present yet.
+  const handleRefreshSuggestedModels = async () => {
+    if (!providerModelsFetcher || refreshingSuggestedModels) return;
+    setRefreshingSuggestedModels(true);
+    try {
+      const catalogue = await fetchSuggestedModels(providerModelsFetcher, { fresh: true });
+      setSuggestedModels(catalogue);
+      if (catalogue.length === 0) {
+        alert(translate("No models returned"));
+        return;
+      }
+      const missing = catalogue.filter((m) => {
+        return !customModels.some(
+          (entry) => entry.providerAlias === providerStorageAlias && entry.id === m.id && (entry.kind || entry.type || "llm") === "llm"
+        ) && !Object.values(modelAliases).includes(`${providerStorageAlias}/${m.id}`) && !models.some((existing) => existing.id === m.id);
+      });
+      let importedCount = 0;
+      for (const model of missing) {
+        await handleAddCustomModel(model.id, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      alert(importedCount === 0
+        ? translate("All models already exist, no new models added")
+        : translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+    } catch (error) {
+      alert(translate("Error fetching models") + ": " + error.message);
+    } finally {
+      setRefreshingSuggestedModels(false);
     }
   };
 
@@ -1265,7 +1350,7 @@ export default function ProviderDetailPage() {
         {/* Import Cline /models catalog button — only show for cline and clinepass providers */}
         {(providerId === "cline" || providerId === "clinepass") && connections.some((conn) => conn.isActive !== false) && (
           <button
-            onClick={handleImportClineModels}
+            onClick={() => handleImportClineModels(false)}
             disabled={importingClineModels}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -1273,6 +1358,35 @@ export default function ProviderDetailPage() {
               {importingClineModels ? "progress_activity" : "download"}
             </span>
             {importingClineModels ? translate("Fetching...") : translate("Import from /models")}
+          </button>
+        )}
+
+        {/* Free-tier sync: the `:free` catalog ids plus the recommended feed's
+            free[] list, which is the only place Cline publishes cline-free/*. */}
+        {providerId === "cline" && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={() => handleImportClineModels(true)}
+            disabled={importingClineModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-500/40 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400 transition-colors hover:border-emerald-500 hover:bg-emerald-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-sm" style={importingClineModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {importingClineModels ? "progress_activity" : "redeem"}
+            </span>
+            {importingClineModels ? translate("Fetching...") : translate("Sync Free Models")}
+          </button>
+        )}
+
+        {/* Pull the provider's live /models catalogue and add every missing model */}
+        {providerModelsFetcher && (
+          <button
+            onClick={handleRefreshSuggestedModels}
+            disabled={refreshingSuggestedModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-sm" style={refreshingSuggestedModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {refreshingSuggestedModels ? "progress_activity" : "sync"}
+            </span>
+            {refreshingSuggestedModels ? translate("Fetching...") : translate("Sync Catalog Models")}
           </button>
         )}
 

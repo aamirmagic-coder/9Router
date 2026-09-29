@@ -53,17 +53,20 @@ export async function POST(request) {
 }
 
 // DELETE /api/models/custom?providerAlias=xxx&id=yyy&type=zzz
+// Bulk form: ?providerAlias=xxx&ids=a,b,c&type=zzz — one request per sync instead
+// of one per model. Single-id callers keep working unchanged.
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");
-    const id = searchParams.get("id");
     const type = searchParams.get("type") || "llm";
-    if (!providerAlias || !id) {
+    const ids = searchParams.get("ids");
+    const modelIds = ids ? ids.split(",").filter(Boolean) : [searchParams.get("id")];
+    if (!providerAlias || !modelIds.length || !modelIds[0]) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
-    await deleteCustomModel({ providerAlias, id, type });
-    return NextResponse.json({ success: true });
+    await Promise.all(modelIds.map((modelId) => deleteCustomModel({ providerAlias, id: modelId, type })));
+    return NextResponse.json({ success: true, deleted: modelIds.length });
   } catch (error) {
     console.log("Error deleting custom model:", error);
     return NextResponse.json({ error: "Failed to delete custom model" }, { status: 500 });

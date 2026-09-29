@@ -5,16 +5,14 @@ const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const cache = new Map(); // key: fetcher.url → { data, expiresAt }
 
 /**
- * Fetch suggested models for a provider using its modelsFetcher config.
- * Results are cached in-memory for CACHE_TTL_MS.
  * @param {{ url: string, type: string }} fetcher
- * @returns {Promise<Array<{ id: string, name: string, contextLength?: number }>>}
+ * @param {{ fresh?: boolean }} [opts] — fresh: true skips the cache (used by manual refresh)
  */
-export async function fetchSuggestedModels(fetcher) {
+export async function fetchSuggestedModels(fetcher, { fresh = false } = {}) {
   if (!fetcher?.url || !fetcher?.type) return [];
 
   const cached = cache.get(fetcher.url);
-  if (cached && Date.now() < cached.expiresAt) return cached.data;
+  if (!fresh && cached && Date.now() < cached.expiresAt) return cached.data;
 
   try {
     const params = new URLSearchParams({ url: fetcher.url, type: fetcher.type });

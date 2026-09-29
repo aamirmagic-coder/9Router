@@ -12,7 +12,7 @@ import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
-import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
+import { resolveClineModels, resolveClinepassModels, resolveClineFreeModels } from "open-sse/services/clinepassModels.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
@@ -381,7 +381,15 @@ const PROVIDER_MODELS_CONFIG = {
   // the cursor direct pattern (no refreshFn) and only differ in filtering:
   // cline returns the whole catalog verbatim, clinepass keeps cline-pass/* only.
   cline: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, { filter } = {}) => {
+      if (filter === "free") {
+        const free = await resolveClineFreeModels({
+          accessToken: connection.accessToken,
+          apiKey: connection.apiKey,
+        });
+        if (free?.models?.length) return { models: free.models };
+        return { models: [], warning: "Cline returned no free models." };
+      }
       const result = await resolveClineModels({
         accessToken: connection.accessToken,
         apiKey: connection.apiKey,
@@ -618,7 +626,9 @@ export async function GET(request, { params }) {
 
     // Config-driven custom resolver path (OAuth refresh, non-OpenAI shape, etc.)
     if (typeof config.customResolver === "function") {
-      const result = await config.customResolver(connection);
+      const result = await config.customResolver(connection, {
+        filter: new URL(request.url).searchParams.get("filter"),
+      });
       if (result.error) {
         return NextResponse.json({ error: result.error }, { status: result.status || 500 });
       }

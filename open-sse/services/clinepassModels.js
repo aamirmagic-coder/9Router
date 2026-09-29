@@ -143,3 +143,27 @@ export async function resolveClineModels(credentials) {
 
   return merged.length ? { models: merged } : null;
 }
+
+/**
+ * Free-tier-only view of the Cline catalog: every `:free` id plus the entries
+ * the `free[]` feed publishes (stealth/pixel-canary, cline-free/*, …) — the
+ * catalog endpoint itself carries none of those. Backs the Sync Free Models
+ * button; the static list is data, so region-blocked ids are kept too.
+ *
+ * @param {object} credentials - Connection credentials ({ accessToken, apiKey })
+ * @returns {Promise<{ models: { id: string, name: string }[] } | null>}
+ */
+export async function resolveClineFreeModels(credentials) {
+  const rawList = await fetchClineRawModels(credentials);
+  const freeTier = await fetchClineFreeTierModels();
+  const byId = new Map();
+  for (const m of rawList || []) {
+    if (typeof m?.id === "string" && m.id.endsWith(":free")) {
+      byId.set(m.id, { id: m.id, name: m.name || m.id });
+    }
+  }
+  for (const m of freeTier || []) {
+    byId.set(m.id, { id: m.id, name: m.name || m.id });
+  }
+  return byId.size ? { models: Array.from(byId.values()) } : null;
+}

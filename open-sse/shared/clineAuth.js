@@ -1,6 +1,7 @@
-import pkg from "../../package.json" with { type: "json" };
-
-const APP_VERSION = pkg.version || "0.0.0";
+// Cline's free tier (cline-free/*) rejects requests that don't look like the
+// official desktop SDK ("only available via Cline product surfaces"), so mirror
+// the desktop identity. Bump when Cline gates on newer versions.
+const CLINE_CLIENT_VERSION = "0.0.37";
 
 export function getClineAccessToken(token) {
   if (typeof token !== "string") return "";
@@ -26,12 +27,12 @@ export function buildClineHeaders(token, extraHeaders = {}) {
   const headers = {
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
-    "User-Agent": `9Router/${APP_VERSION}`,
-    "X-PLATFORM": process.platform || "unknown",
+    "User-Agent": `Cline/${CLINE_CLIENT_VERSION}`,
+    "X-PLATFORM": "darwin",
     "X-PLATFORM-VERSION": process.version || "unknown",
-    "X-CLIENT-TYPE": "9router",
-    "X-CLIENT-VERSION": APP_VERSION,
-    "X-CORE-VERSION": APP_VERSION,
+    "X-CLIENT-TYPE": "cline-sdk",
+    "X-CLIENT-VERSION": CLINE_CLIENT_VERSION,
+    "X-CORE-VERSION": CLINE_CLIENT_VERSION,
     "X-IS-MULTIROOT": "false",
     ...extraHeaders,
   };

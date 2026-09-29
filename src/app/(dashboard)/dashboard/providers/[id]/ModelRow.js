@@ -64,7 +64,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
           <button
             onClick={onDeleteAlias}
             className="ml-auto rounded p-0.5 text-text-muted opacity-100 transition-opacity hover:bg-red-500/10 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100"
-            title="Remove custom model"
+            title="Remove and hide until restored"
           >
             <span className="material-symbols-outlined text-sm">close</span>
           </button>

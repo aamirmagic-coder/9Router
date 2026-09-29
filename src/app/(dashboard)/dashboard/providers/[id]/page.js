@@ -712,14 +712,14 @@ export default function ProviderDetailPage() {
           removedCount += chunk.length;
         }
         if (hideIds.length) await fetchDisabledModels();
-        for (const id of freeIds) {
-          if (disabledModelIds.includes(id)) await handleEnableModel(id);
-        }
       }
       let importedCount = 0;
       for (const model of models) {
         const modelId = model.id || model.name;
         if (!modelId) continue;
+        // A model the user hid stays hidden: the disabled list is the memory
+        // behind the row's ❌, so sync must not resurrect it as a custom row.
+        if (disabledModelIds.includes(modelId)) continue;
         const alreadyExists = customModels.some(
           (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
         ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
@@ -1259,7 +1259,18 @@ export default function ProviderDetailPage() {
     ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
     const disabledSet = new Set(disabledModelIds);
     const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
-    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
+    const knownDisabled = allModels.filter((m) => disabledSet.has(m.id));
+    // ❌ on a synced free model deletes its row too, so nothing is left to click;
+    // list those leftover ids as well or the exclusion would be permanent. The
+    // list is append-ordered, so its tail is what the user just excluded and the
+    // free sync's own hundreds stay out of the way.
+    const disabledDisplayModels = [
+      ...knownDisabled,
+      ...disabledModelIds
+        .filter((id) => !allModels.some((m) => m.id === id))
+        .slice(-24)
+        .map((id) => ({ id })),
+    ];
     const customModelRows = getProviderCustomModelRows({
       customModels,
       modelAliases,
@@ -1280,9 +1291,13 @@ export default function ProviderDetailPage() {
             copied={copied}
             onCopy={copy}
             onSetAlias={() => {}}
-            onDeleteAlias={() => {
+            onDeleteAlias={async () => {
               if (model.source === "custom") {
-                handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
+                // Delete + remember: a bare delete comes back on the next catalog
+                // sync, so the id goes into the disabled list and stays gone until
+                // it is restored from the "Disabled models" section.
+                await handleDisableModel(model.id);
+                await handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
               } else {
                 handleDeleteAlias(model.alias);
               }
@@ -1426,7 +1441,7 @@ export default function ProviderDetailPage() {
         {/* Disabled models — restorable */}
         {disabledDisplayModels.length > 0 && (
           <div className="w-full mt-2">
-            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledDisplayModels.length}):</p>
+            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledModelIds.length}):</p>
             <div className="flex flex-wrap gap-2">
               {disabledDisplayModels.map((m) => (
                 <button

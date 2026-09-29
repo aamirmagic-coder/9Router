@@ -33,6 +33,7 @@ import {
   qoderJobTokenExchangeUrl,
   qoderUserInfoUrl,
   qoderInferenceBase,
+  QODER_USER_AGENT,
 } from "../shared/qoder/constants.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -75,7 +76,7 @@ async function exchangeJobToken(pat, proxyOptions = null, signal = null, region 
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        "User-Agent": "qodercli/1.0.0",
+        "User-Agent": QODER_USER_AGENT,
         "Cosy-Version": QODER_IDE_VERSION,
         "Cosy-ClientType": QODER_CLIENT_TYPE,
       },
@@ -114,7 +115,7 @@ async function fetchUserIdForJobToken(jobToken, proxyOptions = null, signal = nu
         headers: {
           Authorization: `Bearer ${jobToken}`,
           Accept: "application/json",
-          "User-Agent": "qodercli/1.0.0",
+          "User-Agent": QODER_USER_AGENT,
         },
         signal,
       },

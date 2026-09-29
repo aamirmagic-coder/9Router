@@ -24,6 +24,7 @@ import {
   QODER_MACHINE_OS,
   QODER_MACHINE_TYPE,
   QODER_RSA_PUBLIC_KEY,
+  QODER_USER_AGENT,
 } from "./constants.js";
 
 // AES-128 wants a 16-byte key. Match qodercli/Veria: take the first 16 chars
@@ -170,6 +171,8 @@ export function buildCosyHeaders(body, requestUrl, creds) {
     "Cosy-Organization-Id": "",
     "Cosy-Organization-Tags": "",
     "Login-Version": QODER_LOGIN_VERSION,
+    // 真实客户端固定发 "Qoder"；growth/campaign 类接口按 UA 判定，缺了会返回 showCampaign:false。
+    "User-Agent": QODER_USER_AGENT,
     "X-Request-Id": uuidv4(),
   };
 }

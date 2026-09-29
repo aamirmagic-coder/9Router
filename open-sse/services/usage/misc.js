@@ -4,6 +4,7 @@
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { U } from "./shared.js";
+import { QODER_CLIENT_TYPE, QODER_USER_AGENT } from "../../shared/qoder/constants.js";
 
 export { getGlmUsage } from "./glm.js";
 
@@ -239,6 +240,8 @@ export async function getQoderUsage(accessToken, proxyOptions = null, providerId
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
+          "Cosy-ClientType": QODER_CLIENT_TYPE,
+          "User-Agent": QODER_USER_AGENT,
         },
       },
       proxyOptions,

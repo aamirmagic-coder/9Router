@@ -19,6 +19,11 @@ import {
   KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import {
+  QODER_IDE_VERSION,
+  QODER_CLIENT_TYPE,
+  QODER_USER_AGENT,
+} from "open-sse/shared/qoder/constants.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -72,6 +77,7 @@ const OAUTH_TEST_CONFIG = {
     method: "GET",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
+    extraHeaders: { "Cosy-ClientType": QODER_CLIENT_TYPE, "User-Agent": QODER_USER_AGENT },
     refreshable: false,
   },
   "qoder-cn": {
@@ -80,6 +86,7 @@ const OAUTH_TEST_CONFIG = {
     method: "GET",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
+    extraHeaders: { "Cosy-ClientType": QODER_CLIENT_TYPE, "User-Agent": QODER_USER_AGENT },
     refreshable: false,
   },
   kimi: { checkExpiry: true, refreshable: true },
@@ -813,8 +820,9 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
             headers: {
               "Content-Type": "application/json",
               Accept: "application/json",
-              "Cosy-Version": "1.0.1",
-              "Cosy-ClientType": "5",
+              "Cosy-Version": QODER_IDE_VERSION,
+              "Cosy-ClientType": QODER_CLIENT_TYPE,
+              "User-Agent": QODER_USER_AGENT,
             },
             body: JSON.stringify({ personal_token: pat }),
           },

@@ -307,6 +307,17 @@ export async function buildModelsList(kindFilter, options = {}) {
     }
   }
 
+  // noAuth providers need no connection, but the model list below is driven
+  // entirely by connections — seed a placeholder so their static + custom models surface.
+  for (const [providerId, provider] of Object.entries(AI_PROVIDERS)) {
+    if (!provider?.noAuth || activeConnectionByProvider.has(providerId)) continue;
+    activeConnectionByProvider.set(providerId, {
+      id: `noauth-${providerId}`,
+      provider: providerId,
+      providerSpecificData: {},
+    });
+  }
+
   const models = [];
 
   // Lookup map so aggregateComboCapabilities can recursively resolve nested combos

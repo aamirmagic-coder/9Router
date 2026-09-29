@@ -15,6 +15,7 @@ import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import ModelRow from "./ModelRow";
+import ClineUsageListPanels from "./ClineUsageListPanels";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
@@ -75,6 +76,10 @@ export default function ProviderDetailPage() {
   const [liveModelsError, setLiveModelsError] = useState(null);
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
+  // Cline usage list: ids of the free bucket (null = still loading) and the
+  // save lock. Everything else about the usage list is derived from custom rows.
+  const [clineFreeIds, setClineFreeIds] = useState(null);
+  const [savingClineSelection, setSavingClineSelection] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
@@ -515,6 +520,31 @@ export default function ProviderDetailPage() {
     return () => { cancelled = true; };
   }, [providerId, connections]);
 
+  // Cline splits the catalog into a free bucket (`:free` ids plus the
+  // recommended feed's free[] list) and everything else. Both the panels and
+  // the picker's paid candidate list need that split, so fetch it once per
+  // connection instead of guessing from the id.
+  useEffect(() => {
+    if (providerId !== "cline") {
+      setClineFreeIds(null);
+      return;
+    }
+    const connection = connections.find((item) => item.isActive !== false);
+    if (!connection?.id) {
+      setClineFreeIds(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/providers/${connection.id}/models?filter=free`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.models)) return;
+        setClineFreeIds(new Set(data.models.map((m) => m.id || m.name).filter(Boolean)));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [providerId, connections]);
+
   // Fetch suggested models from provider's public API (if configured)
   useEffect(() => {
     const fetcher = (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId])?.modelsFetcher;
@@ -642,12 +672,10 @@ export default function ProviderDetailPage() {
       setImportingQoderModels(false);
     }
   };
-  // Cline /models catalog (shared by Cline and ClinePass, api.cline.bot/api/v1/models).
-  // freeOnly=false adds whatever the catalog has; freeOnly=true syncs the list to
-  // exactly the free set — stale custom rows are deleted in one bulk request,
-  // legacy alias rows are dropped, and built-in registry rows (which the
-  // custom-models API can't delete) are hidden via disabled models.
-  const handleImportClineModels = async (freeOnly) => {
+  // Cline /models catalog → add every id that isn't a row yet. Cline's own
+  // model list is the usage list (ClineUsageListPanels); this add-only path
+  // stays for ClinePass, which has no picker.
+  const handleImportClineModels = async () => {
     if (importingClineModels) return;
     const activeConnection = connections.find((conn) => conn.isActive !== false);
     if (!activeConnection) {
@@ -656,7 +684,7 @@ export default function ProviderDetailPage() {
     }
     setImportingClineModels(true);
     try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models${freeOnly ? "?filter=free" : ""}`);
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
       const data = await res.json();
       if (!res.ok) {
         alert(data.error || translate("Failed to fetch models"));
@@ -667,58 +695,12 @@ export default function ProviderDetailPage() {
         alert(translate("No models returned"));
         return;
       }
-      const freeIds = new Set(models.map((model) => model.id || model.name).filter(Boolean));
-      let removedCount = 0;
-      if (freeOnly) {
-        if (!confirm(translate("Sync Free Models keeps only free models and removes the rest. Continue?"))) return;
-        const staleCustomIds = customModels
-          .filter((entry) => entry.providerAlias === providerStorageAlias && (entry.kind || entry.type || "llm") === "llm")
-          .map((entry) => entry.id)
-          .filter((id) => !freeIds.has(id));
-        for (let i = 0; i < staleCustomIds.length; i += 100) {
-          const chunk = staleCustomIds.slice(i, i + 100);
-          const delRes = await fetch(`/api/models/custom?providerAlias=${encodeURIComponent(providerStorageAlias)}&type=llm&ids=${encodeURIComponent(chunk.join(","))}`, { method: "DELETE" });
-          if (!delRes.ok) break;
-          removedCount += chunk.length;
-        }
-        if (removedCount) {
-          await fetchCustomModels();
-          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
-        }
-        const aliasPrefix = `${providerStorageAlias}/`;
-        for (const [alias, fullModel] of Object.entries(modelAliases)) {
-          if (typeof fullModel !== "string" || !fullModel.startsWith(aliasPrefix)) continue;
-          if (freeIds.has(fullModel.slice(aliasPrefix.length))) continue;
-          await handleDeleteAlias(alias);
-          removedCount += 1;
-        }
-        // Registry rows and the connection's live catalog both have to go: the
-        // custom-models API can't delete them, but /v1/models and the picker
-        // both honour the disabled list, so hiding is the only lever.
-        const fullRes = await fetch(`/api/providers/${activeConnection.id}/models`, { cache: "no-store" });
-        const fullData = fullRes.ok ? await fullRes.json() : { models: [] };
-        const hideIds = [...new Set([
-          ...staticModels.map((model) => model.id),
-          ...(fullData.models || []).map((model) => model.id || model.name),
-        ].filter(Boolean))].filter((id) => !freeIds.has(id) && !disabledModelIds.includes(id));
-        for (let i = 0; i < hideIds.length; i += 200) {
-          const chunk = hideIds.slice(i, i + 200);
-          const disRes = await fetch("/api/models/disabled", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ providerAlias: providerStorageAlias, ids: chunk }),
-          });
-          if (!disRes.ok) break;
-          removedCount += chunk.length;
-        }
-        if (hideIds.length) await fetchDisabledModels();
-      }
       let importedCount = 0;
       for (const model of models) {
         const modelId = model.id || model.name;
         if (!modelId) continue;
         // A model the user hid stays hidden: the disabled list is the memory
-        // behind the row's ❌, so sync must not resurrect it as a custom row.
+        // behind the row's ❌, so import must not resurrect it as a custom row.
         if (disabledModelIds.includes(modelId)) continue;
         const alreadyExists = customModels.some(
           (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
@@ -729,16 +711,124 @@ export default function ProviderDetailPage() {
         await handleAddCustomModel(modelId, "llm", providerStorageAlias);
         importedCount += 1;
       }
-      if (importedCount === 0 && removedCount === 0) {
-        alert(translate("Cline free models are already up to date"));
+      if (importedCount === 0) {
+        alert(translate("Cline models are already up to date"));
       } else {
-        alert(`${translate("Successfully added")} ${importedCount} ${translate("models")}, ${translate("removed")} ${removedCount}`);
+        alert(`${translate("Successfully added")} ${importedCount} ${translate("models")}`);
       }
     } catch (error) {
       console.log("Error importing Cline models:", error);
       alert(translate("Error fetching models") + ": " + error.message);
     } finally {
       setImportingClineModels(false);
+    }
+  };
+
+  // Cline usage list. Selected = custom rows; every save re-derives the hidden
+  // set as catalog − selected, because catalog rows can't be deleted through
+  // the custom-models API and the disabled list is the only lever.
+  const clineUsageRows = () => getProviderCustomModelRows({
+    customModels,
+    modelAliases,
+    providerAlias: providerStorageAlias,
+    builtInModels: models,
+    type: "llm",
+  });
+
+  // Raw catalog ids from the active connection; null means the fetch failed.
+  const fetchClineCatalog = async (freeOnly) => {
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) {
+      alert(translate("Please add an active Cline connection first"));
+      return null;
+    }
+    const res = await fetch(`/api/providers/${activeConnection.id}/models${freeOnly ? "?filter=free" : ""}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || translate("Failed to fetch models"));
+      return null;
+    }
+    return (data.models || []).map((m) => m.id || m.name).filter(Boolean);
+  };
+
+  const handleClineRefresh = async (bucket) => {
+    if (bucket === "free") {
+      const freeIds = await fetchClineCatalog(true);
+      if (!freeIds) return [];
+      if (freeIds.length) setClineFreeIds(new Set(freeIds));
+      return freeIds;
+    }
+    const all = await fetchClineCatalog(false);
+    if (!all) return [];
+    let free = clineFreeIds;
+    if (!free) {
+      const freeIds = await fetchClineCatalog(true);
+      if (!freeIds) return [];
+      free = new Set(freeIds);
+      if (freeIds.length) setClineFreeIds(free);
+    }
+    return all.filter((id) => !free.has(id));
+  };
+
+  const handleClineSelectionSave = async (bucket, nextIds) => {
+    if (savingClineSelection) return;
+    const rows = clineUsageRows();
+    const allIds = rows.map((row) => row.id);
+    const free = clineFreeIds || new Set();
+    const inBucket = (id) => (bucket === "free" ? free.has(id) : !free.has(id));
+    const next = new Set([...allIds.filter((id) => !inBucket(id)), ...nextIds]);
+    const toAdd = [...next].filter((id) => !allIds.includes(id));
+    const toDel = allIds.filter((id) => !next.has(id));
+    setSavingClineSelection(true);
+    try {
+      let added = 0;
+      for (const id of toAdd) {
+        await handleAddCustomModel(id, "llm", providerStorageAlias);
+        added += 1;
+      }
+      // A legacy alias row has no custom row to delete — drop the alias itself.
+      const aliasRows = toDel
+        .map((id) => rows.find((row) => row.id === id && row.source === "legacyAlias"))
+        .filter(Boolean);
+      const customToDel = toDel.filter((id) => !aliasRows.some((row) => row.id === id));
+      for (const row of aliasRows) await handleDeleteAlias(row.alias);
+      for (let i = 0; i < customToDel.length; i += 100) {
+        const chunk = customToDel.slice(i, i + 100);
+        const delRes = await fetch(`/api/models/custom?providerAlias=${encodeURIComponent(providerStorageAlias)}&type=llm&ids=${encodeURIComponent(chunk.join(","))}`, { method: "DELETE" });
+        if (!delRes.ok) break;
+      }
+      const catalogIds = await fetchClineCatalog(false);
+      if (catalogIds) {
+        const disabledNow = new Set(
+          await fetch(`/api/models/disabled?providerAlias=${encodeURIComponent(providerStorageAlias)}`, { cache: "no-store" })
+            .then((r) => r.json())
+            .then((data) => data.ids || [])
+        );
+        const known = new Set([...staticModels.map((model) => model.id), ...catalogIds].filter(Boolean));
+        const toHide = [...known].filter((id) => !next.has(id) && !disabledNow.has(id));
+        const toShow = [...next].filter((id) => disabledNow.has(id));
+        for (let i = 0; i < toHide.length; i += 200) {
+          const chunk = toHide.slice(i, i + 200);
+          const disRes = await fetch("/api/models/disabled", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerAlias: providerStorageAlias, ids: chunk }),
+          });
+          if (!disRes.ok) break;
+        }
+        if (toShow.length) {
+          await fetch(`/api/models/disabled?providerAlias=${encodeURIComponent(providerStorageAlias)}&ids=${encodeURIComponent(toShow.join(","))}`, { method: "DELETE" });
+        }
+      }
+      await Promise.all([fetchCustomModels(), fetchDisabledModels()]);
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+      const removed = customToDel.length + aliasRows.length;
+      alert(`${translate("Successfully added")} ${added} ${translate("models")}, ${translate("removed")} ${removed}`);
+    } catch (error) {
+      console.log("Error saving Cline usage list:", error);
+      alert(translate("Error fetching models") + ": " + error.message);
+    } finally {
+      setSavingClineSelection(false);
     }
   };
 
@@ -1251,6 +1341,55 @@ export default function ProviderDetailPage() {
         />
       );
     }
+    // Cline's model list is the usage list: only picked ids are rows, and the
+    // catalog is reached through each panel's Refresh instead of a catalog dump.
+    if (providerId === "cline") {
+      if (!clineFreeIds) {
+        return <p className="text-xs text-text-muted">{translate("Loading models...")}</p>;
+      }
+      const rows = clineUsageRows();
+      return (
+        <ClineUsageListPanels
+          freeIds={clineFreeIds}
+          selectedIds={rows.map((row) => row.id)}
+          busy={savingClineSelection}
+          onRefresh={handleClineRefresh}
+          onSave={handleClineSelectionSave}
+          renderRow={(id) => {
+            const row = rows.find((item) => item.id === id);
+            return (
+              <ModelRow
+                key={`${row?.source}-${id}`}
+                model={{ id, name: row?.name }}
+                fullModel={`${providerDisplayAlias}/${id}`}
+                alias={row?.alias}
+                copied={copied}
+                onCopy={copy}
+                onSetAlias={() => {}}
+                onDeleteAlias={async () => {
+                  if (row?.source === "custom") {
+                    // Leave the usage list and remember it: the disabled list
+                    // keeps the catalog row out of /v1/models, and the picker
+                    // shows it again as an unchecked candidate.
+                    await handleDisableModel(id);
+                    await handleDeleteCustomModel(id, "llm", providerStorageAlias);
+                  } else {
+                    handleDeleteAlias(row.alias);
+                  }
+                }}
+                testStatus={modelTestResults[id]}
+                onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(id) : undefined}
+                isTesting={testingModelIds.has(id)}
+                isCustom
+                isFree={clineFreeIds.has(id)}
+                caps={getCaps(`${providerId}/${id}`)}
+                thinkingSuffix={resolveThinkingSuffix(id)}
+              />
+            );
+          }}
+        />
+      );
+    }
     // Combine hardcoded models with Kilo free models (deduplicated)
     // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
     const allModels = [
@@ -1362,10 +1501,11 @@ export default function ProviderDetailPage() {
           </button>
         )}
 
-        {/* Import Cline /models catalog button — only show for cline and clinepass providers */}
-        {(providerId === "cline" || providerId === "clinepass") && connections.some((conn) => conn.isActive !== false) && (
+        {/* ClinePass catalog import — Cline itself has no catalog button: its
+            catalog is reached from the usage list panels. */}
+        {providerId === "clinepass" && connections.some((conn) => conn.isActive !== false) && (
           <button
-            onClick={() => handleImportClineModels(false)}
+            onClick={handleImportClineModels}
             disabled={importingClineModels}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -1373,21 +1513,6 @@ export default function ProviderDetailPage() {
               {importingClineModels ? "progress_activity" : "download"}
             </span>
             {importingClineModels ? translate("Fetching...") : translate("Import from /models")}
-          </button>
-        )}
-
-        {/* Free-tier sync: the `:free` catalog ids plus the recommended feed's
-            free[] list, which is the only place Cline publishes cline-free/*. */}
-        {providerId === "cline" && connections.some((conn) => conn.isActive !== false) && (
-          <button
-            onClick={() => handleImportClineModels(true)}
-            disabled={importingClineModels}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-500/40 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400 transition-colors hover:border-emerald-500 hover:bg-emerald-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-sm" style={importingClineModels ? { animation: "spin 1s linear infinite" } : undefined}>
-              {importingClineModels ? "progress_activity" : "redeem"}
-            </span>
-            {importingClineModels ? translate("Fetching...") : translate("Sync Free Models")}
           </button>
         )}
 

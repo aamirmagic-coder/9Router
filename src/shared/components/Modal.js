@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/shared/utils/cn";
 import Button from "./Button";
 import Tooltip from "./Tooltip";
@@ -19,10 +19,12 @@ export default function Modal({
   const sizes = {
     sm: "max-w-sm",
     md: "max-w-md",
-    lg: "max-w-lg",
     xl: "max-w-xl",
+    "2xl": "max-w-6xl",
     full: "max-w-4xl",
   };
+
+  const panelRef = useRef(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -31,6 +33,31 @@ export default function Modal({
       document.body.style.overflow = "";
     }
     return () => { document.body.style.overflow = ""; };
+  }, [isOpen]);
+
+  // Without a trap, Tab walks out of the dialog into the page behind it and the
+  // overlay stays open. Cycle within the panel instead.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!isOpen || !panel) return;
+    const handleTab = (e) => {
+      if (e.key !== "Tab") return;
+      const focusables = panel.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    panel.addEventListener("keydown", handleTab);
+    return () => panel.removeEventListener("keydown", handleTab);
   }, [isOpen]);
 
   useEffect(() => {
@@ -53,6 +80,7 @@ export default function Modal({
 
       {/* Modal content */}
       <div
+        ref={panelRef}
         className={cn(
           "relative w-full bg-surface",
           "border border-border-subtle",

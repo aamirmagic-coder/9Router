@@ -5,11 +5,15 @@
 // to bump only skips that backup — it does NOT break the additive auto-sync.
 export const SCHEMA_VERSION = 1;
 
+// journal_mode must stay DELETE (not WAL): the database lives on a macOS bind
+// mount shared between the Docker VM and host tooling, where WAL's cross-process
+// locking is unreliable and has repeatedly corrupted this file (2026-07/08).
+// The app serializes all access through one adapter instance, so DELETE is safe.
 export const PRAGMA_SQL = `
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+PRAGMA journal_mode = DELETE;
+PRAGMA synchronous = FULL;
 PRAGMA temp_store = MEMORY;
-PRAGMA mmap_size = 30000000;
+PRAGMA mmap_size = 0;
 PRAGMA cache_size = -64000;
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;

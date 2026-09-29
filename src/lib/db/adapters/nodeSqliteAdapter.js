@@ -2,8 +2,6 @@
 // No native build, no npm install. API mirrors betterSqliteAdapter.
 import { PRAGMA_SQL } from "../schema.js";
 
-const CHECKPOINT_INTERVAL_MS = 60 * 1000;
-
 export async function createNodeSqliteAdapter(filePath) {
   // Suppress "ExperimentalWarning: SQLite is an experimental feature" from node:sqlite.
   // Stable enough for production use as of Node 22.x (RC quality).
@@ -32,14 +30,7 @@ export async function createNodeSqliteAdapter(filePath) {
     return stmt;
   }
 
-  // Periodic WAL checkpoint to keep -wal/-shm small
-  const checkpointTimer = setInterval(() => {
-    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
-  }, CHECKPOINT_INTERVAL_MS);
-  if (typeof checkpointTimer.unref === "function") checkpointTimer.unref();
-
   function gracefulClose() {
-    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
     try { stmtCache.clear(); } catch {}
     try { db.close(); } catch {}
   }
@@ -74,9 +65,7 @@ export async function createNodeSqliteAdapter(filePath) {
         throw e;
       }
     },
-    checkpoint() { try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {} },
     close() {
-      clearInterval(checkpointTimer);
       gracefulClose();
     },
     raw: db,

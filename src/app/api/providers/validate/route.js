@@ -6,6 +6,7 @@ import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from
 import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
 import { resolveQoderCredentials, resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { normalizeProviderId } from "@/lib/providerNormalization";
+import { ANTHROPIC_VALIDATION_MODEL } from "@/shared/constants/anthropicValidation";
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
 // Returns true if API key is accepted (status !== 401 && !== 403).
@@ -157,7 +158,7 @@ export async function POST(request) {
         }
 
         const messagesUrl = `${normalizedBase}/v1/messages`;
-        const model = node.defaultModel || "claude-3-haiku-20240307";
+        const model = node.defaultModel || ANTHROPIC_VALIDATION_MODEL;
 
         const res = await fetch(messagesUrl, {
           method: "POST",
@@ -276,7 +277,7 @@ export async function POST(request) {
               "content-type": "application/json",
             },
             body: JSON.stringify({
-              model: "claude-3-haiku-20240307",
+              model: ANTHROPIC_VALIDATION_MODEL,
               max_tokens: 1,
               messages: [{ role: "user", content: "test" }],
             }),

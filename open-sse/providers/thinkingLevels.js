@@ -68,6 +68,11 @@ const PATTERN_THINKING = [
   { provider: "codebuddy-cn", pattern: "hy4*",         levels: ["high"] },
   // codebuddy-intl rides the same gateway catalog, so its deepseek levels match.
   { provider: "codebuddy-intl", pattern: "deepseek-v4*", levels: ["low", "high", "xhigh"] },
+  // GLM-5.3 backends (z.ai + Alibaba MaaS, probed live 2026-09-21) accept exactly
+  // low|high|max for reasoning_effort — xhigh/medium are a 400. Match the exact
+  // model suffix so the -prime variant (wider set) is not caught. Placed after
+  // the provider-scoped glm entries above so they keep precedence.
+  { pattern: "*glm-5.3", levels: ["low", "high", "max"] },
 ];
 
 // Returns valid thinking levels for a model, or null when the model has no reasoning.

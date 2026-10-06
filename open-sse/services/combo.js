@@ -575,22 +575,16 @@ export async function handleComboChat({
         try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
       }
 
-      // Check if should fallback to next model
-      const { provider } = parseModel(modelStr);
-      const { shouldFallback, cooldownMs, requestScoped } = checkFallbackError(result.status, errorText, 0, provider);
-
-      if (!shouldFallback && !requestScoped) {
-        log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
-        return result;
-      }
-
       // A request-scoped 4xx (validation failure, unsupported parameter, context
       // overflow) says this member cannot serve THIS request — not that the
       // credential is unhealthy. Members run on different providers with
       // different validation, so the next member may well serve it. Advance
-      // without a cooldown, and without waiting: there is nothing to recover.
+      // without a cooldown, and remember the first such response so it can be
+      // returned to the caller if no member serves the request.
       // checkFallbackError() reports no account fallback here on purpose (a
       // request-scoped fault must not evict a healthy account from rotation).
+      const { provider } = parseModel(modelStr);
+      const { requestScoped } = checkFallbackError(result.status, errorText, 0, provider);
       if (requestScoped) {
         log.warn("COMBO", `Model ${modelStr} rejected the request (${result.status}), trying next`, { status: result.status });
         lastError = errorText || String(result.status);
@@ -599,16 +593,9 @@ export async function handleComboChat({
         continue;
       }
 
-      // For transient errors (503/502/504), wait for cooldown before falling through
-      // so a briefly-overloaded provider gets a chance to recover rather than being
-      // skipped immediately (fixes: combo falls through on transient 503)
-      if (cooldownMs && cooldownMs > 0 && cooldownMs <= 5000 &&
-          (result.status === 503 || result.status === 502 || result.status === 504)) {
-        log.info("COMBO", `Model ${modelStr} transient ${result.status}, waiting ${cooldownMs}ms before next`);
-        await new Promise(r => setTimeout(r, cooldownMs));
-      }
-
-      // Fallback to next model
+      // Fallback to next model immediately with zero artificial delay.
+      // In a combo, different models belong to different providers, so transient
+      // failures or model-specific errors (400, 429, 500, etc.) must not block or abort fallback.
       lastError = errorText || String(result.status);
       if (!lastStatus) lastStatus = result.status;
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });

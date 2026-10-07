@@ -12,6 +12,7 @@
 - **Dashboard**: drop NEW badges in sidebar, mark 9Remote as HOT
 
 ## Fixes
+- **Hermes**: stop breaking the config write when an earlier save left the `model: ""` sentinel behind (duplicate-key handling in `config.yaml`)
 - **Claude**: preserve intentional prefill from non-messages[] source formats; keep a trailing user turn so cleanup never yields assistant prefill
 - **Claude**: cache a tool loop's final tool results with the 4th breakpoint
 - **Claude**: resolve Sonnet 5.x to adaptive thinking so no forged thinking placeholders are sent; inject unsigned thinking placeholders for opencode-go DeepSeek `/messages` (#4436)

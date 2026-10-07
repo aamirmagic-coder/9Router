@@ -14,6 +14,8 @@ const SESSION_FIELD = "_opencodeZenSession";
 const MAX_SESSION_LENGTH = 256;
 
 const RESPONSES_BASE_URL = "https://opencode.ai/zen/v1/responses";
+// Console rejects max_output_tokens < 16 with 400 invalid_request_error.
+const MIN_OUTPUT_TOKENS = 16;
 const MAX_TOOL_NAME_LEN = 128;
 const OPENCODE_UA = "opencode/1.18.31";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
@@ -295,6 +297,12 @@ export class OpenCodeZenExecutor extends DefaultExecutor {
     if (out.max_output_tokens === undefined) {
       if (out.max_completion_tokens !== undefined) out.max_output_tokens = out.max_completion_tokens;
       else if (out.max_tokens !== undefined) out.max_output_tokens = out.max_tokens;
+    }
+    // Floor at the provider minimum: tiny model-switch probes (e.g. Claude
+    // Code checks a model with max_tokens: 1) would otherwise 400 and the
+    // client refuses to switch to the model.
+    if (out.max_output_tokens !== undefined) {
+      out.max_output_tokens = Math.max(MIN_OUTPUT_TOKENS, Number(out.max_output_tokens) || MIN_OUTPUT_TOKENS);
     }
     delete out.max_tokens;
     delete out.max_completion_tokens;

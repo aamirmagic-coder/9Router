@@ -38,6 +38,8 @@ const RESPONSES_MODELS = new Set([
   "muse-spark-1.3-contributor-free",
 ]);
 const MESSAGES_MODELS = new Set(["union-alpha"]);
+// Console rejects max_output_tokens < 16 with 400 invalid_request_error.
+const MIN_OUTPUT_TOKENS = 16;
 
 let lastTimestamp = 0;
 let counter = 0;
@@ -430,6 +432,12 @@ export class OpenCodeExecutor extends BaseExecutor {
       if (body.max_output_tokens === undefined) {
         if (body.max_completion_tokens !== undefined) body.max_output_tokens = body.max_completion_tokens;
         else if (body.max_tokens !== undefined) body.max_output_tokens = body.max_tokens;
+      }
+      // Floor at the provider minimum: tiny model-switch probes (e.g. Claude
+      // Code checks a model with max_tokens: 1) would otherwise 400 and the
+      // client refuses to switch to the model.
+      if (body.max_output_tokens !== undefined) {
+        body.max_output_tokens = Math.max(MIN_OUTPUT_TOKENS, Number(body.max_output_tokens) || MIN_OUTPUT_TOKENS);
       }
       delete body.max_tokens;
       delete body.max_completion_tokens;

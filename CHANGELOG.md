@@ -1,3 +1,12 @@
+# Unreleased (2026-10-08)
+
+## Features
+- **Models**: add authenticated model-discovery view `GET /api/models/router` (availability, usage, latency, routing) plus extended `/api/v1/models` filtering and a new `POST /api/v1/models/query` shortlist (L1)
+- **Tools**: flag-gated lexical tool-schema relevance ranking that drops zero-overlap tools before dispatch; dashboard toggle, default off (L2)
+
+## Chores
+- **Observability**: log combo attempt depth and cache-reuse %; fix the cache-reuse denominator to the canonical cache-inclusive prompt count (P0)
+
 # v0.5.99 (2026-10-08)
 
 ## Features

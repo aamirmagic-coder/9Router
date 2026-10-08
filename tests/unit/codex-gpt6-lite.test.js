@@ -214,7 +214,9 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     expect(body.input[0].type).not.toBe("additional_tools");
     expect(body.reasoning.context).toBeUndefined();
     expect(executor.buildHeaders(credentials, true, null, "gpt-5.5")["x-openai-internal-codex-responses-lite"]).toBeUndefined();
-    expect(getThinkingLevels("codex", "gpt-6-astra")).toContain("none");
+    // #4031: OpenAI reasoning models reject reasoning_effort "none", so astra's floor is minimal.
+    expect(getThinkingLevels("codex", "gpt-6-astra")).toContain("minimal");
+    expect(getThinkingLevels("codex", "gpt-6-astra")).not.toContain("none");
     expect(executor.buildHeaders(credentials, true, null, "gpt-6-astra")["x-openai-internal-codex-responses-lite"]).toBeUndefined();
   });
 });

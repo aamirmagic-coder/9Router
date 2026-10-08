@@ -1,6 +1,7 @@
 # v0.5.95 (2026-10-01)
 
 ## Features
+- **Hermes**: sync the auxiliary role picker with Hermes 0.21.5 (`hermes_cli/config_defaults.py`) — add TTS Audio Tags, Triage Specifier, Kanban Decomposer, Profile Describer, Review and Goal Judge; drop Web Extract, which stopped calling an LLM
 - **CLI**: Hermes profile selection in the settings menu — per-profile status header, Quick Setup and Reset scoped to the picked profile, plus "Apply to All Profiles"
 - **Dashboard**: per-profile Hermes config — profile selector with status dots and run command, Apply/Reset scoped to the selected profile, per-profile Manual Config paths, and an "Apply to All Profiles" action
 - **Hermes**: profile-aware settings API — target a profile with `?profile=`/body, list them via `GET /api/cli-tools/hermes-profiles`, and apply endpoint + API key to every profile in one call (`applyToAll`)

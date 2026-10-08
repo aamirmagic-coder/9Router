@@ -145,4 +145,13 @@ describe("forced-SSE JSON path for a Responses-API client behind a chat upstream
     expect(json.object).toBe("chat.completion");
     expect(json.choices[0].message.tool_calls[0].function.name).toBe("shell");
   });
+
+  it("returns a Claude Message for a Claude client of a chat SSE upstream", async () => {
+    const result = await handleForcedSSEToJson(sseCtx(FORMATS.CLAUDE, FORMATS.OPENAI));
+    expect(result.success).toBe(true);
+    const json = await result.response.json();
+    expect(json).toMatchObject({ type: "message", role: "assistant", stop_reason: "tool_use" });
+    expect(json.content[0]).toMatchObject({ type: "tool_use", name: "shell", input: { cmd: "pwd" } });
+    expect(json).not.toHaveProperty("choices");
+  });
 });

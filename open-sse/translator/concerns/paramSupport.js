@@ -30,6 +30,11 @@ const STRIP_RULES = [
   { provider: "groq", dropMessageFields: ["reasoning_content", "reasoning", "reasoning_details"] },
   { provider: "mistral", dropMessageFields: ["reasoning_content", "reasoning", "reasoning_details"] },
   { provider: "cerebras", dropMessageFields: ["reasoning_content", "reasoning", "reasoning_details"] },
+  // OpenAI gpt-5 family + o-series reject `max_tokens` upstream (HTTP 400:
+  // "Use 'max_completion_tokens' instead.") — rename so the output cap survives.
+  // Provider-agnostic: the OpenAI API contract applies to resellers/proxies too
+  // (openai, github copilot, azure, openrouter, ...). #2742
+  { match: /(^|[^a-z0-9])(gpt-5|o[134])([^a-z0-9]|$)/i, rename: { max_tokens: "max_completion_tokens" } },
 ];
 
 // Test a rule's match (regex or predicate) against the model id.
@@ -86,6 +91,16 @@ export function stripUnsupportedParams(provider, model, body) {
         clampNumber(body, "max_tokens", ceiling);
         clampNumber(body, "max_completion_tokens", ceiling);
         clampNumber(body, "max_output_tokens", ceiling);
+      }
+    }
+    // Rename params the upstream rejects under their old name (e.g. OpenAI
+    // gpt-5/o-series: max_tokens → max_completion_tokens). Prefer keeping an
+    // already-present target name, then drop the rejected one.
+    if (rule.rename) {
+      for (const [from, to] of Object.entries(rule.rename)) {
+        if (body[from] === undefined) continue;
+        if (body[to] === undefined) body[to] = body[from];
+        delete body[from];
       }
     }
   }

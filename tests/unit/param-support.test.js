@@ -96,4 +96,44 @@ describe("stripUnsupportedParams", () => {
 
     expect(body.messages[0].reasoning_content).toBe("thinking...");
   });
+
+  it("renames max_tokens to max_completion_tokens for OpenAI gpt-5 models", () => {
+    const body = { max_tokens: 8192, temperature: 0.7 };
+
+    stripUnsupportedParams("openai", "gpt-5.1", body);
+
+    expect(body).toEqual({ max_completion_tokens: 8192, temperature: 0.7 });
+  });
+
+  it("renames max_tokens for o-series reasoning models", () => {
+    const body = { max_tokens: 4096 };
+
+    stripUnsupportedParams("openai", "o3-mini", body);
+
+    expect(body).toEqual({ max_completion_tokens: 4096 });
+  });
+
+  it("renames max_tokens for prefixed reseller model ids", () => {
+    const body = { max_tokens: 1000 };
+
+    stripUnsupportedParams("openrouter", "openai/gpt-5.1", body);
+
+    expect(body).toEqual({ max_completion_tokens: 1000 });
+  });
+
+  it("keeps an already-present max_completion_tokens and drops max_tokens", () => {
+    const body = { max_tokens: 1000, max_completion_tokens: 5000 };
+
+    stripUnsupportedParams("openai", "gpt-5.1", body);
+
+    expect(body).toEqual({ max_completion_tokens: 5000 });
+  });
+
+  it("leaves max_tokens alone for models that still support it", () => {
+    const body = { max_tokens: 4096 };
+
+    stripUnsupportedParams("openai", "gpt-4o", body);
+
+    expect(body).toEqual({ max_tokens: 4096 });
+  });
 });

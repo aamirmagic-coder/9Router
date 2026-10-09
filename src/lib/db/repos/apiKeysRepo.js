@@ -96,10 +96,16 @@ export async function updateApiKey(id, data) {
     const merged = { ...current, ...data, updatedAt: new Date().toISOString() };
     const tokenLimit = merged.tokenLimit != null ? Math.max(0, Number(merged.tokenLimit) || 0) : 0;
     const usedTokens = merged.usedTokens != null ? Math.max(0, Number(merged.usedTokens) || 0) : 0;
-    const allowedModels = Array.isArray(merged.allowedModels)
+    let allowedModels = Array.isArray(merged.allowedModels)
       ? (merged.allowedModels.length > 0 ? merged.allowedModels.map((m) => String(m).trim()).filter(Boolean) : null)
       : null;
-    const cols = keyAccessToColumns(merged.access);
+    let access = merged.access || KEY_ACCESS_UNRESTRICTED;
+    if (data.allowedModels !== undefined && data.access === undefined) {
+      access = allowedModels ? { restricted: true, allow: allowedModels } : { restricted: false, allow: [] };
+    } else if (data.access !== undefined && data.allowedModels === undefined) {
+      allowedModels = access?.restricted && Array.isArray(access?.allow) ? access.allow : null;
+    }
+    const cols = keyAccessToColumns(access);
     db.run(
       `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, allowedModels = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
       [

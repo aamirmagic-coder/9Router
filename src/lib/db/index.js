@@ -147,9 +147,10 @@ export async function importDb(payload) {
         access = checked.value;
       }
       const cols = keyAccessToColumns(access);
+      const allowedModels = access.restricted && Array.isArray(access.allow) && access.allow.length > 0 ? access.allow : null;
       db.run(
         `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, allowedModels, createdAt, updatedAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.tokenLimit || 0, k.usedTokens || 0, k.allowedModels ? stringifyJson(k.allowedModels) : null, k.createdAt || new Date().toISOString(), k.updatedAt || new Date().toISOString(), cols.accessRestricted, cols.accessAllow]
+        [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.tokenLimit || 0, k.usedTokens || 0, allowedModels ? stringifyJson(allowedModels) : null, k.createdAt || new Date().toISOString(), k.updatedAt || new Date().toISOString(), cols.accessRestricted, cols.accessAllow]
       );
     }
     for (const c of payload.combos || []) {

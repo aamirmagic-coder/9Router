@@ -18,7 +18,7 @@ import EndpointRow from "./components/EndpointRow";
 import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
-import KeyAccessControls from "./components/KeyAccessControls";
+
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -657,6 +657,10 @@ export default function APIPageClient({ machineId }) {
     try {
       const tokenLimit = newKeyTokenLimit ? Math.max(0, parseInt(newKeyTokenLimit, 10) || 0) : 0;
       const allowedModels = newKeyModelMode === "custom" ? newKeyAllowedModels : null;
+      const access = {
+        restricted: newKeyModelMode === "custom",
+        allow: newKeyModelMode === "custom" ? newKeyAllowedModels : [],
+      };
 
       const res = await fetch("/api/keys", {
         method: "POST",
@@ -665,6 +669,7 @@ export default function APIPageClient({ machineId }) {
           name: newKeyName.trim(),
           tokenLimit,
           allowedModels,
+          access,
         }),
       });
       const data = await res.json();
@@ -688,8 +693,12 @@ export default function APIPageClient({ machineId }) {
     setEditKeyName(key.name || "");
     setEditKeyTokenLimit(key.tokenLimit ? String(key.tokenLimit) : "");
     setEditKeyUsedTokens(key.usedTokens || 0);
-    setEditKeyModelMode(Array.isArray(key.allowedModels) && key.allowedModels.length > 0 ? "custom" : "all");
-    setEditKeyAllowedModels(Array.isArray(key.allowedModels) ? [...key.allowedModels] : []);
+    const hasRestrictions = (Array.isArray(key.allowedModels) && key.allowedModels.length > 0) || (key.access?.restricted);
+    setEditKeyModelMode(hasRestrictions ? "custom" : "all");
+    const initialModels = Array.isArray(key.allowedModels) && key.allowedModels.length > 0
+      ? [...key.allowedModels]
+      : (Array.isArray(key.access?.allow) ? [...key.access.allow] : []);
+    setEditKeyAllowedModels(initialModels);
     setEditKeyCustomPattern("");
   };
 
@@ -699,6 +708,10 @@ export default function APIPageClient({ machineId }) {
     try {
       const tokenLimit = editKeyTokenLimit ? Math.max(0, parseInt(editKeyTokenLimit, 10) || 0) : 0;
       const allowedModels = editKeyModelMode === "custom" ? editKeyAllowedModels : null;
+      const access = {
+        restricted: editKeyModelMode === "custom",
+        allow: editKeyModelMode === "custom" ? editKeyAllowedModels : [],
+      };
 
       const res = await fetch(`/api/keys/${editingKey.id}`, {
         method: "PUT",
@@ -708,6 +721,7 @@ export default function APIPageClient({ machineId }) {
           tokenLimit,
           usedTokens: editKeyUsedTokens,
           allowedModels,
+          access,
         }),
       });
       if (res.ok) {
@@ -1176,10 +1190,23 @@ export default function APIPageClient({ machineId }) {
                       <span className="material-symbols-outlined text-[13px] text-text-muted">view_in_ar</span>
                       <span>
                         Models:{" "}
-                        {Array.isArray(key.allowedModels) && key.allowedModels.length > 0 ? (
-                          <span className="text-primary font-medium" title={key.allowedModels.join(", ")}>
-                            {key.allowedModels.length} restricted
-                          </span>
+                        {((Array.isArray(key.allowedModels) && key.allowedModels.length > 0) || (key.access?.restricted && Array.isArray(key.access?.allow) && key.access.allow.length > 0)) ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(key)}
+                            className="text-primary font-medium hover:underline cursor-pointer"
+                            title={(key.allowedModels || key.access?.allow || []).join(", ")}
+                          >
+                            {(key.allowedModels?.length || key.access?.allow?.length)} restricted
+                          </button>
+                        ) : key.access?.restricted ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(key)}
+                            className="text-red-500 font-medium hover:underline cursor-pointer"
+                          >
+                            Blocked (0 allowed)
+                          </button>
                         ) : (
                           <span className="text-text-main">All</span>
                         )}
@@ -1203,18 +1230,6 @@ export default function APIPageClient({ machineId }) {
                       />
                     </div>
                   )}
-                  <KeyAccessControls
-                    apiKey={key}
-                    onChange={(access) => handleUpdateKeyAccess(key.id, access)}
-                    onRequestRestrict={() => setConfirmState({
-                      title: "Restrict API Key",
-                      message: `Restrict API key "${key.name}"?\n\nIt will only be able to call the combos and models you add. Until you add one, it can call nothing.`,
-                      onConfirm: async () => {
-                        setConfirmState(null);
-                        handleUpdateKeyAccess(key.id, { restricted: true, allow: key.access?.allow || [] });
-                      }
-                    })}
-                  />
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
                   <button

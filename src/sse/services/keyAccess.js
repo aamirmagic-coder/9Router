@@ -102,12 +102,35 @@ async function getAllowSets(ctx) {
   return ctx._sets;
 }
 
+function matchesWildcardPattern(str, pattern) {
+  if (!pattern || typeof pattern !== "string") return false;
+  const p = pattern.trim().toLowerCase();
+  if (p === "*") return true;
+  if (!p.includes("*")) return false; // non-wildcards are handled strictly by canonical set checks
+  const target = String(str || "").trim().toLowerCase();
+  const escaped = p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  const regex = new RegExp(`^${escaped}$`, "i");
+  return regex.test(target);
+}
+
+function anyWildcardMatches(canonical, requested, patterns) {
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+  for (const p of patterns) {
+    if (matchesWildcardPattern(requested, p) || matchesWildcardPattern(canonical, p)) return true;
+  }
+  return false;
+}
+
 async function isModelStringAllowed(ctx, requested) {
   const sets = await getAllowSets(ctx);
   const info = await getModelInfo(requested);
   // provider null ⇔ an existing combo with no members (routes nowhere).
   if (!info?.provider) return sets.combos.has(lower(requested));
-  return sets.models.has(canonicalModel(info.provider, info.model));
+  const canonical = canonicalModel(info.provider, info.model);
+  if (sets.models.has(canonical)) return true;
+
+  // Wildcard pattern matching (e.g. oc/*, *claude*, *)
+  return anyWildcardMatches(canonical, requested, ctx.allow);
 }
 
 export function keyAccessDeniedResponse(ctx, requested) {
@@ -142,7 +165,13 @@ export async function enforceKeyAccessResolved(ctx, requested, provider, model) 
   const label = requested || (provider ? `${provider}/${model ?? ""}` : "");
   if (!provider || !model) return keyAccessDeniedResponse(ctx, label);
   const sets = await getAllowSets(ctx);
-  return sets.models.has(canonicalModel(provider, model)) ? null : keyAccessDeniedResponse(ctx, label);
+  const canonical = canonicalModel(provider, model);
+  if (sets.models.has(canonical)) return null;
+
+  // Wildcard matching
+  if (anyWildcardMatches(canonical, label, ctx.allow)) return null;
+
+  return keyAccessDeniedResponse(ctx, label);
 }
 
 /**
@@ -184,16 +213,19 @@ export async function filterModelsListForKey(ctx, list) {
   for (const entry of list) {
     if (!entry?.id) continue;
     if (entry.owned_by === KEY_ACCESS_COMBO_OWNER) {
-      if (sets.combos.has(lower(entry.id))) out.push(entry);
+      if (sets.combos.has(lower(entry.id)) || anyWildcardMatches(entry.id, entry.id, ctx.allow)) out.push(entry);
       continue;
     }
     const info = await getModelInfo(entry.id);
     if (!info?.provider) continue;
     if (KEY_ACCESS_PROVIDER_AS_MODEL_KINDS.includes(entry.kind)) {
-      if (sets.providers.has(lower(info.provider))) out.push(entry);
+      if (sets.providers.has(lower(info.provider)) || anyWildcardMatches(entry.id, entry.id, ctx.allow)) out.push(entry);
       continue;
     }
-    if (sets.models.has(canonicalModel(info.provider, info.model))) out.push(entry);
+    const canonical = canonicalModel(info.provider, info.model);
+    if (sets.models.has(canonical) || anyWildcardMatches(canonical, entry.id, ctx.allow)) {
+      out.push(entry);
+    }
   }
   return out;
 }

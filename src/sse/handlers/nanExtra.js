@@ -4,6 +4,7 @@ import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { getProviderCredentials, markAccountUnavailable, clearAccountError, extractApiKey, isValidApiKey } from "../services/auth.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
+import { getKeyAccessContext, enforceKeyAccessResolved } from "../services/keyAccess.js";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const IMAGE_FIELDS = new Set(["prompt", "n", "size", "response_format", "seed", "guidance"]);
@@ -15,7 +16,9 @@ async function authenticated(request) {
   return key && await isValidApiKey(key) ? null : errorResponse(401, "Invalid or missing API key");
 }
 
-async function sendToNan(model, url, body, headers) {
+async function sendToNan(request, model, url, body, headers) {
+  const denied = await enforceKeyAccessResolved(await getKeyAccessContext(request), `nan/${model}`, "nan", model);
+  if (denied) return denied;
   const excluded = new Set();
   let lastStatus = 503;
   let lastError = "No NaN account available";
@@ -81,7 +84,7 @@ export async function rerank(request) {
     return errorResponse(400, "top_n must be between 1 and document count");
   }
   const body = JSON.stringify({ model: "rerank", query, documents, ...(top_n === undefined ? {} : { top_n }) });
-  return sendToNan("rerank", PROVIDER_MEDIA.nan.rerankConfig.baseUrl, body, { "Content-Type": "application/json" });
+  return sendToNan(request, "rerank", PROVIDER_MEDIA.nan.rerankConfig.baseUrl, body, { "Content-Type": "application/json" });
 }
 
 export async function editImage(request) {
@@ -101,5 +104,5 @@ export async function editImage(request) {
     if (IMAGE_FIELDS.has(name)) body.set(name, value);
   }
   for (const image of images) body.append("image[]", image, image.name);
-  return sendToNan("flux-2-klein", PROVIDER_MEDIA.nan.imageConfig.editUrl, body, {});
+  return sendToNan(request, "flux-2-klein", PROVIDER_MEDIA.nan.imageConfig.editUrl, body, {});
 }

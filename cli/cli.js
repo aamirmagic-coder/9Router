@@ -4,7 +4,27 @@ const { spawn, exec, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
+const net = require("net");
 const os = require("os");
+
+// Poll until the server accepts TCP connections on port, or timeout — avoids blind fixed waits.
+function waitServerReady(port, { timeoutMs = 15000, intervalMs = 150 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const tryConnect = () => {
+      const socket = net.connect({ host: "127.0.0.1", port }, () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() >= deadline) return resolve(false);
+        setTimeout(tryConnect, intervalMs);
+      });
+    };
+    tryConnect();
+  });
+}
 
 // Native spinner - no external dependency
 function createSpinner(text) {
@@ -52,6 +72,19 @@ const args = process.argv.slice(2);
 if (args[0] === "xai" && args[1] === "video") {
   const { run } = require("./src/cli/commands/xaiVideo");
   run(args.slice(2))
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      console.error(`❌ ${err?.message || err}`);
+      process.exit(1);
+    });
+  return;
+}
+
+// `9router connect <url>` configures local CLI tools against a remote server —
+// no local server, no runtime deps. Usable via `npx 9router connect …`.
+if (args[0] === "connect") {
+  const { run } = require("./src/cli/commands/connect");
+  run(args.slice(1))
     .then((code) => process.exit(code))
     .catch((err) => {
       console.error(`❌ ${err?.message || err}`);
@@ -121,22 +154,24 @@ for (let i = 0; i < args.length; i++) {
     process.env.TRAY_MODE = "1";
   } else if (args[i] === "--help" || args[i] === "-h") {
     console.log(`
-Использование: ${APP_NAME} [опции]
+Usage: ${APP_NAME} [options]
 
-Опции:
-  -p, --port <порт>   Порт для запуска сервера (по умолч.: ${DEFAULT_PORT})
-  -H, --host <хост>   Хост для привязки (по умолч.: ${DEFAULT_HOST})
-  -n, --no-browser    Не открывать браузер автоматически
-  -l, --log           Показывать логи сервера (по умолч.: скрыты)
-  -t, --tray          Запуск в системном трее (фоновый режим)
-  --skip-update       Пропустить проверку обновлений
-  -h, --help          Показать эту справку
-  -v, --version       Показать версию
+Options:
+  -p, --port <port>   Port to run the server (default: ${DEFAULT_PORT})
+  -H, --host <host>   Host to bind (default: ${DEFAULT_HOST})
+  -n, --no-browser    Don't open browser automatically
+  -l, --log           Show server logs (default: hidden)
+  -t, --tray          Run in system tray mode (background)
+  --skip-update       Skip auto-update check
+  -h, --help          Show this help message
+  -v, --version       Show version
 
-Команды:
+Commands:
+  connect <server-url> Configure Claude Code for a remote 9router server
+                      (npx 9router connect http://host:20128 — no install needed)
   xai video --prompt "..." --output video.mp4
-                      Генерация видео Grok Imagine через запущенный шлюз
-                      (см.: ${APP_NAME} xai video --help)
+                      Generate a Grok Imagine video via the running gateway
+                      (see: ${APP_NAME} xai video --help)
 `);
     process.exit(0);
   } else if (args[i] === "--version" || args[i] === "-v") {
@@ -230,16 +265,17 @@ function killCloudflaredByAppPort(appPort) {
 function killAllAppProcesses(appPort) {
   return new Promise((resolve) => {
     try {
-      // Kill MIT first (privileged process, needs special handling)
-      killProxyByPidFile();
-      // Kill cloudflared/tailscale by PID file (precise, only this app's tunnel)
-      killTunnelByPidFile();
+      // Background: MITM + tunnel/cloudflared run on separate ports/processes —
+      // killing them doesn't free the app port, so don't block the critical path.
+      // Server-side MITM manager has stale-lock recovery and starts deferred (~3s).
+      setImmediate(() => {
+        try { killProxyByPidFile(); } catch {}
+        try { killTunnelByPidFile(); } catch {}
+        try { killCloudflaredByAppPort(appPort); } catch {}
+      });
 
       const platform = process.platform;
       let pids = [];
-
-      // Catch stale PID files: kill cloudflared bound to this app's port
-      pids.push(...killCloudflaredByAppPort(appPort));
 
       if (platform === "win32") {
         // Windows: use WMI to get full CommandLine (tasklist /V doesn't include it)
@@ -442,7 +478,7 @@ function checkForUpdate() {
       return;
     }
 
-    const spinner = createSpinner("Проверка обновлений...").start();
+    const spinner = createSpinner("Checking for updates...").start();
     let resolved = false;
 
     const safetyTimeout = setTimeout(() => {
@@ -498,7 +534,7 @@ function openBrowser(url) {
 
   exec(cmd, { windowsHide: true }, (err) => {
     if (err) {
-      console.log(`Откройте браузер вручную: ${url}`);
+      console.log(`Open browser manually: ${url}`);
     }
   });
 }
@@ -512,19 +548,16 @@ const serverPath = fs.existsSync(customServerPath)
   : path.join(standaloneDir, "server.js");
 
 if (!fs.existsSync(serverPath)) {
-  console.error("Ошибка: Сборка не найдена.");
-  console.error("Сначала выполните 'npm run build:cli'.");
+  console.error("Error: Standalone build not found.");
+  console.error("Please run 'npm run build:cli' first.");
   process.exit(1);
 }
 
-// Check for updates FIRST, then start server
-checkForUpdate().then((latestVersion) => {
-  killAllAppProcesses(port).then(() => {
-    return killProcessOnPort(port);
-  }).then(() => {
-    startServer(latestVersion);
-  });
-});
+// Start server immediately; run update check in parallel (not on the critical path).
+const updatePromise = checkForUpdate();
+killAllAppProcesses(port)
+  .then(() => killProcessOnPort(port))
+  .then(() => startServer(updatePromise));
 
 // Show interface selection menu
 async function showInterfaceMenu(latestVersion) {
@@ -545,22 +578,22 @@ async function showInterfaceMenu(latestVersion) {
     serverUrl = `http://${displayHost}:${port}`;
   }
 
-  const subtitle = `🚀 Сервер: \x1b[32m${serverUrl}\x1b[0m`;
+  const subtitle = `🚀 Server: \x1b[32m${serverUrl}\x1b[0m`;
 
   const menuItems = [];
 
   if (latestVersion) {
-    menuItems.push({ label: `Обновить до v${latestVersion} (текущая: v${pkg.version})`, icon: "⬆" });
+    menuItems.push({ label: `Update to v${latestVersion} (current: v${pkg.version})`, icon: "⬆" });
   }
 
   menuItems.push(
-    { label: "Веб-интерфейс (открыть в браузере)", icon: "🌐" },
-    { label: "Терминальный интерфейс (интерактивный CLI)", icon: "💻" },
-    { label: "Скрыть в трей (фоновый режим)", icon: "🔔" },
-    { label: "Выход", icon: "🚪" }
+    { label: "Web UI (Open in Browser)", icon: "🌐" },
+    { label: "Terminal UI (Interactive CLI)", icon: "💻" },
+    { label: "Hide to Tray (Background)", icon: "🔔" },
+    { label: "Exit", icon: "🚪" }
   );
 
-  const selected = await selectMenu(`Выбор интерфейса (v${pkg.version})`, menuItems, 0, subtitle);
+  const selected = await selectMenu(`Choose Interface (v${pkg.version})`, menuItems, 0, subtitle);
 
   const offset = latestVersion ? 1 : 0;
 
@@ -574,7 +607,9 @@ async function showInterfaceMenu(latestVersion) {
 const MAX_RESTARTS = 2;
 const RESTART_RESET_MS = 30000; // Reset counter if alive > 30s
 
-function startServer(latestVersion) {
+function startServer(updatePromise) {
+  // Accept either a Promise (parallel update check) or a resolved value.
+  const latestVersionPromise = Promise.resolve(updatePromise);
   const displayHost = getDisplayHost();
   const url = `http://${displayHost}:${port}/dashboard`;
   // Surface real network exposure when bound to all interfaces (default 0.0.0.0).
@@ -643,14 +678,14 @@ function startServer(latestVersion) {
   let isShuttingDown = false;
   process.on("uncaughtException", (err) => {
     if (isShuttingDown) return;
-    console.error("Ошибка:", err.message);
+    console.error("Error:", err.message);
   });
 
   // Handle all exit scenarios
   process.on("SIGINT", () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log("\nВыход...");
+    console.log("\nExiting...");
     cleanup();
     setTimeout(() => process.exit(0), 100);
   });
@@ -675,7 +710,7 @@ function startServer(latestVersion) {
         port,
         onQuit: () => {
           isShuttingDown = true;
-          console.log("\n👋 Завершение работы из трея...");
+          console.log("\n👋 Shutting down from tray...");
           cleanup();
           setTimeout(() => process.exit(0), 100);
         },
@@ -693,19 +728,21 @@ function startServer(latestVersion) {
     process.on("SIGHUP", () => {});
 
     console.log(`\n🚀 ${pkg.name} v${pkg.version}`);
-    console.log(`Сервер: http://${displayHost}:${port}`);
+    console.log(`Server: http://${displayHost}:${port}`);
 
-    setTimeout(() => {
+    waitServerReady(port).then(() => {
       initTrayIcon();
-      console.log("\n💡 Роутер работает в системном трее. Можете закрыть этот терминал.");
-      console.log("   Правый клик по иконке в трее — открыть панель или выйти.\n");
-    }, 2000);
+      console.log("\n💡 Router is now running in system tray. Close this terminal if you want.");
+      console.log("   Right-click tray icon to open dashboard or quit.\n");
+    });
 
     return;
   }
 
   // Wait for server to be ready, then show interface menu loop + tray
-  setTimeout(async () => {
+  waitServerReady(port).then(async () => {
+    // Resolve parallel update check (already running); don't block server start on it.
+    const latestVersion = await latestVersionPromise;
     // Start tray icon alongside TUI
     initTrayIcon();
 
@@ -717,8 +754,8 @@ function startServer(latestVersion) {
           isShuttingDown = true;
           const { clearScreen } = require("./src/cli/utils/display");
           clearScreen();
-          console.log(`\n⬆  Обновление v${pkg.version} → v${latestVersion}\n`);
-          console.log(`Выполните после выхода:\n`);
+          console.log(`\n⬆  Update v${pkg.version} → v${latestVersion}\n`);
+          console.log(`Run this after exit:\n`);
           console.log(`   \x1b[33m${INSTALL_CMD_LATEST}\x1b[0m\n`);
           cleanup();
           await killAllAppProcesses(port);
@@ -729,7 +766,7 @@ function startServer(latestVersion) {
           openBrowser(url);
           // Wait for user to come back
           const { pause } = require("./src/cli/utils/input");
-          await pause("\nНажмите Enter для возврата в меню...");
+          await pause("\nPress Enter to go back to menu...");
         } else if (choice === "terminal") {
           // Start Terminal UI - it will return when user selects Back
           const { startTerminalUI } = require("./src/cli/terminalUI");
@@ -751,17 +788,17 @@ function startServer(latestVersion) {
             process.removeAllListeners("SIGHUP");
             process.on("SIGHUP", () => {});
 
-            console.log(`\n⏳ Переключение в режим трея... (иконка уже видна в строке меню)`);
-            console.log(`🔔 9Router работает в трее (PID: ${process.pid})`);
-            console.log(`   Сервер: http://${displayHost}:${port}`);
-            console.log(`\n💡 Можете закрыть этот терминал. Правый клик по иконке — выход.\n`);
+            console.log(`\n⏳ Switching to tray mode... (icon already visible in menu bar)`);
+            console.log(`🔔 9Router is running in tray (PID: ${process.pid})`);
+            console.log(`   Server: http://${displayHost}:${port}`);
+            console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
 
             // Tray already init'd at startup — just keep event loop alive.
             return;
           }
 
           // Windows/Linux: spawn detached bgProcess (systray works fine in child)
-          console.log(`\n⏳ Запуск фонового процесса... (иконка в трее появится через ~3 с)`);
+          console.log(`\n⏳ Starting background process... (tray icon will appear in ~3s)`);
 
           const bgProcess = spawn(process.execPath, ["--dns-result-order=ipv4first", __filename, "--tray", "--skip-update", "-p", port.toString()], {
             detached: true,
@@ -771,30 +808,30 @@ function startServer(latestVersion) {
           });
           bgProcess.unref();
 
-          console.log(`🔔 9Router работает в фоне (PID: ${bgProcess.pid})`);
-          console.log(`   Сервер: http://${displayHost}:${port}`);
-          console.log(`\n💡 Можете закрыть этот терминал. Правый клик по иконке — выход.\n`);
+          console.log(`🔔 9Router is now running in background (PID: ${bgProcess.pid})`);
+          console.log(`   Server: http://${displayHost}:${port}`);
+          console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
 
           // cleanup() kills server so bgProcess can claim the port fresh
           cleanup();
           process.exit(0);
         } else if (choice === "exit") {
           isShuttingDown = true;
-          console.log("\nВыход...");
+          console.log("\nExiting...");
           cleanup();
           setTimeout(() => process.exit(0), 100);
         }
       }
     } catch (err) {
-      console.error("Ошибка:", err.message);
+      console.error("Error:", err.message);
       cleanup();
       process.exit(1);
     }
-  }, 3000);
+  });
 
   function attachServerEvents() {
     server.on("error", (err) => {
-      console.error("Не удалось запустить сервер:", err.message);
+      console.error("Failed to start server:", err.message);
       if (!isShuttingDown) tryRestart();
       else { cleanup(); process.exit(1); }
     });
@@ -814,7 +851,7 @@ function startServer(latestVersion) {
     if (aliveMs >= RESTART_RESET_MS) restartCount = 0;
 
     if (restartCount >= MAX_RESTARTS) {
-      console.error(`\n⚠️  Сервер упал ${MAX_RESTARTS} раза. Отключаем MIT и перезапускаем...`);
+      console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times. Disabling MIT and restarting...`);
       try {
         const dbPath = path.join(os.homedir(), process.platform === "win32" ? path.join("AppData", "Roaming", "9router", "db.json") : path.join(".9router", "db.json"));
         if (fs.existsSync(dbPath)) {
@@ -831,11 +868,11 @@ function startServer(latestVersion) {
 
     restartCount++;
     const delay = Math.min(1000 * restartCount, 10000);
-    console.error(`\n⚠️  Сервер завершился (код=${code ?? "неизвестно"}). Перезапуск через ${delay / 1000}с... (${restartCount}/${MAX_RESTARTS})`);
+    console.error(`\n⚠️  Server exited (code=${code ?? "unknown"}). Restarting in ${delay / 1000}s... (${restartCount}/${MAX_RESTARTS})`);
     if (crashLog.length) {
-      console.error("\n--- Лог аварийного завершения сервера ---");
-      crashLog.forEach(l => { console.error(l); });
-      console.error("--- Конец лога ---\n");
+      console.error("\n--- Server crash log ---");
+      crashLog.forEach(l => console.error(l));
+      console.error("--- End crash log ---\n");
     }
 
     setTimeout(() => {

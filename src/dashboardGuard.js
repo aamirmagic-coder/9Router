@@ -176,6 +176,8 @@ async function isAuthenticated(request) {
   return false;
 }
 
+export { isAuthenticated };
+
 function isPublicApi(pathname) {
   if (isPublicLlmApi(pathname)) return true;
   return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

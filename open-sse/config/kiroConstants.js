@@ -15,11 +15,17 @@
  * fiction. The suffix is stripped before the request leaves this process.
  */
 
-import { extractThinking } from "../translator/concerns/thinkingUnified.js";
+import { extractThinking, parseSuffix } from "../translator/concerns/thinkingUnified.js";
 import { effortToBudget } from "../translator/concerns/thinking.js";
 
 export const KIRO_AGENTIC_SUFFIX = "-agentic";
 export const KIRO_THINKING_SUFFIX = "-thinking";
+export const KIRO_TOOL_NAME_MAX_LENGTH = 64;
+export const KIRO_TOOL_DESCRIPTION_MAX_LENGTH = 10237;
+export const KIRO_TOOL_ID_MAX_LENGTH = 64;
+export const KIRO_CODEWHISPERER_TARGET =
+  "AmazonCodeWhispererStreamingService.GenerateAssistantResponse";
+export const KIRO_ENDPOINT_FALLBACK_STATUSES = new Set([401, 403, 404]);
 
 // Public default CodeWhisperer profile ARNs (us-east-1), keyed by auth method.
 // Used when an account cannot resolve its own profileArn. Builder ID and social
@@ -39,6 +45,39 @@ export function resolveDefaultProfileArn(authMethod) {
 }
 
 export const KIRO_THINKING_BUDGET_DEFAULT = 16000;
+
+/**
+ * Resolve a Kiro model after consuming the generic model(level) suffix.
+ * The suffix is a 9router request override, not part of Kiro's upstream model id.
+ */
+export function resolveKiroModelIntent(model) {
+  const { cleanModel, override } = parseSuffix(model);
+  return {
+    model: cleanModel,
+    ...resolveKiroModel(cleanModel),
+    thinkingOverride: override,
+  };
+}
+
+/** Apply a parsed model(level) override without mutating the caller's body. */
+export function applyKiroThinkingOverride(body, override) {
+  if (!override) return body;
+
+  const next = { ...body };
+  if (override.mode === "budget") {
+    delete next.output_config;
+    delete next.reasoning_effort;
+    delete next.reasoning;
+    next.thinking = { type: "enabled", budget_tokens: override.budget };
+    return next;
+  }
+
+  next.output_config = {
+    ...(body.output_config || {}),
+    effort: override.mode === "level" ? override.level : override.mode,
+  };
+  return next;
+}
 
 export const KIRO_AGENTIC_SYSTEM_PROMPT = `
 # CRITICAL: CHUNKED WRITE PROTOCOL (MANDATORY)
@@ -132,7 +171,22 @@ export function resolveKiroThinkingBudget(body, headers, model) {
   return null;
 }
 
-export function extractKiroEffortLevel(body) {
+function parseClaudeVersion(model) {
+  if (typeof model !== "string") return null;
+  const normalized = model.toLowerCase().replace(/-/g, ".");
+  const match = normalized.match(/(?:^|[/.])claude(?:[/.][a-z]+)*[/.](\d+)(?:[/.](\d+))?(?:[/.]|$)/);
+  if (!match) return null;
+  return { major: Number(match[1]), minor: match[2] === undefined ? null : Number(match[2]) };
+}
+
+// Kiro effort tiers per model (kiro.dev docs + live additionalModelRequestFieldsSchema):
+// 4.6 Claude models cap at low|medium|high|max; 4.7+ add xhigh. Unknown models stay conservative.
+function kiroModelLacksXhigh(model) {
+  const v = parseClaudeVersion(model);
+  return !v || (v.major === 4 && v.minor !== null && v.minor <= 6);
+}
+
+export function extractKiroEffortLevel(body, model) {
   const effort =
     body?.output_config?.effort ??
     body?.reasoning_effort ??
@@ -140,7 +194,8 @@ export function extractKiroEffortLevel(body) {
   if (typeof effort !== "string") return null;
   const normalized = effort.toLowerCase();
   if (normalized === "none" || normalized === "off" || normalized === "disabled") return null;
-  if (normalized === "xhigh" || normalized === "max") return "high";
+  if (normalized === "xhigh") return kiroModelLacksXhigh(model) ? "high" : "xhigh";
+  if (normalized === "max") return "max";
   if (["low", "medium", "high"].includes(normalized)) return normalized;
   return null;
 }
@@ -160,10 +215,10 @@ function extractKiroGptEffortLevel(body) {
   return null;
 }
 
-export function buildKiroAdditionalModelRequestFields(body, effortPath = "output_config") {
+export function buildKiroAdditionalModelRequestFields(body, effortPath = "output_config", model) {
   const effort = effortPath === "reasoning"
     ? extractKiroGptEffortLevel(body)
-    : extractKiroEffortLevel(body);
+    : extractKiroEffortLevel(body, model);
   if (!effort) return undefined;
   if (effortPath === "reasoning") {
     // Mirrors Kiro CLI/KAS buildEffortRequestFields("reasoning") for GPT.
@@ -183,11 +238,9 @@ export function resolveKiroEffortPath(model) {
     return "reasoning";
   }
   if (!normalized.includes("claude")) return null;
-  const match = normalized.match(/(?:^|[/.])claude(?:[/.][a-z]+)*[/.](\d+)(?:[/.](\d+))?(?:[/.]|$)/);
-  if (!match) return null;
-  const [, majorText, minorText] = match;
-  const major = Number(majorText);
-  const minor = minorText === undefined ? null : Number(minorText);
+  const v = parseClaudeVersion(model);
+  if (!v) return null;
+  const { major, minor } = v;
   const dateSuffixMinor = minor !== null && minor >= 1000;
   // Kiro rejected additionalModelRequestFields on legacy 4.5 models in live smoke.
   // Default future Claude/Kiro models to supported so new model releases do not
@@ -209,7 +262,7 @@ export function usesKiroNativeGptEffort(body, model) {
 export function buildKiroAdditionalModelRequestFieldsForModel(body, model) {
   const effortPath = resolveKiroEffortPath(model);
   if (!effortPath) return undefined;
-  return buildKiroAdditionalModelRequestFields(body, effortPath);
+  return buildKiroAdditionalModelRequestFields(body, effortPath, model);
 }
 
 /**

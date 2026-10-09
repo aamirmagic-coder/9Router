@@ -3,6 +3,7 @@ import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js"
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
+import { resolveOpenAICompatibleApiType } from "../services/provider.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -30,7 +31,7 @@ export class BaseExecutor {
     if (this.provider?.startsWith?.("openai-compatible-")) {
       const baseUrl = credentials?.providerSpecificData?.baseUrl || OPENAI_COMPAT_BASE;
       const normalized = baseUrl.replace(/\/$/, "");
-      const path = this.provider.includes("responses") ? "/responses" : "/chat/completions";
+      const path = resolveOpenAICompatibleApiType(this.provider, credentials) === "responses" ? "/responses" : "/chat/completions";
       return `${normalized}${path}`;
     }
     if (this.provider?.startsWith?.("anthropic-compatible-")) {
@@ -96,7 +97,7 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
+async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
     // Strip internal routing suffixes before upstream API call
     const cleanModel = model.replace(/:(cloud|-cloud)$/i, '');
     const fallbackCount = this.getFallbackCount();
@@ -126,9 +127,11 @@ export class BaseExecutor {
     };
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
-      const url = this.buildUrl(cleanModel, stream, urlIndex, credentials);
+const url = this.buildUrl(cleanModel, stream, urlIndex, credentials);
       const transformedBody = this.transformRequest(cleanModel, body, stream, credentials);
-      const headers = this.buildHeaders(credentials, stream);
+      const headers = this.buildHeaders(credentials, stream, url, cleanModel, transformedBody);
+      // User per-provider override wins over registry headers (blocked names filtered at the API)
+      if (providerOverrides?.headers) Object.assign(headers, providerOverrides.headers);
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
 

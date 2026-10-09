@@ -4,6 +4,8 @@ import { testProxyUrl } from "@/lib/network/proxyTest";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
+import { CODEX_CLI_VERSION } from "open-sse/config/appConstants.js";
+import { GROK_CLI_PAGER_USER_AGENT, GROK_CLI_VERSION } from "open-sse/config/grokCli.js";
 import {
   refreshProviderCredentials,
   shouldRefreshCredentials,
@@ -12,10 +14,10 @@ import {
   GEMINI_CONFIG,
   ANTIGRAVITY_CONFIG,
   KIRO_CONFIG,
-  QWEN_CONFIG,
   CLAUDE_CONFIG,
   CLINE_CONFIG,
   KILOCODE_CONFIG,
+  KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
 
@@ -27,7 +29,7 @@ const OAUTH_TEST_CONFIG = {
     method: "POST",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
-    extraHeaders: { "Content-Type": "application/json", "originator": "codex_cli_rs", "User-Agent": "codex_cli_rs/0.136.0" },
+    extraHeaders: { "Content-Type": "application/json", "originator": "codex_cli_rs", "User-Agent": `codex_cli_rs/${CODEX_CLI_VERSION}` },
     // Minimal invalid body — triggers fast 400 without consuming quota
     body: JSON.stringify({ model: "gpt-5.3-codex", input: [], stream: false, store: false }),
     // 400 (bad request) means auth succeeded; only 401/403 means token is bad
@@ -61,7 +63,6 @@ const OAUTH_TEST_CONFIG = {
     method: "GET",
     noAuth: true,
   },
-  qwen: { checkExpiry: true, refreshable: true },
   kiro: { checkExpiry: true, refreshable: true },
   qoder: {
     // Test by hitting Qoder's userinfo endpoint with the device token.
@@ -69,6 +70,14 @@ const OAUTH_TEST_CONFIG = {
     // 403 for our flow (users re-login when expired). No checkExpiry —
     // we want the actual URL probe to run so revoked tokens surface.
     url: "https://openapi.qoder.sh/api/v1/userinfo",
+    method: "GET",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    refreshable: false,
+  },
+  "qoder-cn": {
+    // Same shape as intl qoder, CN host.
+    url: "https://openapi.qoder.com.cn/api/v1/userinfo",
     method: "GET",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
@@ -91,7 +100,54 @@ const OAUTH_TEST_CONFIG = {
     authHeader: "Authorization",
     authPrefix: "Bearer ",
   },
-  codebuddy: { tokenExists: true },
+codebuddy: { tokenExists: true },
+  "codebuddy-cn": { tokenExists: true },
+  // codebuddy-intl uses the same JWT token structure as codebuddy-cn
+  // (access + refresh token pair, ~1-year expiry) — same test strategy (#4232).
+  "codebuddy-intl": { tokenExists: true },
+  kimchi: {
+    url: KIMCHI_CONFIG.validationUrl || "https://api.cast.ai/v1/llm/openai/supported-providers",
+    method: "GET",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    extraHeaders: {
+      Accept: "application/json",
+      "User-Agent": "kimchi/0.1.40",
+    },
+    refreshable: false,
+  },
+  // Grok CLI / Grok Build — probe /v1/user (no inference quota). Headers mirror official CLI.
+  "grok-cli": {
+    url: PROVIDERS["grok-cli"]?.userUrl || "https://cli-chat-proxy.grok.com/v1/user",
+    method: "GET",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    extraHeaders: {
+      Accept: "application/json",
+      ...(PROVIDERS["grok-cli"]?.headers || {
+        "User-Agent": GROK_CLI_PAGER_USER_AGENT,
+        "x-xai-token-auth": "xai-grok-cli",
+        "x-grok-client-identifier": "grok-pager",
+        "x-grok-client-version": GROK_CLI_VERSION,
+      }),
+    },
+    refreshable: true,
+    // Subscription spending-limit is not an auth failure — token is fine, credits aren't.
+    // Accept 402 so the connection stays "active" with a warning (same idea as Codex 400).
+    acceptStatuses: [402],
+    softFailMessage: {
+      402: "Connected, but Grok Build credits are exhausted (spending limit). Add credits or upgrade SuperGrok.",
+    },
+  },
+  // Muse Code subscription — probe /v1/models with the minted LLM|… key
+  "muse": {
+    url: "https://api.meta.ai/v1/models",
+    method: "GET",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    extraHeaders: { "x-api-version": "1.0.0" },
+    refreshable: false,
+  },
 };
 
 async function probeClineAccessToken(accessToken) {
@@ -171,21 +227,6 @@ async function refreshOAuthToken(connection) {
       if (!response.ok) return null;
       const data = await response.json();
       return { accessToken: data.accessToken, expiresIn: data.expiresIn || 3600, refreshToken: data.refreshToken || refreshToken };
-    }
-
-    if (provider === "qwen") {
-      const response = await fetch(QWEN_CONFIG.tokenUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-          client_id: QWEN_CONFIG.clientId,
-        }),
-      });
-      if (!response.ok) return null;
-      const data = await response.json();
-      return { accessToken: data.access_token, expiresIn: data.expires_in, refreshToken: data.refresh_token || refreshToken };
     }
 
     if (provider === "cline") {
@@ -316,6 +357,12 @@ async function testOAuthConnection(connection, effectiveProxy = null) {
 }
 
 async function fetchWithConnectionProxy(url, options = {}, effectiveProxy = null) {
+  // Add a 15-second timeout to prevent connection testing from hanging indefinitely
+  // and exhausting the browser/Node.js connection pools.
+  if (!options.signal) {
+    options.signal = AbortSignal.timeout(15000);
+  }
+
   // Vercel relay: forward via relay URL
   if (effectiveProxy?.vercelRelayUrl) {
     const { proxyAwareFetch } = await import("open-sse/utils/proxyFetch.js");
@@ -537,6 +584,16 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const res = await fetchWithConnectionProxy("https://api.hyperbolic.xyz/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
+      case "tokenharbor":
+      case "dahl":
+      case "atria":
+      case "agnes":
+      case "bai":
+      case "muse": {
+        const cfg = PROVIDERS[connection.provider];
+        const res = await fetchWithConnectionProxy(cfg.validateUrl, { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
+        return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+      }
       case "ollama": {
         const res = await fetch("https://ollama.com/api/tags", { headers: { Authorization: `Bearer ${connection.apiKey}` } });
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
@@ -600,6 +657,12 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const valid = !!(data && data.user);
         return { valid, error: valid ? null : "Session expired — re-paste cookie" };
       }
+      case "opencode": {
+        const res = await fetchWithConnectionProxy("https://opencode.ai/zen/v1/models", {
+          headers: { Authorization: "Bearer public", "User-Agent": "opencode/1.18.31" },
+        }, effectiveProxy);
+        return { valid: res.ok, error: res.ok ? null : "OpenCode free tier unavailable" };
+      }
       case "opencode-go": {
         const res = await fetchWithConnectionProxy("https://opencode.ai/zen/go/v1/chat/completions", {
           method: "POST",
@@ -636,6 +699,51 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       case "huggingface": {
         const res = await fetchWithConnectionProxy("https://router.huggingface.co/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+      }
+      case "qoder":
+      case "qoder-cn": {
+        // PAT (pt-...) exchange → job token. A successful exchange proves the PAT.
+        const exchangeUrl = provider === "qoder-cn"
+          ? "https://openapi.qoder.com.cn/api/v1/jobToken/exchange"
+          : "https://openapi.qoder.sh/api/v1/jobToken/exchange";
+        const raw = connection.apiKey || "";
+        const pat = raw.startsWith("pt-") ? raw : `pt-${raw}`;
+        const exRes = await fetchWithConnectionProxy(
+          exchangeUrl,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+              "Cosy-Version": "1.0.1",
+              "Cosy-ClientType": "5",
+            },
+            body: JSON.stringify({ personal_token: pat }),
+          },
+          effectiveProxy,
+        );
+        return { valid: exRes.ok, error: exRes.ok ? null : "Invalid Personal Access Token" };
+      }
+case "llm7": {
+        const baseUrl = connection.providerSpecificData?.baseUrl || "https://api.llm7.io/v1";
+        const res = await fetchWithConnectionProxy(`${baseUrl.replace(/\/$/, "")}/models`, {
+          headers: { Authorization: `Bearer ${connection.apiKey}` },
+        }, effectiveProxy);
+        return { valid: res.ok, error: res.ok ? null : "Invalid API key or base URL" };
+      }
+      case "kimchi": {
+        // Dual-auth: same validation endpoint as the OAuth flow — the token (API key
+        // or OAuth access token) is sent as Authorization: Bearer.
+        const url = KIMCHI_CONFIG.validationUrl || "https://api.cast.ai/v1/llm/openai/supported-providers";
+        const res = await fetchWithConnectionProxy(url, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${connection.apiKey}`,
+            "User-Agent": "kimchi/0.1.40",
+          },
+        }, effectiveProxy);
+        return { valid: res.ok, error: res.ok ? null : "Invalid API key", refreshed: false };
       }
       default:
         return { valid: false, error: "Provider test not supported" };

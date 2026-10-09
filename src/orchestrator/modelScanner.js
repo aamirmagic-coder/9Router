@@ -1,6 +1,7 @@
 import { getProviderConnections, getProviderNodes, getSettings, updateSettings } from '@/lib/localDb.js';
 import { getAdapter } from '@/lib/db/driver.js';
 import { getCapabilitiesForModel } from 'open-sse/providers/capabilities.js';
+import { isModelAllowed } from 'open-sse/config/modelPolicy.js';
 
 const BENCHMARK_CHAT = 'Ответь одним словом: работаю.';
 
@@ -246,6 +247,16 @@ export class ModelScanner {
     function isEmbeddingModel(modelName) {
       const name = modelName.toLowerCase();
       return EMBEDDING_KEYWORDS.some(k => name.includes(k));
+    }
+
+    // Free-only policy: выкидываем платные / неразрешённые модели ДО любых тестовых вызовов,
+    // поэтому сканер никогда не тратит деньги и не трогает RouterAI кроме deepseek-flash.
+    for (let i = allTests.length - 1; i >= 0; i--) {
+      const t = allTests[i];
+      if (!isModelAllowed(t.provider, t.model)) {
+        console.log(`[ModelScanner] policy: skipped ${t.provider}/${t.model}`);
+        allTests.splice(i, 1);
+      }
     }
 
     this._progress.push({ phase: 'discovery', total: allTests.length, done: 0 });

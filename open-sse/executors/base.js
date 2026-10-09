@@ -4,6 +4,7 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
+import { isModelAllowed, modelBlockedMessage } from "../config/modelPolicy.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -98,6 +99,14 @@ export class BaseExecutor {
   }
 
 async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
+    // Free-only policy: last guard before ANY upstream call, covers every modality.
+    if (!isModelAllowed(this.provider, model)) {
+      const err = new Error(modelBlockedMessage(this.provider, model));
+      err.statusCode = HTTP_STATUS.FORBIDDEN;
+      err.modelPolicyBlocked = true;
+      throw err;
+    }
+
     // Strip internal routing suffixes before upstream API call
     const cleanModel = model.replace(/:(cloud|-cloud)$/i, '');
     const fallbackCount = this.getFallbackCount();

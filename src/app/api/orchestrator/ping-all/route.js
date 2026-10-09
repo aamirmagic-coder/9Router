@@ -9,6 +9,7 @@
 import { NextResponse } from 'next/server';
 import { getProviderConnections, getProviderNodes } from '@/lib/localDb';
 import { getAdapter } from '@/lib/db/driver.js';
+import { isModelAllowed } from 'open-sse/config/modelPolicy.js';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120; // 2 min max
@@ -483,15 +484,22 @@ export async function POST() {
       });
     }
 
-    console.log(`[ping-all] Testing ${tests.length} model endpoints...`);
-    pingProgress.total = tests.length;
+    // Free-only policy: не проверяем платные / неразрешённые модели вообще.
+    const allowedTests = tests.filter((t) => {
+      if (isModelAllowed(t.provider, t.model)) return true;
+      console.log(`[ping-all] policy: skipped ${t.provider}/${t.model}`);
+      return false;
+    });
+
+    console.log(`[ping-all] Testing ${allowedTests.length} model endpoints...`);
+    pingProgress.total = allowedTests.length;
     pingProgress.completed = 0;
     pingProgress.status = "running";
 
     // Run all tests in parallel (with concurrency limit of 5)
     const CONCURRENCY = 5;
-    for (let i = 0; i < tests.length; i += CONCURRENCY) {
-      const batch = tests.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < allowedTests.length; i += CONCURRENCY) {
+      const batch = allowedTests.slice(i, i + CONCURRENCY);
       const batchResults = await Promise.all(
         batch.map(t => pingProvider(t.provider, t.apiKey, t.endpoint, t.model))
       );

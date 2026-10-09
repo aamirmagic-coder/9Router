@@ -4,6 +4,7 @@ import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { getExecutor } from "../executors/index.js";
 import { getImageAdapter } from "./imageProviders/index.js";
 import { urlToBase64 } from "./imageProviders/_base.js";
+import { isModelAllowed, modelBlockedMessage } from "../config/modelPolicy.js";
 
 function serializeRequestBody(requestBody) {
   if (typeof FormData !== "undefined" && requestBody instanceof FormData) return requestBody;
@@ -37,6 +38,11 @@ export async function handleImageGenerationCore({
   onRequestSuccess,
 }) {
   const { provider, model } = modelInfo;
+
+  // Model policy: block paid image models (e.g. RouterAI flux*) before any upstream call.
+  if (!isModelAllowed(provider, model)) {
+    return createErrorResult(HTTP_STATUS.FORBIDDEN, modelBlockedMessage(provider, model));
+  }
 
   if (!body.prompt) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");

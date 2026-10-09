@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
+import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
 function rowToKey(row) {
   if (!row) return null;
@@ -15,6 +17,7 @@ function rowToKey(row) {
     allowedModels: row.allowedModels ? parseJson(row.allowedModels, null) : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt || null,
+    access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
 }
 
@@ -30,6 +33,7 @@ export async function getApiKeyById(id) {
   return rowToKey(row);
 }
 
+// Used by the /v1 handlers to read the presented key's access settings.
 export async function getApiKeyByKey(key) {
   if (!key) return null;
   const db = await getAdapter();
@@ -47,6 +51,7 @@ export async function createApiKey(name, machineId, options = {}) {
   const allowedModels = Array.isArray(options.allowedModels) && options.allowedModels.length > 0
     ? options.allowedModels.map((m) => String(m).trim()).filter(Boolean)
     : null;
+  const access = options.access || { restricted: false, allow: [] };
   const apiKey = {
     id: uuidv4(),
     name,
@@ -58,9 +63,11 @@ export async function createApiKey(name, machineId, options = {}) {
     allowedModels,
     createdAt: now,
     updatedAt: now,
+    access,
   };
+  const cols = keyAccessToColumns(access || KEY_ACCESS_UNRESTRICTED);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, allowedModels, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, allowedModels, createdAt, updatedAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -72,6 +79,8 @@ export async function createApiKey(name, machineId, options = {}) {
       allowedModels ? stringifyJson(allowedModels) : null,
       apiKey.createdAt,
       apiKey.updatedAt,
+      cols.accessRestricted,
+      cols.accessAllow,
     ]
   );
   return apiKey;
@@ -90,8 +99,9 @@ export async function updateApiKey(id, data) {
     const allowedModels = Array.isArray(merged.allowedModels)
       ? (merged.allowedModels.length > 0 ? merged.allowedModels.map((m) => String(m).trim()).filter(Boolean) : null)
       : null;
+    const cols = keyAccessToColumns(merged.access);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, allowedModels = ?, updatedAt = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, allowedModels = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -101,15 +111,12 @@ export async function updateApiKey(id, data) {
         usedTokens,
         allowedModels ? stringifyJson(allowedModels) : null,
         merged.updatedAt,
+        cols.accessRestricted,
+        cols.accessAllow,
         id,
       ]
     );
-    result = {
-      ...merged,
-      tokenLimit,
-      usedTokens,
-      allowedModels,
-    };
+    result = rowToKey(db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]));
   });
   return result;
 }

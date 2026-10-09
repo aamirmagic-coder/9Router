@@ -707,3 +707,26 @@ export function getCapabilitiesForModel(provider, model) {
   // 4. Floor
   return refine(null, provider, model);
 }
+
+/**
+ * The capability subset the dashboard consumes over the wire: the /api/models
+ * payload and the useModelCaps local fallback build the same shape, so both go
+ * through this one helper — hand-rolled copies drifted and silently dropped the
+ * modality flags (the Audio adapter picker reads `audioInput` and saw nothing,
+ * see #4638).
+ *
+ * @param {object} caps full capabilities object (getCapabilitiesForModel / refine)
+ * @returns {object} client-facing subset
+ */
+export function pickClientCaps(caps) {
+  return {
+    vision: caps.vision,
+    pdf: caps.pdf,
+    audioInput: caps.audioInput,
+    videoInput: caps.videoInput,
+    search: caps.search,
+    reasoning: caps.reasoning,
+    contextWindow: caps.contextWindow,
+    maxOutput: caps.maxOutput,
+  };
+}

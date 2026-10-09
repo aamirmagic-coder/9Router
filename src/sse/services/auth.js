@@ -19,6 +19,132 @@ function githubMonthlyResetMs(status, errorText, provider) {
 }
 
 /**
+ * Resolve effective quota for a connection and model.
+ * Handles:
+ * - Antigravity live cache or cachedQuotas (model tiers, shared family session/weekly)
+ * - Provider-specific model keys (Google, Minimax, etc.)
+ * - Session/primary window buckets (Claude 5h, Codex primary, CommandCode)
+ * - Generic quota maps
+ */
+export function resolveConnectionQuota(conn, model, providerId, antigravityQuotaCache = null) {
+  if (!conn) return null;
+  const isAntigravity = providerId === "antigravity" || conn.provider === "antigravity";
+  let quotas = conn.cachedQuotas || null;
+  if (isAntigravity && antigravityQuotaCache) {
+    const live = antigravityQuotaCache.get(conn.id);
+    if (live) {
+      quotas = { ...(quotas || {}), ...live };
+    }
+  }
+  if (!quotas || typeof quotas !== "object") return null;
+
+  // 1. Antigravity specialized resolution
+  if (isAntigravity && model) {
+    const agQuota = getAntigravityModelQuota(quotas, model) || quotas[model];
+    if (agQuota) return agQuota;
+  }
+
+  const now = Date.now();
+  const cleanModel = model ? model.replace(/^[^/]+\//, "") : null;
+
+  // 2. Check if any relevant bucket is exhausted (remainingPercentage <= 0 with future resetAt)
+  const isRelevantBucket = (key) => {
+    if (!cleanModel) return true;
+    const lowerKey = key.toLowerCase();
+    const lowerModel = cleanModel.toLowerCase();
+    if (lowerKey === lowerModel) return true;
+    const strippedKey = lowerKey.replace(/^[^/]+\//, "");
+    if (strippedKey === lowerModel) return true;
+    if (
+      lowerKey.includes("session") ||
+      lowerKey.includes("weekly") ||
+      lowerKey.includes("primary") ||
+      lowerKey.includes("five_hour") ||
+      lowerKey.includes("seven_day")
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const exhausted = [];
+  for (const [key, q] of Object.entries(quotas)) {
+    if (!isRelevantBucket(key)) continue;
+    if (q && typeof q === "object" && typeof q.remainingPercentage === "number" && q.remainingPercentage <= 0) {
+      if (q.resetAt) {
+        const resetMs = new Date(q.resetAt).getTime();
+        if (resetMs > now) {
+          exhausted.push({ ...q, resetMs });
+        }
+      }
+    }
+  }
+
+  if (exhausted.length > 0) {
+    exhausted.sort((a, b) => b.resetMs - a.resetMs);
+    return exhausted[0];
+  }
+
+  // 3. Exact model match in quotas
+  if (model && quotas[model]) return quotas[model];
+  if (cleanModel && quotas[cleanModel]) return quotas[cleanModel];
+
+  // 4. Session / primary window candidates
+  const sessionCandidates = [
+    quotas.session,
+    quotas.primary,
+    quotas["session (5h)"],
+    quotas["Session (5h)"],
+    quotas.five_hour,
+    quotas.codex_session,
+    quotas.claude_gpt_session,
+    quotas.gemini_session,
+  ];
+  for (const cand of sessionCandidates) {
+    if (cand && (cand.resetAt || cand.remainingPercentage !== undefined)) return cand;
+  }
+
+  // 5. Weekly / secondary window candidates
+  const weeklyCandidates = [
+    quotas.weekly,
+    quotas.secondary,
+    quotas["weekly (7d)"],
+    quotas.Weekly,
+    quotas.seven_day,
+    quotas.codex_weekly,
+    quotas.claude_gpt_weekly,
+    quotas.gemini_weekly,
+  ];
+  for (const cand of weeklyCandidates) {
+    if (cand && (cand.resetAt || cand.remainingPercentage !== undefined)) return cand;
+  }
+
+  // 6. Relevant quota bucket with earliest future resetAt (or any bucket if cleanModel is null)
+  let earliestFuture = null;
+  for (const [key, q] of Object.entries(quotas)) {
+    if (!isRelevantBucket(key)) continue;
+    if (q && typeof q === "object" && q.resetAt) {
+      const resetMs = new Date(q.resetAt).getTime();
+      if (!Number.isNaN(resetMs) && resetMs > now) {
+        if (!earliestFuture || resetMs < new Date(earliestFuture.resetAt).getTime()) {
+          earliestFuture = q;
+        }
+      }
+    }
+  }
+  if (earliestFuture) return earliestFuture;
+
+  // 7. Relevant quota bucket (or any bucket if cleanModel is null)
+  for (const [key, q] of Object.entries(quotas)) {
+    if (!isRelevantBucket(key)) continue;
+    if (q && typeof q === "object" && (q.remainingPercentage !== undefined || q.resetAt)) {
+      return q;
+    }
+  }
+  return null;
+}
+
+/**
  * Get provider credentials from localDb
  * Filters out unavailable accounts and returns the selected account based on strategy
  * @param {string} provider - Provider name
@@ -82,19 +208,24 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const isAntigravity = providerId === "antigravity";
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
 
-    // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
+    // Filter out model-locked, excluded, and quota-exhausted connections.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
       const enabled = c.providerSpecificData?.enabledModels;
       if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
-      // Antigravity: skip if live quota exhausted for this model
-      if (isAntigravity && model && antigravityQuotaCache) {
-        const connQuotas = antigravityQuotaCache.get(c.id);
-        const quota = getAntigravityModelQuota(connQuotas, model) || connQuotas?.[model];
-        if (quota && quota.remainingPercentage <= 0 && quota.resetAt && new Date(quota.resetAt).getTime() > Date.now()) {
+
+      // Quota exhaustion check (Antigravity live cache or cachedQuotas)
+      const quota = resolveConnectionQuota(c, model, providerId, antigravityQuotaCache);
+      if (quota && typeof quota.remainingPercentage === "number" && quota.remainingPercentage <= 0 && quota.resetAt) {
+        const resetMs = new Date(quota.resetAt).getTime();
+        if (resetMs > Date.now()) {
           const account = c.id?.slice(0, 8) || "unknown";
-          log.info("AG_QUOTA", `${account} | CACHE_BLOCK ${model} — skip upstream until ${quota.resetAt}`);
+          if (isAntigravity) {
+            log.info("AG_QUOTA", `${account} | CACHE_BLOCK ${model} — skip upstream until ${quota.resetAt}`);
+          } else {
+            log.info("AUTH", `${account} | QUOTA_EXHAUSTED ${model || "session"} — skip until ${quota.resetAt}`);
+          }
           return false;
         }
       }
@@ -112,20 +243,21 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     });
 
     if (availableConnections.length === 0) {
-      // Find earliest persistent lock or lazy Antigravity quota-cache reset for retry timing.
+      // Find earliest persistent lock or quota reset for retry timing.
       const lockedConns = connections.filter(c => isModelLockActive(c, model));
       const expiries = lockedConns.map(c => getEarliestModelLockUntil(c)).filter(Boolean);
-      if (isAntigravity && model && antigravityQuotaCache) {
-        connections.forEach((c) => {
-          const connQuotas = antigravityQuotaCache.get(c.id);
-          const quota = getAntigravityModelQuota(connQuotas, model) || connQuotas?.[model];
-          const resetAt = quota?.resetAt;
-          if (resetAt && new Date(resetAt).getTime() > Date.now()) expiries.push(resetAt);
-        });
-      }
+
+      connections.forEach((c) => {
+        const quota = resolveConnectionQuota(c, model, providerId, antigravityQuotaCache);
+        const resetAt = quota?.resetAt;
+        if (resetAt && new Date(resetAt).getTime() > Date.now()) {
+          expiries.push(resetAt);
+        }
+      });
+
       const earliest = expiries.sort()[0] || null;
       if (earliest) {
-        const earliestConn = lockedConns[0];
+        const earliestConn = lockedConns[0] || connections[0];
         log.warn("AUTH", `${provider} | all ${connections.length} accounts locked for ${model || "all"} (${formatRetryAfter(earliest)}) | lastError=${earliestConn?.lastError?.slice(0, 50)}`);
         return {
           allRateLimited: true,
@@ -154,6 +286,41 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     }
     if (connection) {
       // skip strategy
+    } else if (strategy === "earliest-reset") {
+      const now = Date.now();
+
+      function getEffectiveResetTime(conn) {
+        const quota = resolveConnectionQuota(conn, model, providerId, antigravityQuotaCache);
+        if (quota?.resetAt) {
+          const t = new Date(quota.resetAt).getTime();
+          if (!Number.isNaN(t)) return t;
+        }
+        return null;
+      }
+
+      const sorted = [...availableConnections].sort((a, b) => {
+        const resetA = getEffectiveResetTime(a);
+        const resetB = getEffectiveResetTime(b);
+
+        const hasFutureA = resetA !== null && resetA > now;
+        const hasFutureB = resetB !== null && resetB > now;
+
+        // Both have future reset times: pick the one resetting sooner (smallest time remaining)
+        if (hasFutureA && hasFutureB) {
+          const diff = resetA - resetB;
+          if (diff !== 0) return diff;
+          return (a.priority || 999) - (b.priority || 999);
+        }
+
+        // Known future reset has higher priority than unknown / past reset
+        if (hasFutureA && !hasFutureB) return -1;
+        if (!hasFutureA && hasFutureB) return 1;
+
+        // Fall back to configured priority if neither has future reset info
+        return (a.priority || 999) - (b.priority || 999);
+      });
+
+      connection = sorted[0];
     } else if (strategy === "round-robin") {
       const stickyLimit = providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3;
 
@@ -272,8 +439,23 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   const reason = typeof errorText === "string" ? errorText.slice(0, 200) : "Provider error";
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 
+  const extraUpdates = {};
+  if (resetsAtMs || githubResetAtMs) {
+    const quotaKey = model || "session";
+    const resetTime = githubResetAtMs || resetsAtMs;
+    const existingQuotas = conn?.cachedQuotas || {};
+    extraUpdates.cachedQuotas = {
+      ...existingQuotas,
+      [quotaKey]: {
+        remainingPercentage: 0,
+        resetAt: new Date(resetTime).toISOString(),
+      },
+    };
+  }
+
   await updateProviderConnection(connectionId, {
     ...lockUpdate,
+    ...extraUpdates,
     testStatus: "unavailable",
     lastError: reason,
     errorCode: status,

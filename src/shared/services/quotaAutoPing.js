@@ -238,6 +238,7 @@ async function pingConnection(conn, provider, providerConfig, handler, deps, sta
 
   delete state.failureCache[key];
   await deps.updateProviderConnection(connection.id, {
+    cachedQuotas: quotas,
     lastPingedResetAt: resetAt,
     lastPingedResetKey: resetKey,
     lastPingAt: new Date().toISOString(),

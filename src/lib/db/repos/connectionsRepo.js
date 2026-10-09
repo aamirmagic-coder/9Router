@@ -7,7 +7,7 @@ const OPTIONAL_FIELDS = [
   "accessToken", "refreshToken", "expiresAt", "tokenType",
   "scope", "projectId", "apiKey", "testStatus",
   "lastTested", "lastError", "lastErrorAt", "rateLimitedUntil", "expiresIn", "errorCode",
-  "consecutiveUseCount", "idToken", "lastRefreshAt",
+  "consecutiveUseCount", "idToken", "lastRefreshAt", "cachedQuotas",
 ];
 
 const MODEL_LOCK_PREFIX = "modelLock_";
@@ -44,13 +44,14 @@ function rowToConn(row) {
     email: row.email,
     priority: row.priority,
     isActive: row.isActive === 1 || row.isActive === true,
+    cachedQuotas: parseJson(row.cachedQuotas, null) ?? extra.cachedQuotas ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
 function connToRow(c) {
-  const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = c;
+  const { id, provider, authType, name, email, priority, isActive, cachedQuotas, createdAt, updatedAt, ...rest } = c;
   return {
     id,
     provider,
@@ -59,6 +60,7 @@ function connToRow(c) {
     email: email ?? null,
     priority: priority ?? null,
     isActive: isActive === false ? 0 : 1,
+    cachedQuotas: cachedQuotas ? stringifyJson(cachedQuotas) : null,
     data: stringifyJson(rest),
     createdAt,
     updatedAt,
@@ -68,13 +70,13 @@ function connToRow(c) {
 function upsert(db, c) {
   const r = connToRow(c);
   db.run(
-    `INSERT INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, cachedQuotas, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        provider=excluded.provider, authType=excluded.authType, name=excluded.name,
        email=excluded.email, priority=excluded.priority, isActive=excluded.isActive,
-       data=excluded.data, updatedAt=excluded.updatedAt`,
-    [r.id, r.provider, r.authType, r.name, r.email, r.priority, r.isActive, r.data, r.createdAt, r.updatedAt]
+       data=excluded.data, cachedQuotas=excluded.cachedQuotas, updatedAt=excluded.updatedAt`,
+    [r.id, r.provider, r.authType, r.name, r.email, r.priority, r.isActive, r.data, r.cachedQuotas, r.createdAt, r.updatedAt]
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, Button, Toggle, Input } from "@/shared/components";
+import { Card, Button, Toggle, Input, Select } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
 import { useTheme } from "@/shared/hooks/useTheme";
@@ -18,6 +18,12 @@ function getLocaleFromCookie() {
   const value = cookie ? decodeURIComponent(cookie.split("=")[1]) : "en";
   return normalizeLocale(value);
 }
+
+const ROUTING_STRATEGY_OPTIONS = [
+  { value: "fill-first", label: "Fill First (Priority Order)" },
+  { value: "round-robin", label: "Round Robin (Load Balance)" },
+  { value: "earliest-reset", label: "Earliest Reset (Soonest Quota Reset)" },
+];
 
 export default function ProfilePage() {
   const { theme, setTheme, isDark } = useTheme();
@@ -1444,17 +1450,19 @@ export default function ProfilePage() {
             <h3 className="text-base sm:text-lg font-semibold">Routing Strategy</h3>
           </div>
           <div className="flex flex-col gap-4">
-            <div className="flex items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm sm:text-base">Round Robin</p>
+                <p className="font-medium text-sm sm:text-base">Account Routing Strategy</p>
                 <p className="text-xs sm:text-sm text-text-muted">
-                  Cycle through accounts to distribute load
+                  How requests are routed across accounts
                 </p>
               </div>
-              <Toggle
-                checked={settings.fallbackStrategy === "round-robin"}
-                onChange={() => updateFallbackStrategy(settings.fallbackStrategy === "round-robin" ? "fill-first" : "round-robin")}
+              <Select
+                options={ROUTING_STRATEGY_OPTIONS}
+                value={settings.fallbackStrategy || "fill-first"}
+                onChange={(e) => updateFallbackStrategy(e.target.value)}
                 disabled={loading}
+                className="w-full sm:w-64 shrink-0"
               />
             </div>
 
@@ -1518,6 +1526,8 @@ export default function ProfilePage() {
             <p className="text-xs text-text-muted italic pt-2 border-t border-border/50">
               {settings.fallbackStrategy === "round-robin"
                 ? `Currently distributing requests across all available accounts with ${settings.stickyRoundRobinLimit || 3} calls per account.`
+                : settings.fallbackStrategy === "earliest-reset"
+                ? "Currently prioritizing accounts whose quota resets soonest."
                 : "Currently using accounts in priority order (Fill First)."}
               {settings.comboStrategy === "round-robin"
                 ? ` Combos rotate after ${settings.comboStickyRoundRobinLimit || 1} call${(settings.comboStickyRoundRobinLimit || 1) === 1 ? "" : "s"} per model.`

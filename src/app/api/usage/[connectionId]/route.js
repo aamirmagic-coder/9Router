@@ -194,6 +194,14 @@ export async function GET(request, { params }) {
       }
     }
 
+    if (usage?.quotas && typeof usage.quotas === "object" && Object.keys(usage.quotas).length > 0) {
+      try {
+        await updateProviderConnection(connection.id, { cachedQuotas: usage.quotas });
+      } catch (cacheErr) {
+        console.warn(`[Usage] Failed to cache quotas for connection ${connection.id}: ${cacheErr.message}`);
+      }
+    }
+
     return Response.json(usage);
   } catch (error) {
     const provider = connection?.provider ?? "unknown";

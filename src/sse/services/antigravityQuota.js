@@ -6,6 +6,7 @@
 
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { getAntigravityUsage } from "open-sse/services/usage/google.js";
+import { updateProviderConnection, getProviderConnectionById } from "@/lib/localDb";
 import * as log from "../utils/logger.js";
 
 // In-memory cache: connectionId → { [modelId]: { remainingPercentage, resetAt } }
@@ -228,7 +229,16 @@ async function _doRefresh(connectionId, accessToken, providerSpecificData, now) 
     // Update in-memory cache. Caller logs CACHE_BLOCK only if requested model is exhausted.
     // Strike blocks are re-asserted after every refresh so an optimistic
     // upstream reading cannot resurrect a pair we just circuit-broke.
-    quotaCache.set(connectionId, applyActiveStrikeBlocks(connectionId, usage.quotas));
+    const mergedQuotas = applyActiveStrikeBlocks(connectionId, usage.quotas);
+    quotaCache.set(connectionId, mergedQuotas);
+
+    try {
+      if (typeof updateProviderConnection === "function") {
+        await updateProviderConnection(connectionId, { cachedQuotas: usage.quotas });
+      }
+    } catch (e) {
+      log.warn("AG_QUOTA", `${connectionId.slice(0, 8)} | failed to persist cachedQuotas: ${e.message}`);
+    }
 
     return usage.quotas;
   } catch (e) {
@@ -278,6 +288,7 @@ export async function handleAntigravityQuotaError(connectionId, status, model, a
       cached[model] = { remainingPercentage: 0, resetAt: new Date(blockedUntil).toISOString() };
       quotaCache.set(connectionId, cached);
       strikeBlocks.set(key, blockedUntil);
+
       return blockedUntil;
     }
     return null;
@@ -294,6 +305,16 @@ export async function handleAntigravityQuotaError(connectionId, status, model, a
   const cached = quotaCache.get(connectionId) || {};
   cached[model] = { remainingPercentage: 0, resetAt: quota.resetAt };
   quotaCache.set(connectionId, cached);
+
+  try {
+    if (typeof updateProviderConnection === "function") {
+      const conn = typeof getProviderConnectionById === "function" ? await getProviderConnectionById(connectionId) : null;
+      const currentQuotas = { ...(conn?.cachedQuotas || {}), ...cached };
+      await updateProviderConnection(connectionId, { cachedQuotas: currentQuotas });
+    }
+  } catch (e) {
+    log.warn("AG_QUOTA", `${connectionId.slice(0, 8)} | failed to persist exhausted quota: ${e.message}`);
+  }
 
   log.warn("AG_QUOTA", `${connectionId.slice(0, 8)} | UPSTREAM_${status} ${model} — quota exhausted; CACHE_BLOCK until ${quota.resetAt}`);
   return resetMs;

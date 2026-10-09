@@ -1560,13 +1560,24 @@ export default function ProviderDetailPage() {
                   )}
                 </>
               )}
-              {/* Round Robin toggle */}
+              {/* Routing Strategy selector */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-text-muted font-medium">Round Robin</span>
-                <Toggle
-                  checked={providerStrategy === "round-robin"}
-                  onChange={handleRoundRobinToggle}
-                />
+                <span className="text-xs text-text-muted font-medium">Strategy:</span>
+                <select
+                  value={providerStrategy || ""}
+                  onChange={(e) => {
+                    const strategy = e.target.value || null;
+                    setProviderStrategy(strategy);
+                    if (strategy === "round-robin" && !providerStickyLimit) setProviderStickyLimit("1");
+                    saveProviderStrategy(strategy, strategy === "round-robin" ? (providerStickyLimit || "1") : providerStickyLimit);
+                  }}
+                  className="px-2 py-1 text-xs border border-border rounded-md bg-background focus:outline-none focus:border-primary text-text-main"
+                >
+                  <option value="">Default (Global)</option>
+                  <option value="fill-first">Fill First</option>
+                  <option value="round-robin">Round Robin</option>
+                  <option value="earliest-reset">Earliest Reset</option>
+                </select>
                 {providerStrategy === "round-robin" && (
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-text-muted">Sticky:</span>

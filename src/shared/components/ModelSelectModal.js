@@ -224,11 +224,12 @@ export default function ModelSelectModal({
     // key, so gating on connections hides models the user already added. These nodes
     // are LLM-only, so only surface them when no kind filter is active.
     // See #4177, #2113, #2119, #1988.
+    const existingNodeIds = new Set((providerNodes || []).map((n) => n?.id).filter(Boolean));
     const compatibleNodeIds = kindFilter
       ? []
       : customModels
           .map((m) => m.providerAlias)
-          .filter((alias) => isOpenAICompatibleProvider(alias) || isAnthropicCompatibleProvider(alias));
+          .filter((alias) => (isOpenAICompatibleProvider(alias) || isAnthropicCompatibleProvider(alias)) && existingNodeIds.has(alias));
 
     // Only show connected providers (including both standard and custom)
     const providerIdsToShow = new Set([

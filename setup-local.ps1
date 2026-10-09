@@ -17,7 +17,7 @@ if (-not (Test-Path $envFile)) {
     Write-Host "`n[1/4] Создаю .env..." -ForegroundColor Yellow
 @"
 # 9Router — Локальный режим
-PROVIDER_OPENCODE_KEY=sk-NXEB55UHcYlQKkHe1F6Hto91CAMCphU5cC8rU609ZGbyMGAotYIaUztUdUHJhjf1
+PROVIDER_OPENCODE_KEY=sk-your-opencode-key-here
 OLLAMA_BASE_URL=http://localhost:11434
 PORT=20128
 NODE_ENV=development

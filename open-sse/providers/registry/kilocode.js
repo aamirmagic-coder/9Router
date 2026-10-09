@@ -22,8 +22,8 @@ export default {
       combined: true,
       header: "Authorization",
       scheme: "bearer",
-      // Ваш рабочий токен оркестратора
-      token: "sk-1cf548be0804e556-r2phva-9d993e27"
+      // Ваш токен оркестратора — задайте через переменную окружения KILOCODE_GATEWAY_TOKEN
+      token: process.env.KILOCODE_GATEWAY_TOKEN || "sk-REPLACE_ME"
     },
   },
   models: [

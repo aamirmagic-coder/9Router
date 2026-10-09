@@ -13,15 +13,8 @@ export default {
   transport: {
     baseUrl: "https://api.nan.builders/v1/chat/completions",
     usage: {
-      url: "https://api.nan.builders/v1/usage",
-      // Published per-member calendar-month token caps; /usage reports usage, not ceilings.
-      monthlyTokenCaps: {
-        "deepseek-v4-flash": 3000000000,
-        "mimo-v2.5": 1000000000,
-        "mimo-v2.6-flash": 1000000000,
-        "qwen3.8-flash": 500000000,
-        "glm5.3-flash": 2000000000,
-      },
+      // Dashboard quota counters; /v1/usage can return an empty history for an active key.
+      url: "https://cloud-api.nan.builders/api/usage/quota",
     },
   },
   modelsFetcher: { url: "https://api.nan.builders/v1/models", type: "openai" },

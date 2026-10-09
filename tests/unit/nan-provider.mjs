@@ -20,19 +20,43 @@ const retry = await parseUpstreamError(new Response('{"error":{"message":"slow d
 }));
 assert(retry.resetsAtMs > Date.now() + 59000 && retry.resetsAtMs < Date.now() + 61000);
 const report = {
-  start_date: "2026-09-01", end_date: "2026-09-27",
-  totals: { total_tokens: 150, api_requests: 3, by_model: [
-    { model: "deepseek-v4-flash", total_tokens: 100, api_requests: 2 },
-    { model: "qwen3.6", total_tokens: 50, api_requests: 1 },
-  ] },
-  all_time: { total_tokens: 1000 },
+  periodStart: "2026-10-01",
+  models: [
+    { model: "deepseek-v4-flash", tokensUsed: 1500000000, cap: 3000000000, periodEnd: "2026-11-01T00:00:00Z" },
+    { model: "glm5.3-flash", tokensUsed: 650000000, cap: 2000000000, periodEnd: "2026-11-01T00:00:00Z" },
+    { model: "glm5.3", tokensUsed: 500000000, cap: 1500000000, fullCap: 3000000000, periodEnd: "2026-11-09T15:06:22Z" },
+  ],
 };
-const usage = formatNanUsage(report, new Date("2026-09-27T12:00:00Z"));
-assert.equal(usage.quotas["deepseek-v4-flash"].total, 3000000000);
-assert.equal(usage.quotas["deepseek-v4-flash"].used, 100);
-assert.equal(usage.quotas["deepseek-v4-flash"].resetAt, "2026-10-01T00:00:00.000Z");
-assert.equal(usage.quotas["mimo-v2.5"].used, 0);
-assert.equal(usage.quotas["qwen3.6"].limitUnknown, true);
-assert.equal(usage.quotas["qwen3.6"].total, null);
-assert.equal(formatNanUsage(report, new Date("2026-12-31T23:59:00Z")).quotas["mimo-v2.5"].resetAt, "2027-01-01T00:00:00.000Z");
+const usage = formatNanUsage(report);
+assert.equal(usage.plan, "NaN");
+assert.deepEqual(Object.keys(usage.quotas), report.models.map((row) => row.model));
+for (const row of report.models) {
+  assert.deepEqual(usage.quotas[row.model], {
+    used: row.tokensUsed, total: row.cap, resetAt: row.periodEnd, unit: "tokens",
+  });
+}
+assert.equal(usage.summary, undefined);
+assert.equal(nan.transport.usage.url, "https://cloud-api.nan.builders/api/usage/quota");
+assert.equal(nan.transport.usage.monthlyTokenCaps, undefined);
+
+for (const used of [0, 100, 101]) {
+  const result = formatNanUsage({ models: [{ model: "new-model", tokensUsed: used, cap: 100 }] });
+  assert.deepEqual(result.quotas["new-model"], { used, total: 100, resetAt: null, unit: "tokens" });
+}
+for (const invalid of [
+  null, {}, { models: [] }, { models: {} }, { models: [null] },
+  { totals: { total_tokens: 0, api_requests: 0, by_model: [] }, all_time: { total_tokens: 0 } },
+  ...[
+    { model: "" }, { model: " " }, { model: 1 },
+    { tokensUsed: undefined }, { tokensUsed: null }, { tokensUsed: -1 }, { tokensUsed: "0" },
+    { tokensUsed: 0.5 }, { tokensUsed: Infinity }, { tokensUsed: Number.MAX_SAFE_INTEGER + 1 },
+    { cap: undefined }, { cap: null }, { cap: 0 }, { cap: -1 }, { cap: "100" },
+    { cap: 0.5 }, { cap: Infinity }, { periodEnd: "invalid-date" }, { periodEnd: 123 },
+  ].map((overrides) => ({ models: [report.models[0], { ...report.models[1], ...overrides }] })),
+  { models: [report.models[0], report.models[0]] },
+]) {
+  const result = formatNanUsage(invalid);
+  assert.equal(result.quotas, undefined);
+  assert.match(result.message, /unavailable/i);
+}
 console.log("NaN provider and usage OK");

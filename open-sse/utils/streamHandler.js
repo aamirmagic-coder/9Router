@@ -200,19 +200,22 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   let abortMessage = "upstream connection lost";
   const t0 = Date.now();
   const tag = "STREAM";
+  // PERF: the old code did clearTimeout()+setTimeout() on EVERY upstream chunk,
+  // which is thousands of timer-heap ops/sec under high chunk throughput. Any
+  // chunk now just stamps lastChunkAt; one low-frequency watchdog checks it.
   const clearStall = () => {
-    if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+    if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
   };
-  const armStall = () => {
+  const watchdogMs = Math.max(1000, Math.min(5000, Math.floor(stallTimeoutMs / 4)));
+  stallTimer = setInterval(() => {
+    if (Date.now() - lastChunkAt < stallTimeoutMs) return;
+    abortMessage = "stream stall timeout";
+    dbg(tag, `STALL TIMEOUT ${stallTimeoutMs}ms | chunks=${chunkCount} | bytes=${totalBytes} | sinceLast=${Date.now() - lastChunkAt}ms`);
     clearStall();
-    stallTimer = setTimeout(() => {
-      stallTimer = null;
-      abortMessage = "stream stall timeout";
-      dbg(tag, `STALL TIMEOUT ${stallTimeoutMs}ms | chunks=${chunkCount} | bytes=${totalBytes} | sinceLast=${Date.now() - lastChunkAt}ms`);
-      streamController.handleError?.(new Error("stream stall timeout"));
-      streamController.abort?.();
-    }, stallTimeoutMs);
-  };
+    streamController.handleError?.(new Error("stream stall timeout"));
+    streamController.abort?.();
+  }, watchdogMs);
+  stallTimer.unref?.();
 
   // Wrap controller so every termination path clears the stall timer.
   // Without this, abort/cancel/downstream-error paths leave the timer armed
@@ -227,32 +230,41 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     abort: () => { clearStall(); streamController.abort(); }
   };
 
-  armStall();
   dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms`);
 
-  const upstreamTap = new TransformStream({
-    transform(chunk, controller) {
-      chunkCount++;
-      const sz = chunk?.byteLength || chunk?.length || 0;
-      totalBytes += sz;
-      const now = Date.now();
-      const gap = now - lastChunkAt;
-      lastChunkAt = now;
-      if (isDebugEnabled && (chunkCount <= 5 || chunkCount % 20 === 0 || gap > 5000)) {
-        dbg(tag, `chunk #${chunkCount} | size=${sz}B | gap=${gap}ms | total=${totalBytes}B`);
+  // PERF: the old code chained an extra `upstreamTap` TransformStream purely to
+  // count bytes + stamp stall time, then piped it into the SSE transform — two
+  // stream layers per chunk. Pump the upstream body straight into the SSE
+  // transform's writable instead; removes one full stream layer.
+  const pumpWriter = transformStream.writable.getWriter();
+  (async () => {
+    let reader = null;
+    try {
+      // Guard: a streaming response always has a body, but never assume it.
+      if (!providerResponse.body) { await pumpWriter.close(); return; }
+      reader = providerResponse.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) { await pumpWriter.close(); break; }
+        chunkCount++;
+        totalBytes += (value?.byteLength || value?.length || 0);
+        lastChunkAt = Date.now();
+        await pumpWriter.write(value);
       }
-      armStall();
-      controller.enqueue(chunk);
-    },
-    flush() { dbg(tag, `upstream EOF | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); }
-  });
-
-  const transformedBody = providerResponse.body
-    .pipeThrough(upstreamTap)
-    .pipeThrough(transformStream);
+    } catch (e) {
+      // Downstream cancel errors the transform writable → write() rejects here.
+      // Abort the writer AND cancel the upstream reader so the fetch body is
+      // released immediately (pipeThrough used to cascade this cancellation).
+      try { await pumpWriter.abort(e); } catch { /* already closed */ }
+      try { await reader?.cancel(e); } catch { /* already closed */ }
+    } finally {
+      dbg(tag, `upstream EOF | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`);
+      clearStall();
+    }
+  })();
 
   return createDisconnectAwareStream(
-    { readable: transformedBody, writable: { getWriter: () => ({ abort: () => Promise.resolve() }) } },
+    { readable: transformStream.readable, writable: { getWriter: () => ({ abort: () => Promise.resolve() }) } },
     wrappedController,
     onAbortTerminal ? () => onAbortTerminal(abortMessage) : null
   );

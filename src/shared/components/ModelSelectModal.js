@@ -5,6 +5,7 @@ import PropTypes from "prop-types";
 import Modal from "./Modal";
 import ProviderIcon from "./ProviderIcon";
 import CapacityBadges from "./CapacityBadges";
+import Tooltip from "./Tooltip";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
@@ -81,6 +82,7 @@ export default function ModelSelectModal({
   selectedModel,
   activeProviders = [],
   title = "Select Model",
+  size = "lg",
   modelAliases = {},
   kindFilter = null,
   capFilter = null,
@@ -588,7 +590,7 @@ export default function ModelSelectModal({
         setSearchQuery("");
       }}
       title={title}
-      size="md"
+      size={size}
       className="p-4!"
       footer={null}
     >
@@ -617,9 +619,9 @@ export default function ModelSelectModal({
             }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-20 py-1.5 bg-surface border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+            className="w-full pl-8 pr-28 py-1.5 bg-surface border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
             {parsedQuery.isRegex && (
               <span className="text-[10px] px-1 py-0.2 rounded bg-primary/10 text-primary font-mono font-medium">
                 regex
@@ -640,13 +642,21 @@ export default function ModelSelectModal({
                 <span className="material-symbols-outlined text-[14px] leading-none">close</span>
               </button>
             )}
+            <Tooltip
+              position="left"
+              text="Search syntax: Substring (claude), Exclude/Negation (!embed or -haiku), Combined (claude !haiku), or RegEx (/pattern/flags or /^(?!.*embed).*$/i)."
+            >
+              <span className="material-symbols-outlined text-[16px] text-text-muted hover:text-text-main cursor-help leading-none flex items-center">
+                help
+              </span>
+            </Tooltip>
           </div>
         </div>
 
         {!closeOnSelect && visibleModels.length > 0 && (
           <div className="flex items-center justify-between px-1 text-[11px] text-text-muted">
             <span className="flex items-center gap-1.5">
-              <span>{visibleModels.length} models visible</span>
+              <span>{visibleModels.length} models</span>
               {addedModelValues.length > 0 && (
                 <span className="text-primary font-medium">({addedModelValues.length} selected)</span>
               )}
@@ -657,9 +667,9 @@ export default function ModelSelectModal({
                   type="button"
                   onClick={handleSelectAllVisible}
                   className="px-2 py-0.5 rounded text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
-                  title="Select all currently visible models"
+                  title="Select all filtered models"
                 >
-                  Select All Visible ({visibleUnadded.length})
+                  Select All ({visibleUnadded.length})
                 </button>
               )}
               {visibleAdded.length > 0 && (
@@ -667,9 +677,9 @@ export default function ModelSelectModal({
                   type="button"
                   onClick={handleDeselectAllVisible}
                   className="px-2 py-0.5 rounded text-[11px] font-medium bg-border/40 text-text-muted hover:text-text-main hover:bg-border/60 transition-colors cursor-pointer"
-                  title="Deselect all currently visible models"
+                  title="Deselect all filtered models"
                 >
-                  Deselect All Visible ({visibleAdded.length})
+                  Deselect All ({visibleAdded.length})
                 </button>
               )}
             </div>
@@ -838,6 +848,7 @@ ModelSelectModal.propTypes = {
     })
   ),
   title: PropTypes.string,
+  size: PropTypes.string,
   modelAliases: PropTypes.object,
   kindFilter: PropTypes.string,
   addedModelValues: PropTypes.arrayOf(PropTypes.string),

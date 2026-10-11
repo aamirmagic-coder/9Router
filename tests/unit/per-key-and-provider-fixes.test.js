@@ -48,6 +48,15 @@ describe("Per-Key Model Access and Token Limit Rules", () => {
     it("matches universal wildcard *", () => {
       expect(isModelAllowedForKey("any-model-123", ["*"])).toBe(true);
     });
+
+    it("matches regex patterns (e.g. /pattern/flags or negative lookahead)", () => {
+      const allowed = ["/^(?!.*haiku).*claude.*$/i", "/^gpt-4o$/i"];
+      expect(isModelAllowedForKey("anthropic/claude-3-5-sonnet", allowed)).toBe(true);
+      expect(isModelAllowedForKey("claude-3-opus", allowed)).toBe(true);
+      expect(isModelAllowedForKey("claude-3-haiku", allowed)).toBe(false);
+      expect(isModelAllowedForKey("gpt-4o", allowed)).toBe(true);
+      expect(isModelAllowedForKey("gpt-4o-mini", allowed)).toBe(false);
+    });
   });
 
   describe("validateApiKeyWithRules", () => {

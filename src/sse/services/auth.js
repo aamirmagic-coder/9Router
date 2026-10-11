@@ -390,6 +390,21 @@ export function isModelAllowedForKey(requestedModel, allowedModels) {
 
   for (const rawPattern of allowedModels) {
     if (!rawPattern || typeof rawPattern !== "string") continue;
+    // Regex pattern like "/^claude-(?!haiku)/i"
+    if (rawPattern.trim().startsWith("/") && rawPattern.trim().length > 2) {
+      const match = rawPattern.trim().match(/^\/(.+)\/([a-z]*)$/i);
+      if (match) {
+        try {
+          const reg = new RegExp(match[1], match[2] || "i");
+          if (reg.test(requestedModel) || reg.test(modelLower) || reg.test(modelNameOnly)) {
+            return true;
+          }
+        } catch {
+          // Ignore invalid regex
+        }
+      }
+    }
+
     const pattern = rawPattern.trim().toLowerCase();
     if (pattern === "*" || pattern === modelLower || pattern === modelNameOnly) {
       return true;

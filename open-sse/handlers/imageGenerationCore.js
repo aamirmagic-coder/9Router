@@ -24,6 +24,7 @@ function serializeRequestBody(requestBody) {
  * @param {boolean} [options.binaryOutput] - Return raw image bytes
  * @param {function} [options.onCredentialsRefreshed]
  * @param {function} [options.onRequestSuccess]
+ * @param {function} [options.onUsage] - Receives exact provider-reported usage when available
  * @returns {Promise<{ success: boolean, response: Response, status?: number, error?: string }>}
  */
 export async function handleImageGenerationCore({
@@ -35,6 +36,7 @@ export async function handleImageGenerationCore({
   binaryOutput = false,
   onCredentialsRefreshed,
   onRequestSuccess,
+  onUsage,
 }) {
   const { provider, model } = modelInfo;
 
@@ -48,6 +50,47 @@ export async function handleImageGenerationCore({
       HTTP_STATUS.BAD_REQUEST,
       `Provider '${provider}' does not support image generation`
     );
+  }
+
+  // Executor-delegating adapters: skip manual URL/headers/body, use the proven executor flow
+  if (adapter.useExecutor && adapter.executeViaExecutor) {
+    try {
+      log?.debug?.("IMAGE", `${provider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
+      const responseBody = await adapter.executeViaExecutor(model, body, credentials, log);
+      if (onRequestSuccess) await onRequestSuccess();
+      const normalized = adapter.normalize(responseBody, body.prompt);
+      const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : responseBody;
+
+      if (binaryOutput) {
+        const first = finalBody.data?.[0];
+        let b64 = first?.b64_json;
+        if (!b64 && first?.url) {
+          try { b64 = await urlToBase64(first.url); } catch {}
+        }
+        if (b64) {
+          const buf = Buffer.from(b64, "base64");
+          const fmt = (body.output_format || "png").toLowerCase();
+          const mime = fmt === "jpeg" || fmt === "jpg" ? "image/jpeg" : fmt === "webp" ? "image/webp" : "image/png";
+          return {
+            success: true,
+            response: new Response(buf, {
+              headers: { "Content-Type": mime, "Content-Disposition": `inline; filename="image.${fmt === "jpeg" ? "jpg" : fmt}"`, "Access-Control-Allow-Origin": "*" },
+            }),
+          };
+        }
+      }
+
+      return {
+        success: true,
+        response: new Response(JSON.stringify(finalBody), {
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        }),
+      };
+    } catch (error) {
+      const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
+      log?.debug?.("IMAGE", `Executor error: ${errMsg}`);
+      return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
+    }
   }
 
   let url;
@@ -129,6 +172,7 @@ export async function handleImageGenerationCore({
         log,
         streamToClient,
         onRequestSuccess,
+        onUsage,
         url,
         requestBody,
         model,

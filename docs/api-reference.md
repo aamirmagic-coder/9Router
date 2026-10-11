@@ -100,10 +100,17 @@ request when **any** of the following holds:
    with no key; the endpoint handlers below add their own check.
    A request forwarded by a reverse proxy is never counted as local.
 2. **Valid API key**, sent as any of:
-   - `Authorization: Bearer sk-...`
-   - `x-api-key: sk-...`
-   - `x-goog-api-key: sk-...`
+   - `Authorization: Bearer sk-…`
+   - `x-api-key: sk-…`
+   - `x-goog-api-key: sk-…`
    - `?key=sk-...`
+
+   These are keys **minted by this instance** — dashboard → Endpoint → API Keys,
+   or login + `POST /api/keys` (recipe below). The `API_KEY_SECRET` environment
+   variable is the server-side HMAC secret used to derive and validate those
+   keys; it is **not** a client credential and must never be sent as a Bearer
+   key. Sharing `API_KEY_SECRET` across federation instances keeps minted keys
+   valid on every instance — it does not make the secret itself a client key.
 3. **Remote keyless access, while the effective `requireApiKey` setting is
    `false`.** This is a deployment opt-out — and it is the state a fresh install
    boots in, because `.env.example` ships `REQUIRE_API_KEY=false` (see the

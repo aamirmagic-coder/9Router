@@ -1357,46 +1357,44 @@ export default function APIPageClient({ machineId }) {
                   Select Models from Catalog
                 </Button>
 
-                <div className="flex items-center justify-between text-xs px-0.5 pt-1">
-                  <span className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
-                    <span>Pattern or Model ID</span>
-                    <Tooltip text="Allowed formats: Exact ID (gpt-4o), Provider wildcard (oc/*, openai/*), Glob pattern (*claude*, *gpt-4*), or RegEx (/^claude-(?!haiku)/i)." />
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <div className="relative flex-1">
-                    <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
-                    <input
-                      type="text"
-                      placeholder="Add custom pattern or ID (e.g. oc/*, gpt-4o, *claude*)"
-                      value={newKeyCustomPattern}
-                      onChange={(e) => setNewKeyCustomPattern(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && newKeyCustomPattern.trim()) {
-                          e.preventDefault();
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative flex-1">
+                      <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
+                      <input
+                        type="text"
+                        placeholder="Add model ID, wildcard, or regex (e.g. oc/*, gpt-4o, /regex/)"
+                        value={newKeyCustomPattern}
+                        onChange={(e) => setNewKeyCustomPattern(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newKeyCustomPattern.trim()) {
+                            e.preventDefault();
+                            const p = newKeyCustomPattern.trim();
+                            setNewKeyAllowedModels((prev) => (prev.includes(p) ? prev : [...prev, p]));
+                            setNewKeyCustomPattern("");
+                          }
+                        }}
+                        className="w-full h-9 pl-8 pr-3 text-xs bg-surface border border-border rounded-lg placeholder:text-text-muted/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (newKeyCustomPattern.trim()) {
                           const p = newKeyCustomPattern.trim();
                           setNewKeyAllowedModels((prev) => (prev.includes(p) ? prev : [...prev, p]));
                           setNewKeyCustomPattern("");
                         }
                       }}
-                      className="w-full h-9 pl-8 pr-3 text-xs bg-surface border border-border rounded-lg placeholder:text-text-muted/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 font-mono"
-                    />
+                      disabled={!newKeyCustomPattern.trim()}
+                      className="h-9 px-3.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
+                    >
+                      Add
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (newKeyCustomPattern.trim()) {
-                        const p = newKeyCustomPattern.trim();
-                        setNewKeyAllowedModels((prev) => (prev.includes(p) ? prev : [...prev, p]));
-                        setNewKeyCustomPattern("");
-                      }
-                    }}
-                    disabled={!newKeyCustomPattern.trim()}
-                    className="h-9 px-3.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
-                  >
-                    Add
-                  </button>
+                  <p className="text-[11px] text-text-muted mt-1 px-0.5">
+                    Supports exact ID (gpt-4o), wildcard (oc/*, *claude*), or RegEx (/^claude/i).
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between text-xs px-0.5">
@@ -1565,46 +1563,44 @@ export default function APIPageClient({ machineId }) {
                   Select Models from Catalog
                 </Button>
 
-                <div className="flex items-center justify-between text-xs px-0.5 pt-1">
-                  <span className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
-                    <span>Pattern or Model ID</span>
-                    <Tooltip text="Allowed formats: Exact ID (gpt-4o), Provider wildcard (oc/*, openai/*), Glob pattern (*claude*, *gpt-4*), or RegEx (/^claude-(?!haiku)/i)." />
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <div className="relative flex-1">
-                    <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
-                    <input
-                      type="text"
-                      placeholder="Add custom pattern or ID (e.g. oc/*, gpt-4o, *claude*)"
-                      value={editKeyCustomPattern}
-                      onChange={(e) => setEditKeyCustomPattern(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && editKeyCustomPattern.trim()) {
-                          e.preventDefault();
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative flex-1">
+                      <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
+                      <input
+                        type="text"
+                        placeholder="Add model ID, wildcard, or regex (e.g. oc/*, gpt-4o, /regex/)"
+                        value={editKeyCustomPattern}
+                        onChange={(e) => setEditKeyCustomPattern(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && editKeyCustomPattern.trim()) {
+                            e.preventDefault();
+                            const p = editKeyCustomPattern.trim();
+                            setEditKeyAllowedModels((prev) => (prev.includes(p) ? prev : [...prev, p]));
+                            setEditKeyCustomPattern("");
+                          }
+                        }}
+                        className="w-full h-9 pl-8 pr-3 text-xs bg-surface border border-border rounded-lg placeholder:text-text-muted/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editKeyCustomPattern.trim()) {
                           const p = editKeyCustomPattern.trim();
                           setEditKeyAllowedModels((prev) => (prev.includes(p) ? prev : [...prev, p]));
                           setEditKeyCustomPattern("");
                         }
                       }}
-                      className="w-full h-9 pl-8 pr-3 text-xs bg-surface border border-border rounded-lg placeholder:text-text-muted/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 font-mono"
-                    />
+                      disabled={!editKeyCustomPattern.trim()}
+                      className="h-9 px-3.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
+                    >
+                      Add
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editKeyCustomPattern.trim()) {
-                        const p = editKeyCustomPattern.trim();
-                        setEditKeyAllowedModels((prev) => (prev.includes(p) ? prev : [...prev, p]));
-                        setEditKeyCustomPattern("");
-                      }
-                    }}
-                    disabled={!editKeyCustomPattern.trim()}
-                    className="h-9 px-3.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
-                  >
-                    Add
-                  </button>
+                  <p className="text-[11px] text-text-muted mt-1 px-0.5">
+                    Supports exact ID (gpt-4o), wildcard (oc/*, *claude*), or RegEx (/^claude/i).
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between text-xs px-0.5">

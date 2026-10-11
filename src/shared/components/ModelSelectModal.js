@@ -5,7 +5,6 @@ import PropTypes from "prop-types";
 import Modal from "./Modal";
 import ProviderIcon from "./ProviderIcon";
 import CapacityBadges from "./CapacityBadges";
-import Tooltip from "./Tooltip";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
@@ -599,8 +598,8 @@ export default function ModelSelectModal({
         <span className="material-symbols-outlined text-primary shrink-0" style={{ fontSize: "14px" }}>info</span>
         <span>
           {allowProviderWildcard
-            ? "Click to add/remove a model, or click a provider name to toggle wildcard (e.g. provider/*)."
-            : "Click to add, click again to remove. Changes are saved automatically."}
+            ? "Click to add/remove a model, or click a provider name for wildcard (e.g. provider/*). Search supports !exclude and /regex/."
+            : "Click to add, click again to remove. Search supports !exclude and /regex/."}
         </span>
       </div>
 
@@ -614,14 +613,14 @@ export default function ModelSelectModal({
             type="text"
             placeholder={
               allowProviderWildcard
-                ? "Search (e.g. claude, !embed, /regex/i)..."
+                ? "Search models (e.g. claude, oc/*, !embed, /regex/i)..."
                 : "Search models (e.g. gpt, !preview, /pattern/)..."
             }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-28 py-1.5 bg-surface border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+            className="w-full pl-8 pr-20 py-1.5 bg-surface border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
             {parsedQuery.isRegex && (
               <span className="text-[10px] px-1 py-0.2 rounded bg-primary/10 text-primary font-mono font-medium">
                 regex
@@ -642,14 +641,6 @@ export default function ModelSelectModal({
                 <span className="material-symbols-outlined text-[14px] leading-none">close</span>
               </button>
             )}
-            <Tooltip
-              position="left"
-              text="Search syntax: Substring (claude), Exclude/Negation (!embed or -haiku), Combined (claude !haiku), or RegEx (/pattern/flags or /^(?!.*embed).*$/i)."
-            >
-              <span className="material-symbols-outlined text-[16px] text-text-muted hover:text-text-main cursor-help leading-none flex items-center">
-                help
-              </span>
-            </Tooltip>
           </div>
         </div>
 

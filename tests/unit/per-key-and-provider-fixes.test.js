@@ -57,6 +57,21 @@ describe("Per-Key Model Access and Token Limit Rules", () => {
       expect(isModelAllowedForKey("gpt-4o", allowed)).toBe(true);
       expect(isModelAllowedForKey("gpt-4o-mini", allowed)).toBe(false);
     });
+
+    it("supports exclusion rules with ! or - prefix", () => {
+      // Whitelist claude but exclude haiku
+      const allowed = ["*claude*", "-*haiku*"];
+      expect(isModelAllowedForKey("anthropic/claude-3-5-sonnet", allowed)).toBe(true);
+      expect(isModelAllowedForKey("claude-3-opus", allowed)).toBe(true);
+      expect(isModelAllowedForKey("claude-3-haiku", allowed)).toBe(false);
+      expect(isModelAllowedForKey("gpt-4o", allowed)).toBe(false);
+
+      // Standalone exclusion: allows everything except opus
+      const excludeOnly = ["!*opus*"];
+      expect(isModelAllowedForKey("claude-3-5-sonnet", excludeOnly)).toBe(true);
+      expect(isModelAllowedForKey("gpt-4o", excludeOnly)).toBe(true);
+      expect(isModelAllowedForKey("claude-3-opus", excludeOnly)).toBe(false);
+    });
   });
 
   describe("validateApiKeyWithRules", () => {

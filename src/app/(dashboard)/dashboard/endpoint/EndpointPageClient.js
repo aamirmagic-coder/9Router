@@ -1363,7 +1363,7 @@ export default function APIPageClient({ machineId }) {
                       <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
                       <input
                         type="text"
-                        placeholder="Add model ID, wildcard, or regex (e.g. oc/*, gpt-4o, /regex/)"
+                        placeholder="Add ID, wildcard, exclusion, or regex (e.g. oc/*, gpt-4o, -*haiku*)"
                         value={newKeyCustomPattern}
                         onChange={(e) => setNewKeyCustomPattern(e.target.value)}
                         onKeyDown={(e) => {
@@ -1393,7 +1393,7 @@ export default function APIPageClient({ machineId }) {
                     </button>
                   </div>
                   <p className="text-[11px] text-text-muted mt-1 px-0.5">
-                    Supports exact ID (gpt-4o), wildcard (oc/*, *claude*), or RegEx (/^claude/i).
+                    Supports exact ID (gpt-4o), wildcard (oc/*, *claude*), exclusion (-*haiku*, !*opus*), or RegEx (/^claude/i).
                   </p>
                 </div>
 
@@ -1569,7 +1569,7 @@ export default function APIPageClient({ machineId }) {
                       <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
                       <input
                         type="text"
-                        placeholder="Add model ID, wildcard, or regex (e.g. oc/*, gpt-4o, /regex/)"
+                        placeholder="Add ID, wildcard, exclusion, or regex (e.g. oc/*, gpt-4o, -*haiku*)"
                         value={editKeyCustomPattern}
                         onChange={(e) => setEditKeyCustomPattern(e.target.value)}
                         onKeyDown={(e) => {
@@ -1599,7 +1599,7 @@ export default function APIPageClient({ machineId }) {
                     </button>
                   </div>
                   <p className="text-[11px] text-text-muted mt-1 px-0.5">
-                    Supports exact ID (gpt-4o), wildcard (oc/*, *claude*), or RegEx (/^claude/i).
+                    Supports exact ID (gpt-4o), wildcard (oc/*, *claude*), exclusion (-*haiku*, !*opus*), or RegEx (/^claude/i).
                   </p>
                 </div>
 

@@ -369,8 +369,57 @@ export async function isValidApiKey(apiKey) {
   return await validateApiKey(apiKey);
 }
 
+function matchesSingleRule(requestedModel, modelLower, modelNameOnly, prefix, rawPattern) {
+  if (!rawPattern || typeof rawPattern !== "string") return false;
+  const trimmed = rawPattern.trim();
+  if (!trimmed) return false;
+
+  // Regex pattern like "/^claude-(?!haiku)/i"
+  if (trimmed.startsWith("/") && trimmed.length > 2) {
+    const match = trimmed.match(/^\/(.+)\/([a-z]*)$/i);
+    if (match) {
+      try {
+        const reg = new RegExp(match[1], match[2] || "i");
+        if (reg.test(requestedModel) || reg.test(modelLower) || reg.test(modelNameOnly)) {
+          return true;
+        }
+      } catch {
+        // Ignore invalid regex
+      }
+    }
+  }
+
+  const pattern = trimmed.toLowerCase();
+  if (pattern === "*" || pattern === modelLower || pattern === modelNameOnly) {
+    return true;
+  }
+  const patternParts = pattern.split("/");
+  const patternNameOnly = patternParts.length > 1 ? patternParts.slice(1).join("/") : pattern;
+  if (patternNameOnly === modelLower || patternNameOnly === modelNameOnly) {
+    return true;
+  }
+  // Pattern like "provider/*"
+  if (pattern.endsWith("/*")) {
+    const pfx = pattern.slice(0, -2);
+    if (prefix && prefix === pfx) return true;
+    if (modelLower.startsWith(`${pfx}/`)) return true;
+    if (prefix && resolveProviderId(prefix) === resolveProviderId(pfx)) return true;
+  }
+  // Wildcard pattern like "*gpt-4*"
+  if (pattern.includes("*")) {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    const regex = new RegExp(`^${escaped}$`, "i");
+    if (regex.test(modelLower) || regex.test(modelNameOnly)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Check if a requested model is allowed for an API key given its allowedModels configuration.
+ * Supports exact model IDs, provider wildcards, glob wildcards, regex patterns, and exclusion rules (!pattern or -pattern).
  * @param {string} requestedModel - Requested model string (e.g. "gpt-4o", "oc/muse-spark-1.2-contributor-free")
  * @param {string[]|null} allowedModels - Array of allowed model patterns (null/empty = all allowed)
  * @returns {boolean}
@@ -388,46 +437,36 @@ export function isModelAllowedForKey(requestedModel, allowedModels) {
   const modelNameOnly = parts.length > 1 ? parts.slice(1).join("/") : modelLower;
   const prefix = parts.length > 1 ? parts[0] : "";
 
-  for (const rawPattern of allowedModels) {
-    if (!rawPattern || typeof rawPattern !== "string") continue;
-    // Regex pattern like "/^claude-(?!haiku)/i"
-    if (rawPattern.trim().startsWith("/") && rawPattern.trim().length > 2) {
-      const match = rawPattern.trim().match(/^\/(.+)\/([a-z]*)$/i);
-      if (match) {
-        try {
-          const reg = new RegExp(match[1], match[2] || "i");
-          if (reg.test(requestedModel) || reg.test(modelLower) || reg.test(modelNameOnly)) {
-            return true;
-          }
-        } catch {
-          // Ignore invalid regex
-        }
-      }
-    }
+  // Separate positive and negative (exclusion) rules
+  const negativeRules = [];
+  const positiveRules = [];
 
-    const pattern = rawPattern.trim().toLowerCase();
-    if (pattern === "*" || pattern === modelLower || pattern === modelNameOnly) {
+  for (const raw of allowedModels) {
+    if (!raw || typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if ((trimmed.startsWith("!") || trimmed.startsWith("-")) && trimmed.length > 1) {
+      negativeRules.push(trimmed.slice(1));
+    } else {
+      positiveRules.push(trimmed);
+    }
+  }
+
+  // If matches any exclusion rule -> strictly rejected
+  for (const neg of negativeRules) {
+    if (matchesSingleRule(requestedModel, modelLower, modelNameOnly, prefix, neg)) {
+      return false;
+    }
+  }
+
+  // If no positive rules were specified, all non-excluded models are allowed
+  if (positiveRules.length === 0) {
+    return true;
+  }
+
+  // Otherwise, must match at least one positive rule
+  for (const pos of positiveRules) {
+    if (matchesSingleRule(requestedModel, modelLower, modelNameOnly, prefix, pos)) {
       return true;
-    }
-    const patternParts = pattern.split("/");
-    const patternNameOnly = patternParts.length > 1 ? patternParts.slice(1).join("/") : pattern;
-    if (patternNameOnly === modelLower || patternNameOnly === modelNameOnly) {
-      return true;
-    }
-    // Pattern like "provider/*"
-    if (pattern.endsWith("/*")) {
-      const pfx = pattern.slice(0, -2);
-      if (prefix && prefix === pfx) return true;
-      if (modelLower.startsWith(`${pfx}/`)) return true;
-      if (prefix && resolveProviderId(prefix) === resolveProviderId(pfx)) return true;
-    }
-    // Wildcard pattern like "*gpt-4*"
-    if (pattern.includes("*")) {
-      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-      const regex = new RegExp(`^${escaped}$`, "i");
-      if (regex.test(modelLower) || regex.test(modelNameOnly)) {
-        return true;
-      }
     }
   }
 

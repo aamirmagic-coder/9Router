@@ -598,8 +598,8 @@ export default function ModelSelectModal({
         <span className="material-symbols-outlined text-primary shrink-0" style={{ fontSize: "14px" }}>info</span>
         <span>
           {allowProviderWildcard
-            ? "Click to add/remove a model, or click a provider name for wildcard (e.g. provider/*). Search supports !exclude and /regex/."
-            : "Click to add, click again to remove. Search supports !exclude and /regex/."}
+            ? "Click to add/remove a model, or click a provider name for wildcard (e.g. provider/*). Search supports exclusions (e.g. claude -haiku) and RegEx (/pattern/)."
+            : "Click to add, click again to remove. Search supports exclusions (e.g. claude -haiku) and RegEx (/pattern/)."}
         </span>
       </div>
 
@@ -613,8 +613,8 @@ export default function ModelSelectModal({
             type="text"
             placeholder={
               allowProviderWildcard
-                ? "Search models (e.g. claude, oc/*, !embed, /regex/i)..."
-                : "Search models (e.g. gpt, !preview, /pattern/)..."
+                ? "Search models (e.g. claude -haiku, oc/*, /regex/)..."
+                : "Search models (e.g. claude -haiku, !embed, /regex/)..."
             }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

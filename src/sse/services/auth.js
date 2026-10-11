@@ -452,8 +452,14 @@ export function isModelAllowedForKey(requestedModel, allowedModels) {
   }
 
   // If matches any exclusion rule -> strictly rejected
+  // Supports both glob/regex (-*haiku*, -provider/*) and simple substring (-haiku)
   for (const neg of negativeRules) {
-    if (matchesSingleRule(requestedModel, modelLower, modelNameOnly, prefix, neg)) {
+    const negLower = neg.toLowerCase();
+    if (
+      matchesSingleRule(requestedModel, modelLower, modelNameOnly, prefix, neg) ||
+      modelLower.includes(negLower) ||
+      modelNameOnly.includes(negLower)
+    ) {
       return false;
     }
   }

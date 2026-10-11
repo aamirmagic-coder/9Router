@@ -1674,13 +1674,21 @@ export default function APIPageClient({ machineId }) {
         addedModelValues={newKeyAllowedModels}
         onSelect={(model) => {
           const val = model?.value || model?.name || model;
-          if (val && !newKeyAllowedModels.includes(val)) {
-            setNewKeyAllowedModels([...newKeyAllowedModels, val]);
+          if (val) {
+            setNewKeyAllowedModels((prev) => (prev.includes(val) ? prev : [...prev, val]));
           }
         }}
         onDeselect={(model) => {
           const val = model?.value || model?.name || model;
-          setNewKeyAllowedModels(newKeyAllowedModels.filter((x) => x !== val));
+          setNewKeyAllowedModels((prev) => prev.filter((x) => x !== val));
+        }}
+        onSelectBatch={(models) => {
+          const vals = models.map((m) => m?.value || m?.name || m).filter(Boolean);
+          setNewKeyAllowedModels((prev) => [...new Set([...prev, ...vals])]);
+        }}
+        onDeselectBatch={(models) => {
+          const vals = new Set(models.map((m) => m?.value || m?.name || m).filter(Boolean));
+          setNewKeyAllowedModels((prev) => prev.filter((x) => !vals.has(x)));
         }}
       />
 
@@ -1695,13 +1703,21 @@ export default function APIPageClient({ machineId }) {
         addedModelValues={editKeyAllowedModels}
         onSelect={(model) => {
           const val = model?.value || model?.name || model;
-          if (val && !editKeyAllowedModels.includes(val)) {
-            setEditKeyAllowedModels([...editKeyAllowedModels, val]);
+          if (val) {
+            setEditKeyAllowedModels((prev) => (prev.includes(val) ? prev : [...prev, val]));
           }
         }}
         onDeselect={(model) => {
           const val = model?.value || model?.name || model;
-          setEditKeyAllowedModels(editKeyAllowedModels.filter((x) => x !== val));
+          setEditKeyAllowedModels((prev) => prev.filter((x) => x !== val));
+        }}
+        onSelectBatch={(models) => {
+          const vals = models.map((m) => m?.value || m?.name || m).filter(Boolean);
+          setEditKeyAllowedModels((prev) => [...new Set([...prev, ...vals])]);
+        }}
+        onDeselectBatch={(models) => {
+          const vals = new Set(models.map((m) => m?.value || m?.name || m).filter(Boolean));
+          setEditKeyAllowedModels((prev) => prev.filter((x) => !vals.has(x)));
         }}
       />
 

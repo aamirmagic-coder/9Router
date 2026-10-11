@@ -8,6 +8,7 @@ import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
+import { parseSearchQuery, matchesSearch } from "@/shared/utils/modelSearchFilter";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -75,6 +76,8 @@ export default function ModelSelectModal({
   onClose,
   onSelect,
   onDeselect,
+  onSelectBatch,
+  onDeselectBatch,
   selectedModel,
   activeProviders = [],
   title = "Select Model",
@@ -464,13 +467,15 @@ export default function ModelSelectModal({
     return groups;
   }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels, clineModels, clinepassModels, zedModels]);
 
+  // Parse search query into structured query (regex, positive tokens, negative tokens)
+  const parsedQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);
+
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
     if (kindFilter || capFilter) return [];
-    if (!searchQuery.trim()) return combos;
-    const query = searchQuery.toLowerCase();
-    return combos.filter(c => c.name.toLowerCase().includes(query));
-  }, [combos, searchQuery, kindFilter, capFilter]);
+    if (parsedQuery.isEmpty) return combos;
+    return combos.filter(c => matchesSearch(c.name, parsedQuery));
+  }, [combos, parsedQuery, kindFilter, capFilter]);
 
   // Sort models alphabetically, with added models floated to top
   const sortModels = (models) => {
@@ -479,10 +484,8 @@ export default function ModelSelectModal({
     return [...added, ...rest];
   };
 
-  // Filter models by search query
+  // Filter models by search query (supports substring, regex, and negation !token / -token)
   const filteredGroups = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
     const filtered = {};
     Object.entries(groupedModels).forEach(([providerId, group]) => {
       let models = group.models;
@@ -491,19 +494,27 @@ export default function ModelSelectModal({
         models = models.filter((m) => getCaps(m.value)?.[capFilter] === true);
         if (models.length === 0) return;
       }
-      if (query) {
-        const providerNameMatches = group.name.toLowerCase().includes(query);
+      if (!parsedQuery.isEmpty) {
+        const providerNameMatches = matchesSearch(group.name, parsedQuery);
         const aliasMatches = allowProviderWildcard && (
-          (group.alias && group.alias.toLowerCase().includes(query)) ||
-          (providerId && providerId.toLowerCase().includes(query)) ||
-          `${group.alias}/*`.toLowerCase().includes(query)
+          (group.alias && matchesSearch(group.alias, parsedQuery)) ||
+          (providerId && matchesSearch(providerId, parsedQuery)) ||
+          matchesSearch(`${group.alias}/*`, parsedQuery)
         );
-        models = models.filter(
-          (m) =>
-            m.name.toLowerCase().includes(query) ||
-            m.id.toLowerCase().includes(query)
-        );
-        if (models.length === 0 && !providerNameMatches && !aliasMatches) return;
+
+        models = models.filter((m) => {
+          if (matchesSearch(m, parsedQuery)) return true;
+          // If provider or alias matches, but model doesn't violate negative exclusion terms
+          if (providerNameMatches || aliasMatches) {
+            if (parsedQuery.negativeTerms.length > 0) {
+              return matchesSearch(m, { ...parsedQuery, positiveTerms: [] });
+            }
+            return true;
+          }
+          return false;
+        });
+
+        if (models.length === 0) return;
       }
       filtered[providerId] = {
         ...group,
@@ -512,7 +523,46 @@ export default function ModelSelectModal({
     });
 
     return filtered;
-  }, [groupedModels, searchQuery, addedModelValues, allowProviderWildcard]);
+  }, [groupedModels, parsedQuery, addedModelValues, allowProviderWildcard]);
+
+  // Visible models available for batch actions (excluding placeholders)
+  const visibleModels = useMemo(() => {
+    const list = [];
+    Object.values(filteredGroups).forEach((group) => {
+      group.models.forEach((m) => {
+        if (!m.isPlaceholder) {
+          list.push(m);
+        }
+      });
+    });
+    return list;
+  }, [filteredGroups]);
+
+  const visibleUnadded = useMemo(() => {
+    return visibleModels.filter((m) => !addedModelValues.includes(m.value));
+  }, [visibleModels, addedModelValues]);
+
+  const visibleAdded = useMemo(() => {
+    return visibleModels.filter((m) => addedModelValues.includes(m.value));
+  }, [visibleModels, addedModelValues]);
+
+  const handleSelectAllVisible = () => {
+    if (visibleUnadded.length === 0) return;
+    if (onSelectBatch) {
+      onSelectBatch(visibleUnadded);
+    } else {
+      visibleUnadded.forEach((model) => onSelect(model));
+    }
+  };
+
+  const handleDeselectAllVisible = () => {
+    if (visibleAdded.length === 0) return;
+    if (onDeselectBatch) {
+      onDeselectBatch(visibleAdded);
+    } else if (onDeselect) {
+      visibleAdded.forEach((model) => onDeselect(model));
+    }
+  };
 
   const handleSelect = (model) => {
     const value = model?.value || model?.name || model;
@@ -552,20 +602,79 @@ export default function ModelSelectModal({
         </span>
       </div>
 
-      {/* Search - compact */}
-      <div className="mb-3">
+      {/* Search & batch actions */}
+      <div className="mb-3 space-y-2">
         <div className="relative">
           <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted text-[16px]">
             search
           </span>
           <input
             type="text"
-            placeholder="Search..."
+            placeholder={
+              allowProviderWildcard
+                ? "Search (e.g. claude, !embed, /regex/i)..."
+                : "Search models (e.g. gpt, !preview, /pattern/)..."
+            }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 bg-surface border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+            className="w-full pl-8 pr-20 py-1.5 bg-surface border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {parsedQuery.isRegex && (
+              <span className="text-[10px] px-1 py-0.2 rounded bg-primary/10 text-primary font-mono font-medium">
+                regex
+              </span>
+            )}
+            {parsedQuery.negativeTerms.length > 0 && !parsedQuery.isRegex && (
+              <span className="text-[10px] px-1 py-0.2 rounded bg-amber-500/10 text-amber-500 font-mono font-medium">
+                !exclude
+              </span>
+            )}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="text-text-muted hover:text-text-main cursor-pointer p-0.5 rounded"
+                title="Clear search"
+              >
+                <span className="material-symbols-outlined text-[14px] leading-none">close</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {!closeOnSelect && visibleModels.length > 0 && (
+          <div className="flex items-center justify-between px-1 text-[11px] text-text-muted">
+            <span className="flex items-center gap-1.5">
+              <span>{visibleModels.length} models visible</span>
+              {addedModelValues.length > 0 && (
+                <span className="text-primary font-medium">({addedModelValues.length} selected)</span>
+              )}
+            </span>
+            <div className="flex items-center gap-1.5">
+              {visibleUnadded.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSelectAllVisible}
+                  className="px-2 py-0.5 rounded text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                  title="Select all currently visible models"
+                >
+                  Select All Visible ({visibleUnadded.length})
+                </button>
+              )}
+              {visibleAdded.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDeselectAllVisible}
+                  className="px-2 py-0.5 rounded text-[11px] font-medium bg-border/40 text-text-muted hover:text-text-main hover:bg-border/60 transition-colors cursor-pointer"
+                  title="Deselect all currently visible models"
+                >
+                  Deselect All Visible ({visibleAdded.length})
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Models grouped by provider - compact */}
@@ -720,6 +829,8 @@ ModelSelectModal.propTypes = {
   onClose: PropTypes.func.isRequired,
   onSelect: PropTypes.func.isRequired,
   onDeselect: PropTypes.func,
+  onSelectBatch: PropTypes.func,
+  onDeselectBatch: PropTypes.func,
   selectedModel: PropTypes.string,
   activeProviders: PropTypes.arrayOf(
     PropTypes.shape({

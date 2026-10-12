@@ -82,6 +82,7 @@ export const TABLES = {
       name: "TEXT",
       machineId: "TEXT",
       isActive: "INTEGER DEFAULT 1",
+      permissions: "TEXT",
       createdAt: "TEXT NOT NULL",
       // Per-key access control. Additive columns, picked up by
       // syncSchemaFromTables() on boot; existing rows read as unrestricted (0).

@@ -1063,7 +1063,11 @@ suite("QA-battery cell detection (QA-9ROUTER-21/22/26)", () => {
       // The render is FINAL text: `if [ $disc_rc -eq 0 ]` (no backslash). The old
       // regex demanded the SOURCE-escaped `\$` form, which never occurs in the
       // render, so the extraction found nothing (fixed 2026-09-23).
-      const start = lines.findIndex((l) => /^if \[ \$disc_rc -eq 0 \]/.test(l));
+      // 2026-10-12: the harness (QA-HERMES-DAGGER-26) prepends a ci-pass `nat_rc`
+      // guard, so the chain no longer OPENS at `[ $disc_rc -eq 0 ]` — that test is
+      // now a mid-chain `elif`. Anchor the slice on the chain's first line instead:
+      // the opening `if` of the chain always emits a chaos-disconnect cell.
+      const start = lines.findIndex((l) => /^if .+chaos-disconnect/.test(l));
       const end = lines.findIndex((l, i) => i > start && /chaos-disconnect OK "fails fast/.test(l));
       expect(start).toBeGreaterThan(-1);
       expect(end).toBeGreaterThan(start);

@@ -326,9 +326,11 @@ describe("docker compose render — default vs local-build fallback", () => {
       }
       expect(nine.depends_on.headroom.condition).toBe("service_started");
       // QA-9ROUTER-32: no pinned global name — compose derives the real
-      // volume name from the project (basename of the project directory).
+      // volume name from the project (basename of the project directory,
+      // lowercased per the Compose project-name normalization rules —
+      // checkouts like worktrees with uppercase dir names still match).
       expect(config.volumes["9router-data"].name).toBe(
-        `${path.basename(REPO_ROOT)}_9router-data`
+        `${path.basename(REPO_ROOT).toLowerCase()}_9router-data`
       );
     }
   );

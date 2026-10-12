@@ -529,7 +529,7 @@ Operator-facing auth/security variables, consolidated (each source file is cited
 | Variable | Required | Default | Security effect |
 |---|---|---|---|
 | `JWT_SECRET` | **Yes** (real deploy) | `change-me-to-a-long-random-secret` | Signs/verifies dashboard session JWT cookies; rotation invalidates all sessions. `src/lib/auth/dashboardSession.js` |
-| `INITIAL_PASSWORD` | **Yes** (real deploy) | `change-me` (in-box fallback `123456` only when the var is completely unset) | First-login dashboard password; enabled deployments disable the fallback. Rotation: set a new value. `src/app/api/auth/login/route.js` |
+| `INITIAL_PASSWORD` | **Yes** (real deploy) | `change-me-to-a-strong-password` (in-box fallback `123456` only when the var is completely unset) | First-login dashboard password; enabled deployments disable the fallback. Rotation: set a new value. `src/app/api/auth/login/route.js` |
 | `API_KEY_SECRET` | Recommended | `endpoint-proxy-api-key-secret` | HMAC secret for generated local API keys; rotation invalidates existing keys. `src/shared/utils/apiKey.js` |
 | `MACHINE_ID_SALT` | Recommended | `endpoint-proxy-salt` | Salt for stable machine-id hashing (CLI token `x-9r-cli-token`). `src/shared/utils/machineId.js` |
 | `REQUIRE_API_KEY` | Optional | `false` (stored setting default `true`) | API-key enforcement on the public LLM API — see the README env table. `src/lib/db/repos/settingsRepo.js` |

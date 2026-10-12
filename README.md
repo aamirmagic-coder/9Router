@@ -308,7 +308,7 @@ Verified in source AND live against a fresh instance (2026-09-17):
   `401 {"error":"Unauthorized"}` (confirmed live). The dashboard UI is never needed.
 - Passwords: with `INITIAL_PASSWORD` unset and no stored password, the built-in
   default is `123456` for a loopback session. `.env.example` ships
-  `INITIAL_PASSWORD=change-me`, which replaces that default — posting `123456` then
+  `INITIAL_PASSWORD=change-me-to-a-strong-password`, which replaces that default — posting `123456` then
   answers `401 {"error":"INITIAL_PASSWORD is set — the default password (123456) is
   disabled."}` (`src/app/api/auth/login/route.js:99-106`). Send your
   `INITIAL_PASSWORD` value instead.
@@ -330,7 +330,7 @@ PORT=20129 node cli/cli.js --skip-update --no-browser -t &
 curl -s -c cookies.txt -X POST http://localhost:20129/api/auth/login \
   -H "Content-Type: application/json" -d '{"password":"123456"}'
 # → 200 {"success":true,"mustChangePassword":false}   (INITIAL_PASSWORD unset —
-#    send that value instead when .env sets it, e.g. "change-me")
+#    send that value instead when .env sets it, e.g. "change-me-to-a-strong-password")
 
 # 3. Register a local Ollama provider — the one provider that needs no credential
 curl -s -b cookies.txt -X POST http://localhost:20129/api/providers \
@@ -1879,7 +1879,7 @@ The list is synced from the provider registry (`open-sse/providers/registry/curs
 **First login not working**
 
 - Check `INITIAL_PASSWORD` in `.env`. If it is set (the `.env.example` default is
-  `change-me`), that value is the password — not the built-in fallback.
+  `change-me-to-a-strong-password`), that value is the password — not the built-in fallback.
 - Only when `INITIAL_PASSWORD` is completely unset does the built-in fallback
   `123456` apply (loopback sessions only). See "Headless / Docker first login"
   above for why a copied `.env.example` rejects `123456`.

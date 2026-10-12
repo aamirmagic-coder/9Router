@@ -1520,3 +1520,11 @@ tasks:
   status: complete
   created_at: '2026-10-08T02:27:28.636683+00:00'
   completed_at: '2026-10-08T02:39:00.771938+00:00'
+- id: DF-9ROUTER-53
+  title: Fresh-install default password mismatch
+  criteria:
+  - Verify .env.example documents INITIAL_PASSWORD correctly and source fallback matches;
+    ensure fresh installs use documented password, not hardcoded fallback
+  status: complete
+  created_at: '2026-10-12T01:39:57.202781+00:00'
+  completed_at: '2026-10-12T01:55:22.319879+00:00'

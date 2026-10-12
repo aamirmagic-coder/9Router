@@ -8,7 +8,7 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getProviderConnections } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -27,6 +27,64 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { isOpenAICompatibleProvider } from "@/shared/constants/providers.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
+
+// DF-9ROUTER-54 — a fresh install advertises only the models that work with no
+// stored connection (buildModelsList in src/app/api/v1/models/route.js filters
+// the catalog to providers that need no credentials), yet a chat request naming
+// any other provider answered a bare 404 "No active credentials for provider: X"
+// with nothing pointing at that catalog. The 404 is exactly the moment the
+// pointer is worth most, so the message carries it — plus, when the DB is
+// readable, the providers that DO have a connection, which separates "nothing is
+// configured on this instance" from "this one provider is not".
+//
+// The prefix is unchanged ("No active credentials for provider: X") so existing
+// clients and log greps keep matching; only guidance is appended.
+const MAX_NO_CREDENTIALS_MESSAGE_CHARS = 200;
+const NO_CREDENTIALS_DISCOVERY = " See /v1/models for models usable without credentials.";
+const MAX_NAMED_CONFIGURED_PROVIDERS = 5;
+
+/**
+ * Compose the 404 body for a provider with no usable stored connection.
+ * Pure — `configuredProviders` is the caller's best-effort lookup (null when it
+ * failed, so the guidance is never lost to a DB hiccup).
+ * Budget: the discovery pointer is mandatory, the provider list is optional and
+ * is dropped rather than letting the message reach
+ * MAX_NO_CREDENTIALS_MESSAGE_CHARS.
+ * @param {string} provider - provider id/alias as routed
+ * @param {string[]|null} [configuredProviders] - providers with a stored connection
+ * @returns {string} OpenAI-compatible error message
+ */
+export function noCredentialsMessage(provider, configuredProviders = null) {
+  const base = `No active credentials for provider: ${provider}.`;
+  const discovery = `${base}${NO_CREDENTIALS_DISCOVERY}`;
+  const names = (Array.isArray(configuredProviders) ? configuredProviders : [])
+    .filter((name) => typeof name === "string" && name.length > 0);
+  if (names.length === 0) return discovery;
+
+  const shown = names.slice(0, MAX_NAMED_CONFIGURED_PROVIDERS);
+  const ellipsis = names.length > shown.length ? ", …" : "";
+  const withList = `${base} Active connections exist for: ${shown.join(", ")}${ellipsis}.${NO_CREDENTIALS_DISCOVERY}`;
+  return withList.length < MAX_NO_CREDENTIALS_MESSAGE_CHARS ? withList : discovery;
+}
+
+/**
+ * Best-effort list of providers that currently have a stored (active)
+ * connection. Returns null when the lookup fails — the 404 guidance must not
+ * depend on a second DB read succeeding in the error path.
+ */
+async function configuredProviderIds() {
+  try {
+    const connections = await getProviderConnections();
+    const ids = [];
+    for (const connection of connections || []) {
+      if (!connection?.provider || connection.isActive === false) continue;
+      if (!ids.includes(connection.provider)) ids.push(connection.provider);
+    }
+    return ids;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Handle chat completion request
@@ -256,8 +314,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman, lastHeaders);
       }
       if (excludeConnectionIds.size === 0) {
-        log.warn("AUTH", `No active credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
+        // Nothing has been tried-and-excluded, so this is not "all accounts
+        // exhausted" — the provider has no usable stored connection on this
+        // instance. Say so with a pointer at the model discovery surface
+        // (and the providers that ARE configured) instead of a dead end.
+        const message = noCredentialsMessage(provider, await configuredProviderIds());
+        log.warn("AUTH", message);
+        return errorResponse(HTTP_STATUS.NOT_FOUND, message);
       }
       log.warn("CHAT", "No more accounts available", { provider });
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable", lastHeaders);

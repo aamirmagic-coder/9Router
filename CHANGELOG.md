@@ -1,5 +1,21 @@
 # Unreleased
 
+- fix(ux): point fresh-install chat 404s at the model discovery surface
+  (DF-9ROUTER-54). A zero-connection install advertises only the models that
+  work without credentials on `GET /v1/models`, but a chat request naming any
+  other provider answered a bare `404 "No active credentials for provider: X"`
+  with nothing pointing at that catalog — a fresh user had no way to discover
+  what was actually callable. The message keeps its legacy prefix (existing
+  clients and log greps still match) and appends
+  ` See /v1/models for models usable without credentials.`, plus — when the
+  connection store is readable — the providers that already have a connection
+  (`Active connections exist for: …`, capped at five), which separates "nothing
+  is configured on this instance" from "this provider is not". Error-path only:
+  no routing or credential lookup is touched, the wire contract is unchanged
+  (`404` / `model_not_found`, no cooldown written), the message is budgeted
+  under 200 characters (the provider list is dropped rather than exceed it), and
+  a failed inventory read degrades to the static guidance.
+
 - fix(docker): make the documented local-build docker path fast and servable
   (QA-9ROUTER-33). Two fixes: (1) `.dockerignore` gained `**/node_modules`,
   `**/.next-cli-build`, `.vfs`, `dagger.db*`, `.git`, `.coding-hermes`,

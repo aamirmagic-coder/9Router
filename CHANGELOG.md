@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Capabilities**: advertise PDF input for current Claude models in the built-in catalog, including exact IDs, family aliases, and Claude-backed combos (#4670)
+
 # v0.5.99 (2026-10-08)
 
 ## Features

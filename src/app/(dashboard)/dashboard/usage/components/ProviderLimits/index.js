@@ -537,8 +537,9 @@ export default function ProviderLimits() {
 
     try {
       const visibleConnections = await fetchConnections(page);
+      const toFetch = visibleConnections.filter(shouldFetch);
 
-      setLoading(buildLoadingState(visibleConnections));
+      setLoading(buildLoadingState(toFetch));
       setErrors((prev) =>
         filterQuotaStateByConnections(prev, visibleConnections),
       );
@@ -547,9 +548,7 @@ export default function ProviderLimits() {
       );
 
       await Promise.all(
-        visibleConnections
-          .filter(shouldFetch)
-          .map((conn) => fetchQuota(conn.id, conn.provider)),
+        toFetch.map((conn) => fetchQuota(conn.id, conn.provider)),
       );
 
       setLastUpdated(new Date());

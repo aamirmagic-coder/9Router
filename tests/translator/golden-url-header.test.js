@@ -50,6 +50,14 @@ function sanitize(headers) {
       out[k] = "<MAVIS-SESSION>";
       continue;
     }
+    // X-Mavis-Timezone-Offset embeds new Date().getTimezoneOffset()*-60
+    // (open-sse/executors/default.js minimaxHeaders) — host-local timezone,
+    // not contract. Same rationale as X-Msh-* above: a raw snapshot passes
+    // only on the timezone that captured it (broke under TZ=Asia/Shanghai).
+    if (typeof v === "string" && k === "X-Mavis-Timezone-Offset") {
+      out[k] = "<TZ>";
+      continue;
+    }
     out[k] = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")

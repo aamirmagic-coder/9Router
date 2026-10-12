@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Providers**: delete a provider node's custom models in the same transaction so deleted compatible providers do not leave unusable model picker groups (#4726)
+
 # v0.5.99 (2026-10-08)
 
 ## Features

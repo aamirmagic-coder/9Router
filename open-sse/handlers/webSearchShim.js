@@ -215,10 +215,18 @@ export async function maybeHandleWebSearch({ body, sourceFormat, model, log } = 
 
     log?.info?.("WEBSEARCH", `served via ${searched?.provider || "none"} | ${searched?.results?.length || 0} results`);
 
-    if (body.stream === true) {
-      return new Response(buildSseBody({ blocks, model }), { status: 200, headers: RESPONSE_HEADERS });
-    }
-    return Response.json(buildMessage({ blocks, model }), { status: 200 });
+    const response = body.stream === true
+      ? new Response(buildSseBody({ blocks, model }), { status: 200, headers: RESPONSE_HEADERS })
+      : Response.json(buildMessage({ blocks, model }), { status: 200 });
+
+    // MUST be the {success, response} envelope: handleChatCore callers gate on it.
+    //   src/sse/handlers/chat.js:325          if (result.success) return result.response;
+    //   open-sse/handlers/responsesHandler.js if (!result.success || !result.response) return result;
+    // A bare Response reads as `success === undefined`, so the account-rotation loop treats
+    // this turn as a FAILED account, marks it unavailable and rotates to the next one, calling
+    // back into handleChatCore and re-entering this shim. With ~192 pooled accounts that is
+    // unbounded — observed 192 shim executions from a single probe, and the client never got a reply.
+    return { success: true, response };
   } catch (err) {
     log?.error?.("WEBSEARCH", `shim failed, deferring to upstream: ${err?.message || err}`);
     return null;

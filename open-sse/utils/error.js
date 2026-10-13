@@ -4,19 +4,20 @@ import { ERROR_TYPES, DEFAULT_ERROR_MESSAGES } from "../config/errorConfig.js";
  * Build OpenAI-compatible error response body
  * @param {number} statusCode - HTTP status code
  * @param {string} message - Error message
+ * @param {{type: string, code: string}} [errorInfo] - Client-facing type/code override
  * @returns {object} Error response object
  */
-export function buildErrorBody(statusCode, message) {
-  const errorInfo = ERROR_TYPES[statusCode] || 
-    (statusCode >= 500 
+export function buildErrorBody(statusCode, message, errorInfo = null) {
+  const info = errorInfo || ERROR_TYPES[statusCode] ||
+    (statusCode >= 500
       ? { type: "server_error", code: "internal_server_error" }
       : { type: "invalid_request_error", code: "" });
 
   return {
     error: {
       message: message || DEFAULT_ERROR_MESSAGES[statusCode] || "An error occurred",
-      type: errorInfo.type,
-      code: errorInfo.code
+      type: info.type,
+      code: info.code
     }
   };
 }
@@ -25,10 +26,12 @@ export function buildErrorBody(statusCode, message) {
  * Create error Response object (for non-streaming)
  * @param {number} statusCode - HTTP status code
  * @param {string} message - Error message
+ * @param {object} [extraHeaders] - Additional response headers
+ * @param {{type: string, code: string}} [errorInfo] - Client-facing type/code override
  * @returns {Response} HTTP Response object
  */
-export function errorResponse(statusCode, message, extraHeaders = null) {
-  return new Response(JSON.stringify(buildErrorBody(statusCode, message)), {
+export function errorResponse(statusCode, message, extraHeaders = null, errorInfo = null) {
+  return new Response(JSON.stringify(buildErrorBody(statusCode, message, errorInfo)), {
     status: statusCode,
     headers: {
       "Content-Type": "application/json",
@@ -94,15 +97,17 @@ export async function parseUpstreamError(response, executor = null) {
  * @param {number} statusCode - HTTP status code
  * @param {string} message - Error message
  * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
+ * @param {object} [extraHeaders] - Additional response headers
+ * @param {{type: string, code: string}} [errorInfo] - Client-facing type/code override
  * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null) {
+export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null, errorInfo = null) {
   return {
     success: false,
     status: statusCode,
     error: message,
     resetsAtMs,
-    response: errorResponse(statusCode, message, extraHeaders)
+    response: errorResponse(statusCode, message, extraHeaders, errorInfo)
   };
 }
 

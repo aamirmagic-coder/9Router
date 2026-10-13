@@ -19,7 +19,8 @@ import { CommandCodeExecutor } from "../../open-sse/executors/commandcode.js";
 import { commandCodeToOpenAIResponse } from "../../open-sse/translator/response/commandcode-to-openai.js";
 import { openaiToCommandCodeRequest } from "../../open-sse/translator/request/openai-to-commandcode.js";
 import { toOpenAIUsage } from "../../open-sse/translator/concerns/usage.js";
-import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
+import { checkFallbackError, modelLevelError } from "../../open-sse/services/accountFallback.js";
+import { createErrorResult } from "../../open-sse/utils/error.js";
 import { PROVIDERS } from "../../open-sse/config/providers.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
 
@@ -130,6 +131,25 @@ describe("CommandCodeExecutor surfaces", () => {
     await expect(result.response.text()).resolves.toContain("hello");
   });
 
+  it("keeps the provider-surface region verdict instead of replaying it on the gated lane", async () => {
+    const executor = new CommandCodeExecutor();
+    mocks.proxyAwareFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: REGION_MESSAGE } }), { status: 403 })
+    );
+
+    const result = await executor.execute(executeArgs());
+
+    // The CLI lane region-gates callers by design, so the replay answers with its
+    // own copy of the same verdict and hides which surface actually denied it.
+    expect(mocks.proxyAwareFetch).toHaveBeenCalledTimes(1);
+    expect(result.url).toBe("https://api.commandcode.ai/provider/v1/chat/completions");
+    expect(result.response.status).toBe(403);
+    // Classifying the body must not consume it: the router reports it onward.
+    await expect(result.response.json()).resolves.toMatchObject({
+      error: { message: REGION_MESSAGE },
+    });
+  });
+
   it("surfaces a provider-surface 400 without replaying it on the CLI surface", async () => {
     const executor = new CommandCodeExecutor();
     mocks.proxyAwareFetch.mockResolvedValue(
@@ -176,6 +196,22 @@ describe("Command Code region 403 classification", () => {
   it("still falls back for an ordinary 403 and backs off for 429", () => {
     expect(checkFallbackError(403, "permission denied").shouldFallback).toBe(true);
     expect(checkFallbackError(429, "slow down").shouldFallback).toBe(true);
+  });
+
+  it("reports a region verdict to the client as a model error, not an exhausted quota", async () => {
+    // `insufficient_quota` here makes an OpenAI-compatible client treat the answer
+    // as a usage limit: it parks the credential for a whole quota window, or aborts
+    // the turn when the window exceeds its delay cap, over a model it cannot call.
+    const { response } = createErrorResult(403, REGION_MESSAGE, undefined, null, modelLevelError(403, REGION_MESSAGE));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { type: "permission_error", code: "model_not_available" },
+    });
+  });
+
+  it("does not flag an ordinary 403 as a model verdict", () => {
+    expect(modelLevelError(403, "permission denied")).toBeNull();
   });
 });
 

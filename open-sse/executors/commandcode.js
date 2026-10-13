@@ -5,6 +5,7 @@ import { FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { FORMATS } from "../translator/formats.js";
 import { openaiToCommandCodeRequest } from "../translator/request/openai-to-commandcode.js";
 import { commandCodeToOpenAIResponse } from "../translator/response/commandcode-to-openai.js";
+import { modelLevelError } from "../services/accountFallback.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { SSE_DONE } from "../utils/sseConstants.js";
 
@@ -116,10 +117,16 @@ export class CommandCodeExecutor extends BaseExecutor {
 
       if (!result.response.ok) {
         // Provider surface denied (no Provider API access, or a CLI-only id):
-        // replay the same turn against the CLI endpoint before giving up.
+        // replay the same turn against the CLI endpoint before giving up — unless
+        // the body already states a serving restriction on the model. The CLI
+        // surface is the region-gated one (see the class comment), so replaying a
+        // geographic verdict there only swaps the truthful answer for the gated
+        // lane's copy of it, and pays for a second upstream call to do so.
         if (result.response.status === 403 || result.response.status === 404) {
-          const fallback = await this.executeCliFallback({ ...args, credentials });
-          if (fallback) return fallback;
+          if (!(await statesModelLevelVerdict(result.response))) {
+            const fallback = await this.executeCliFallback({ ...args, credentials });
+            if (fallback) return fallback;
+          }
         }
         return result;
       }
@@ -204,6 +211,27 @@ export class CommandCodeExecutor extends BaseExecutor {
       status,
       message: msg || `CommandCode upstream error: ${response.status}`,
     };
+  }
+}
+
+/**
+ * True when a rejected response states a serving restriction on the model
+ * (geography, policy) rather than a denial of the surface itself. Read from a
+ * clone: the caller still needs the body to report the upstream message.
+ */
+async function statesModelLevelVerdict(response) {
+  try {
+    const text = await response.clone().text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      message = parsed?.error?.message || parsed?.message || text;
+    } catch {
+      /* not JSON: match the raw body text */
+    }
+    return modelLevelError(response.status, message) !== null;
+  } catch {
+    return false;
   }
 }
 

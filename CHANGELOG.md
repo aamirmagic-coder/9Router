@@ -5,6 +5,8 @@
 - **Command Code**: a geographic/serving rejection no longer locks the connection or rotates accounts (new `noFallback` error rule) — the upstream message reaches the caller instead of a 503 `reset after 2m`
 - **Command Code**: derive the CLI envelope `threadId` (and `x-session-id`) as a stable UUID from the client session, so one conversation keeps one wire thread and upstream no longer answers 400 `Invalid UUID at threadId`
 - **Command Code**: sync the model catalog with the public `/provider/v1/models` list (Muse Spark contributor entries) and accept any id the account has
+- **Command Code**: report a geographic/serving rejection as a model-level `permission_error`/`model_not_available` instead of the generic 403 `insufficient_quota`, and drop the upstream retry hint with it — a client that reads it as a quota state parked the credential for a whole usage window (or aborted the turn) over a model it cannot call
+- **Command Code**: keep the region-gated CLI lane out of the 403/404 replay when the provider surface already states a serving verdict
 - **Command Code**: report cache read/write tokens from `inputTokenDetails` in usage accounting, and surface hidden reasoning as content when a turn ends with no visible text
 - **Command Code**: floor a caller-supplied output budget for `muse-spark` models so a small `max_tokens` cannot be consumed entirely by hidden reasoning
 - **Providers validate**: probe the Command Code provider surface with the same OpenAI body generation uses

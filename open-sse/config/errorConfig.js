@@ -57,7 +57,16 @@ const COOLDOWN = {
  *   - backoff: true = use exponential backoff (rate limit)
  *   - noFallback: true = account-scoped statuses skip rotation for this failure
  *     (a model-level verdict the credential cannot fix)
+ *   - modelLevel: true = serving restriction on the model itself. The client-facing
+ *     error is MODEL_LEVEL_ERROR and the upstream's retry hint is dropped with it.
  */
+
+// Client-facing error for a serving restriction (`modelLevel` rules below). Not
+// quota/rate-limit vocabulary on purpose: a client that reads `insufficient_quota`
+// here parks the credential for a whole usage window — or aborts the turn outright —
+// over a model this caller will never be served.
+export const MODEL_LEVEL_ERROR = { type: "permission_error", code: "model_not_available" };
+
 export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
   { provider: "codex", text: "model is not supported when using codex with a chatgpt account", cooldownMs: MAX_RATE_LIMIT_COOLDOWN_MS },
@@ -73,8 +82,8 @@ export const ERROR_RULES = [
   // and account are fine, this model is not served to this caller here. Locking
   // the connection for a cooldown turns a real answer into a bogus 503
   // "reset after 2m", and retrying cannot change a geographic verdict.
-  { text: "geographic use policy",     noFallback: true },
-  { text: "not available in your region", noFallback: true },
+  { text: "geographic use policy",     noFallback: true, modelLevel: true },
+  { text: "not available in your region", noFallback: true, modelLevel: true },
 
   // --- Status-based rules (fallback when text doesn't match) ---
   { status: 401, cooldownMs: COOLDOWN.long },

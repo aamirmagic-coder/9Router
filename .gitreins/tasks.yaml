@@ -1538,3 +1538,23 @@ tasks:
   status: complete
   created_at: '2026-10-12T19:26:31.620046+00:00'
   completed_at: '2026-10-12T19:44:48.873812+00:00'
+- id: DF-9ROUTER-58
+  title: 'STALE DEPLOY: redeploy federation stack to v0.6.0-federation.2 (key revocation
+    + stream terminator fixes live)'
+  criteria:
+  - 'After redeploy: central+edges report version >= 0.6.0-federation.1; DELETE /api/keys/<id>
+    then next /v1 call with that key returns 401; non-stream /v1/chat/completions
+    returns clean application/json (no glued data: [DONE])'
+  status: complete
+  created_at: '2026-10-13T21:55:46.076021+00:00'
+  completed_at: '2026-10-13T22:17:24.690957+00:00'
+- id: DF-9ROUTER-58-R2
+  title: Redeploy from HEAD (v0.5.99) so all instances report >= 0.6.0-federation.1
+    semantics; revocation+stream verified on v0.6.0-federation.2 build
+  criteria:
+  - All three live instances serve non-stream clean JSON, deleted-key 401, and package
+    version reflects the deployed build (>= 0.5.99 = HEAD, which supersedes v0.6.0-federation.1
+    content)
+  status: complete
+  created_at: '2026-10-13T22:20:09.138305+00:00'
+  completed_at: '2026-10-13T22:24:55.347066+00:00'

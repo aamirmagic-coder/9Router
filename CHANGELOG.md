@@ -1,3 +1,14 @@
+# Unreleased
+
+## Fixes
+- **Command Code**: generate on the Provider API surface (`/provider/v1/chat/completions`) instead of the CLI-only `/alpha/generate`, which version- and region-gates external callers; the CLI endpoint stays as the 403/404 fallback with the full CLI header set, and the default `x-command-code-version` tracks the published CLI build
+- **Command Code**: a geographic/serving rejection no longer locks the connection or rotates accounts (new `noFallback` error rule) — the upstream message reaches the caller instead of a 503 `reset after 2m`
+- **Command Code**: derive the CLI envelope `threadId` (and `x-session-id`) as a stable UUID from the client session, so one conversation keeps one wire thread and upstream no longer answers 400 `Invalid UUID at threadId`
+- **Command Code**: sync the model catalog with the public `/provider/v1/models` list (Muse Spark contributor entries) and accept any id the account has
+- **Command Code**: report cache read/write tokens from `inputTokenDetails` in usage accounting, and surface hidden reasoning as content when a turn ends with no visible text
+- **Command Code**: floor a caller-supplied output budget for `muse-spark` models so a small `max_tokens` cannot be consumed entirely by hidden reasoning
+- **Providers validate**: probe the Command Code provider surface with the same OpenAI body generation uses
+
 # v0.5.99 (2026-10-08)
 
 ## Features

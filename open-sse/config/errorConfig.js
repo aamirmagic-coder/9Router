@@ -50,11 +50,13 @@ const COOLDOWN = {
 /**
  * Unified error classification rules.
  * Checked top-to-bottom: text rules first (by order), then status rules.
- * Each rule: { text?, status?, cooldownMs?, backoff? }
+ * Each rule: { text?, status?, cooldownMs?, backoff?, noFallback? }
  *   - text: substring match (case-insensitive) on error message
  *   - status: HTTP status code match
  *   - cooldownMs: fixed cooldown duration
  *   - backoff: true = use exponential backoff (rate limit)
+ *   - noFallback: true = account-scoped statuses skip rotation for this failure
+ *     (a model-level verdict the credential cannot fix)
  */
 export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
@@ -67,6 +69,12 @@ export const ERROR_RULES = [
   { text: "quota exceeded",           backoff: true },
   { text: "capacity",                 backoff: true },
   { text: "overloaded",               backoff: true },
+  // Model-level serving restriction (e.g. Meta's Geographic Use Policy): the key
+  // and account are fine, this model is not served to this caller here. Locking
+  // the connection for a cooldown turns a real answer into a bogus 503
+  // "reset after 2m", and retrying cannot change a geographic verdict.
+  { text: "geographic use policy",     noFallback: true },
+  { text: "not available in your region", noFallback: true },
 
   // --- Status-based rules (fallback when text doesn't match) ---
   { status: 401, cooldownMs: COOLDOWN.long },

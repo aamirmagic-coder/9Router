@@ -39,7 +39,10 @@ export const UNSUPPORTED_SCHEMA_CONSTRAINTS = [
   "errorMessage", "errorMessages", "x-errorMessage", "x-errorMessages",
   "markdownDescription", "x-intellij-html-description",
   "x-taplo-info", "x-taplo", "doNotSuggest", "suggestSortText",
-  "minProperties", "maxProperties"
+  "minProperties", "maxProperties",
+  // Codex connector tools annotate sensitive arguments with this extension.
+  // It is metadata, not a field supported by Gemini's Schema proto.
+  "encrypted"
 ];
 
 // Default safety settings
@@ -162,7 +165,13 @@ function removeUnsupportedKeywords(obj, keywords) {
 
     const value = obj[key];
     if (value && typeof value === "object") {
-      removeUnsupportedKeywords(value, keywords);
+      // A properties map contains parameter names, not schema keywords. Keep
+      // names like encrypted, readOnly or x-token while cleaning their schemas.
+      if (key === "properties") {
+        for (const schema of Object.values(value)) removeUnsupportedKeywords(schema, keywords);
+      } else {
+        removeUnsupportedKeywords(value, keywords);
+      }
     }
   }
 }

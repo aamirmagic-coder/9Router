@@ -4,6 +4,13 @@ import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { getRelayedClientApiKey } from "@/lib/federation/clientAuth.js";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
+import { buildErrorBody } from "open-sse/utils/error.js";
+import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
+
+// DF-9ROUTER-56 — the /v1-style 401 message. Kept verbatim so clients and log
+// greps matching the old text keep working; only the ENVELOPE changed (bare
+// string → OpenAI error object with type/code).
+const API_KEY_REQUIRED_MESSAGE = "API key required for remote API access";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -242,7 +249,12 @@ export async function proxy(request) {
 
   if (isPublicLlmApi(pathname)) {
     if (await canAccessPublicLlmApi(request)) return NextResponse.next();
-    return NextResponse.json({ error: "API key required for remote API access" }, { status: 401 });
+    // DF-9ROUTER-56 — OpenAI-compatible clients read error.type / error.code;
+    // a bare string error leaves both undefined. Same 401, same message, but
+    // shaped by the shared OpenAI error builder (buildErrorBody(401) →
+    // authentication_error / invalid_api_key). Dashboard /api/* 401s keep
+    // their dashboard shape — only /v1-style surfaces are OpenAI clients.
+    return NextResponse.json(buildErrorBody(HTTP_STATUS.UNAUTHORIZED, API_KEY_REQUIRED_MESSAGE), { status: 401 });
   }
 
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.

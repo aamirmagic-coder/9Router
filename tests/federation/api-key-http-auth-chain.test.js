@@ -40,7 +40,13 @@ const THIS_FILE = fileURLToPath(new URL(import.meta.url));
 
 // The guard's own 401 body for a remote request without a usable key
 // (src/dashboardGuard.js, canAccessPublicLlmApi → proxy's isPublicLlmApi branch).
-const KEY_REQUIRED_ERROR = "API key required for remote API access";
+// DF-9ROUTER-56: OpenAI envelope (type/code readable by OpenAI SDK clients),
+// not the flat pre-56 string shape.
+const KEY_REQUIRED_ERROR = {
+  message: "API key required for remote API access",
+  type: "authentication_error",
+  code: "invalid_api_key",
+};
 
 // A peer that provably did NOT come from loopback: isLoopbackPeer() only trusts
 // x-9r-real-ip when the per-process peer secret proves custom-server.js stamped it,
@@ -202,7 +208,7 @@ describe("real dashboardGuard proxy() authenticating a created key at /v1", () =
   it("negative control A: the same request with no key → 401", async () => {
     const res = await guard.proxy(remoteV1Request("/v1/models"));
     expect(res.status).toBe(401);
-    expect((await res.json()).error).toBe(KEY_REQUIRED_ERROR);
+    expect((await res.json()).error).toEqual(KEY_REQUIRED_ERROR);
   });
 
   it("negative control B: a bogus key of the same shape → the same 401", async () => {
@@ -214,7 +220,7 @@ describe("real dashboardGuard proxy() authenticating a created key at /v1", () =
 
     const res = await guard.proxy(remoteV1Request("/v1/models", { authorization: `Bearer ${bogus}` }));
     expect(res.status).toBe(401);
-    expect((await res.json()).error).toBe(KEY_REQUIRED_ERROR);
+    expect((await res.json()).error).toEqual(KEY_REQUIRED_ERROR);
   });
 
   it("negative control C: deactivating the row flips the accepted request back to 401", async () => {
@@ -228,7 +234,7 @@ describe("real dashboardGuard proxy() authenticating a created key at /v1", () =
       remoteV1Request("/v1/models", { authorization: `Bearer ${createdKey}` })
     );
     expect(denied.status).toBe(401);
-    expect((await denied.json()).error).toBe(KEY_REQUIRED_ERROR);
+    expect((await denied.json()).error).toEqual(KEY_REQUIRED_ERROR);
 
     // Reactivating restores the pass-through — so the 401 above came from the row
     // state and nothing else in this file's ordering.
@@ -272,7 +278,7 @@ describe("real dashboardGuard proxy() authenticating a created key at /v1", () =
     );
     expect(revoked.status).toBe(401);
     expect(revoked.headers.get("x-middleware-next")).toBeNull();
-    expect((await revoked.json()).error).toBe(KEY_REQUIRED_ERROR);
+    expect((await revoked.json()).error).toEqual(KEY_REQUIRED_ERROR);
   });
 });
 
@@ -331,7 +337,7 @@ describe("FED-GAP-13 revocation via the shipped routes", () => {
     );
     expect(revoked.status).toBe(401);
     expect(revoked.headers.get("x-middleware-next")).toBeNull();
-    expect((await revoked.json()).error).toBe(KEY_REQUIRED_ERROR);
+    expect((await revoked.json()).error).toEqual(KEY_REQUIRED_ERROR);
   });
 
   it("deleteApiKey (the fn that route delegates to) revokes: validate false, reads hide the row", async () => {
@@ -346,7 +352,7 @@ describe("FED-GAP-13 revocation via the shipped routes", () => {
     );
     expect(revoked.status).toBe(401);
     expect(revoked.headers.get("x-middleware-next")).toBeNull();
-    expect((await revoked.json()).error).toBe(KEY_REQUIRED_ERROR);
+    expect((await revoked.json()).error).toEqual(KEY_REQUIRED_ERROR);
   });
 
   it("updateApiKey cannot write behind the tombstone", async () => {

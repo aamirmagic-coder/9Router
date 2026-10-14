@@ -117,8 +117,9 @@ request when **any** of the following holds:
    `REQUIRE_API_KEY` row in the README for the unset semantics).
 
 Otherwise a remote request with a missing or invalid key is rejected with
-`401 {"error":"API key required for remote API access"}` — the dashboard guard
-answers before the request reaches the endpoint handler.
+`401 {"error":{"message":"API key required for remote API access","type":"authentication_error","code":"invalid_api_key"}}`
+— the dashboard guard answers before the request reaches the endpoint handler,
+in the same OpenAI error envelope the handlers use (DF-9ROUTER-56).
 
 ### Endpoint handlers — the second check
 
@@ -138,7 +139,10 @@ Verified against a running instance (loopback, no key sent):
 | `false` (shipped `.env.example`) | loopback | `200` | `200` (runs) |
 | `false` | remote | `200` | `200` (runs) |
 | `true` (runtime default) | loopback | `200` | `401` `Missing API key` |
-| `true` | remote | `401` `API key required for remote API access` | `401` `API key required for remote API access` |
+| `true` | remote | `401` `authentication_error`/`invalid_api_key` | `401` `authentication_error`/`invalid_api_key` |
+
+Both 401s share the OpenAI error envelope — `{"error":{"message":…,"type":"authentication_error","code":"invalid_api_key"}}`
+— differing only in the message text.
 
 So `GET /v1/models` works with or without a key on loopback, while a completion
 call always needs one once `requireApiKey` is `true`:
@@ -256,11 +260,13 @@ All endpoints return OpenAI-compatible error bodies:
 }
 ```
 
-Two layers can answer before an endpoint does, and their bodies are flat (see
+Two layers can answer before an endpoint does (see
 [Authentication](#authentication)): the dashboard guard returns
-`{"error":"API key required for remote API access"}` for a keyless remote LLM
-request while `requireApiKey` is `true`, and `{"error":"Unauthorized"}` for an
-unauthenticated `/api/*` request.
+`{"error":{"message":"API key required for remote API access","type":"authentication_error","code":"invalid_api_key"}}`
+for a keyless remote LLM request while `requireApiKey` is `true`, and
+`{"error":"Unauthorized"}` for an unauthenticated `/api/*` request (the
+dashboard surface keeps its flat body; the OpenAI-style `/v1` surface uses the
+envelope above).
 
 | HTTP | type | code | Meaning |
 |---|---|---|---|
@@ -268,7 +274,7 @@ unauthenticated `/api/*` request.
 | `401` | `authentication_error` | `invalid_api_key` | Missing or invalid key |
 | `402` | `billing_error` | `payment_required` | Quota/payment issue |
 | `403` | `permission_error` | `insufficient_quota` | Quota exhausted |
-| `404` | `invalid_request_error` | `model_not_found` | Unknown model / no credentials |
+| `404` | `invalid_request_error` | `model_not_found` | Unknown model — when the id is in no catalog the message reads `Model 'X' not found in catalog`; ids the catalog lists but that have no usable connection keep the `No active credentials for provider: X` wording (DF-9ROUTER-56) |
 | `406` | `invalid_request_error` | `model_not_supported` | Model not supported by provider |
 | `429` | `rate_limit_error` | `rate_limit_exceeded` | Provider rate limit (transient) |
 | `5xx` | `server_error` | `internal_server_error` / `bad_gateway` / `service_unavailable` / `gateway_timeout` | Upstream or gateway failure |

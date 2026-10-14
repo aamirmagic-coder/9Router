@@ -1,5 +1,24 @@
 # Unreleased
 
+- fix(api): /v1/* error envelope drift — OpenAI shapes on both pre-handler 404/401
+  paths (DF-9ROUTER-56). Two paths answered shapes OpenAI SDK clients could not
+  read: (1) a remote `/v1` request with a missing/invalid key got the dashboard
+  guard's flat `{"error":"API key required for remote API access"}` while the
+  endpoint handlers answered `authentication_error`/`invalid_api_key` for the
+  SAME failure — same state, two shapes depending on entry path. The guard now
+  builds its 401 through the shared `buildErrorBody` (message text unchanged;
+  dashboard `/api/*` 401s keep their flat body). (2) A chat request naming a
+  model absent from every catalog the instance advertises answered
+  `404 "No active credentials for provider: openai"` — a guessed provider name
+  sending users hunting for a dead API key. When the routed provider has no
+  connection AND the id is provably absent from its static registry and custom
+  models, the message is now
+  `Model 'X' not found in catalog. See /v1/models for models usable without credentials.`
+  Unprovable cases (openai-compatible nodes whose catalog is upstream's,
+  live-resolver providers, DB read failures, ids the catalog DOES list) keep
+  the legacy credential wording — the fix only claims a miss it can prove.
+  Status codes, `type`/`code` pairs and cooldown behavior are unchanged.
+
 - fix(ux): point fresh-install chat 404s at the model discovery surface
   (DF-9ROUTER-54). A zero-connection install advertises only the models that
   work without credentials on `GET /v1/models`, but a chat request naming any

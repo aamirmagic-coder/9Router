@@ -77,7 +77,7 @@ describe("dashboard guard public LLM API access", () => {
     }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("allows loopback peer IP regardless of Host", async () => {
@@ -94,7 +94,7 @@ describe("dashboard guard public LLM API access", () => {
     const response = await proxy(request("/api/v1/chat/completions", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("allows loopback rewritten public LLM API without API key", async () => {
@@ -108,28 +108,28 @@ describe("dashboard guard public LLM API access", () => {
     const response = await proxy(request("/v1beta/models", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("rejects remote rewritten beta public LLM API without API key", async () => {
     const response = await proxy(request("/api/v1beta/models", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("rejects remote codex rewrite without API key", async () => {
     const response = await proxy(request("/codex/x", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("rejects remote /responses rewrite without API key", async () => {
     const response = await proxy(request("/responses", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("allows remote /responses rewrite with a valid API key", async () => {
@@ -249,7 +249,7 @@ describe("dashboard guard REQUIRE_API_KEY=false opt-out (QA-9ROUTER-5)", () => {
     const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("rejects remote keyless public LLM API when requireApiKey is absent (secure default)", async () => {
@@ -258,7 +258,7 @@ describe("dashboard guard REQUIRE_API_KEY=false opt-out (QA-9ROUTER-5)", () => {
     const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("fails closed when settings read returns null", async () => {
@@ -267,7 +267,7 @@ describe("dashboard guard REQUIRE_API_KEY=false opt-out (QA-9ROUTER-5)", () => {
     const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("fails closed when settings read throws", async () => {
@@ -276,7 +276,7 @@ describe("dashboard guard REQUIRE_API_KEY=false opt-out (QA-9ROUTER-5)", () => {
     const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
 
     expect(response.status).toBe(401);
-    expect(response.body.error).toBe("API key required for remote API access");
+    expect(response.body.error).toEqual({ message: "API key required for remote API access", type: "authentication_error", code: "invalid_api_key" });
   });
 
   it("allows remote public LLM API with valid CLI token even when requireApiKey=true", async () => {

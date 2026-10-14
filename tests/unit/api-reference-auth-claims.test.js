@@ -286,13 +286,19 @@ describe("api-reference auth claims match dashboardGuard", () => {
     mocks.getSettings.mockResolvedValue({ requireLogin: true, requireApiKey: true });
     const enforced = await proxy(remoteRequest("/v1/models"));
     expect(enforced.status).toBe(401);
-    expect(enforced.body.error).toBe("API key required for remote API access");
+    // DF-9ROUTER-56: OpenAI envelope, not the old bare-string error.
+    expect(enforced.body.error).toEqual({
+      message: "API key required for remote API access",
+      type: "authentication_error",
+      code: "invalid_api_key",
+    });
 
     // ...and the doc says exactly that.
     expect(AUTH_SECTION).toMatch(/loopback/i);
     expect(AUTH_SECTION).toMatch(/requireApiKey/);
     expect(AUTH_SECTION).toMatch(/reverse proxy/i);
     expect(AUTH_SECTION).toMatch(/API key required for remote API access/);
+    expect(AUTH_SECTION).toMatch(/authentication_error/);
   });
 
   it("documents the endpoint-handler layer the handlers implement", () => {

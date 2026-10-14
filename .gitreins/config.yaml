@@ -40,7 +40,7 @@ pipeline:
     # gitleaks (repo scanner, clean) is the authoritative check.
     - id: tier1
       parallel: true
-      on: [pre-commit, pre-eval]
+      'on': [pre-commit, pre-eval]
       steps:
         - id: secrets
           type: script
@@ -52,7 +52,7 @@ pipeline:
           timeout: 600
     - id: tier2
       type: ai_eval
-      on: [pre-eval]
+      'on': [pre-eval]
       condition: "true"
       max_iterations: -1
       tools: [read_file, run_command, search_pattern, read_diff, sandbox]

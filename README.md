@@ -150,6 +150,11 @@ PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 
 Restart the server after adding a provider connection — running config is loaded at boot.
 
+> Note (removing an install): stop the dev server first (`pkill next-server` or
+> Ctrl-C in its terminal) before deleting the directory. The `bunkerd destroy`
+> gate refuses to remove an install with live processes running and names them
+> in the error — this is intentional protection, not a failure.
+
 > ⚠️ In a copied or relocated tree `npm run dev` can fail before the server
 > starts, with Turbopack complaining `Symlink [project]/node_modules/... points
 > out of the filesystem root`. `package.json` already carries the escape hatch:

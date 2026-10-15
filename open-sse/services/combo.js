@@ -6,6 +6,7 @@ import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
+import { annotateComboResponse } from "./routeAttribution.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
@@ -307,7 +308,11 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Success (2xx) - return response
       if (result.ok) {
         log.info("COMBO", `Model ${modelStr} succeeded`);
-        return result;
+        return annotateComboResponse({
+          comboName: comboName || body?.model,
+          selectedModel: modelStr,
+          attemptedModels: rotatedModels.slice(0, i + 1),
+        }, result);
       }
 
       // Extract error info from response
@@ -336,7 +341,11 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
       if (!shouldFallback) {
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
-        return result;
+        return annotateComboResponse({
+          comboName: comboName || body?.model,
+          selectedModel: modelStr,
+          attemptedModels: rotatedModels.slice(0, i + 1),
+        }, result);
       }
 
       // For transient errors (503/502/504), wait for cooldown before falling through
@@ -371,14 +380,22 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   if (earliestRetryAfter) {
     const retryHuman = formatRetryAfter(earliestRetryAfter);
     log.warn("COMBO", `All models failed | ${msg} (${retryHuman})`);
-    return unavailableResponse(status, msg, earliestRetryAfter, retryHuman);
+    return annotateComboResponse({
+      comboName: comboName || body?.model,
+      selectedModel: "failed",
+      attemptedModels: rotatedModels,
+    }, unavailableResponse(status, msg, earliestRetryAfter, retryHuman));
   }
 
   log.warn("COMBO", `All models failed | ${msg}`);
-  return new Response(
+  return annotateComboResponse({
+    comboName: comboName || body?.model,
+    selectedModel: "failed",
+    attemptedModels: rotatedModels,
+  }, new Response(
     JSON.stringify({ error: { message: msg } }),
     { status, headers: { "Content-Type": "application/json" } }
-  );
+  ));
 }
 
 /**

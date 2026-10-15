@@ -182,13 +182,18 @@ export class AntigravityExecutor extends BaseExecutor {
       // Strip model name suffixes for the actual API model name
       const cleanModel = model.replace(/-(\d+)x(\d+)$/, "");
 
-      // Build simplified contents — text-only, merge all user messages
+      // Build contents — preserve text and inline image data for image generation/editing
       const contents = [];
       const srcContents = body.request?.contents || body.contents || [];
       for (const c of srcContents) {
-        const textParts = (c.parts || []).filter(p => p.text !== undefined).map(p => ({ text: p.text }));
-        if (textParts.length > 0) {
-          contents.push({ role: c.role || "user", parts: textParts });
+        const parts = (c.parts || [])
+          .filter(p => p.text !== undefined || p.inlineData !== undefined || p.inline_data !== undefined)
+          .map(p => {
+            const inline = p.inlineData || p.inline_data;
+            return inline ? { inlineData: inline } : { text: p.text };
+          });
+        if (parts.length > 0) {
+          contents.push({ role: c.role || "user", parts });
         }
       }
 

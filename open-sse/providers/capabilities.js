@@ -208,6 +208,13 @@ export const PROVIDER_CAPABILITIES = {
   // Overrides the global entry, whose z.ai shape is correct for z.ai itself.
   "opencode-go": {
     "glm-5.3-flash": { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 131072 },
+    // Claude Haiku 5.5 on OpenCode Go /messages: the upstream requires adaptive
+    // thinking and rejects the legacy shape with 400 "thinking.type.enabled is not
+    // supported for this model. Use thinking.type.adaptive and output_config.effort".
+    // The global *claude*haiku* pattern resolves to claude-budget, which is right for
+    // older Haiku builds and for every other provider, so override it here only —
+    // same provider-scoped isolation as glm-5.3-flash above.
+    "claude-haiku-5-5": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive" },
   },
   "codex": {
     "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },

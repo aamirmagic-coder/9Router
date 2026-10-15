@@ -69,6 +69,22 @@ const SAMPLE_ME = {
   Plan: "max",
 };
 
+// New pricing (2026-08-31): no `limits`; rolling totals instead.
+const SAMPLE_NEW_7D = {
+  range: "7d",
+  scope: "self",
+  granularity: "day",
+  totals: { request_count: 11645, usage_usd: 40.32, input_tokens: 1315264488, output_tokens: 11968444 },
+  buckets: [],
+};
+const SAMPLE_NEW_30D = {
+  range: "30d",
+  scope: "self",
+  granularity: "day",
+  totals: { request_count: 11826, usage_usd: 42.8, input_tokens: 1315364628, output_tokens: 11970000 },
+  buckets: [],
+};
+
 describe("ollama registry usage flags", () => {
   it("is listed for apikey quota dashboard", () => {
     expect(USAGE_SUPPORTED_PROVIDERS).toContain("ollama");
@@ -201,10 +217,11 @@ describe("getUsageForProvider(ollama)", () => {
     });
   });
 
-  it("reports no limits when no known window is present", async () => {
+  it("surfaces rolling spend when the new pricing reports no limits", async () => {
     proxyAwareFetch
-      .mockResolvedValueOnce(jsonResponse({ activity: {}, limits: {} }))
-      .mockResolvedValueOnce(jsonResponse({ Plan: "free" }));
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_NEW_7D))
+      .mockResolvedValueOnce(jsonResponse({ Plan: "pro", CreatedAt: "2026-02-01T09:13:23Z" }))
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_NEW_30D));
 
     const usage = await getUsageForProvider({
       provider: "ollama",
@@ -212,7 +229,61 @@ describe("getUsageForProvider(ollama)", () => {
       providerSpecificData: {},
     });
 
-    expect(usage.message).toMatch(/no usage limits/i);
+    expect(usage.message).toBeUndefined();
+    expect(usage.plan).toBe("Pro");
+    expect(Object.keys(usage.quotas)).toEqual(["Included usage (Pro · est.)", "Spent (7d)", "Spent (30d)"]);
+    // Pool row: rolling 30d spend against the plan's published $60 pool, with a
+    // familiar used/total bar. Marked "est." — see the code comment.
+    expect(usage.quotas["Included usage (Pro · est.)"]).toMatchObject({
+      used: 42.8,
+      total: 60,
+      remainingPercentage: 29,
+      unlimited: false,
+    });
+    expect(usage.quotas["Spent (7d)"]).toMatchObject({
+      total: 40.32,
+      requestCount: 11645,
+      isSpend: true,
+      currency: "USD",
+      resetAt: null,
+    });
+    // Spend must not masquerade as a quota percentage or a balance.
+    expect(usage.quotas["Spent (7d)"].remainingPercentage).toBeUndefined();
+    expect(usage.quotas["Spent (7d)"].isCreditBalance).toBeUndefined();
+    expect(usage.quotas["Spent (30d)"].total).toBe(42.8);
+    expect(proxyAwareFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a window that spent $0 but did serve requests", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(jsonResponse({ range: "7d", totals: { request_count: 42, usage_usd: 0 } }))
+      .mockResolvedValueOnce(jsonResponse({ Plan: "free" }))
+      .mockResolvedValueOnce(jsonResponse({ range: "30d", totals: { request_count: 42, usage_usd: 0 } }));
+
+    const usage = await getUsageForProvider({
+      provider: "ollama",
+      apiKey: "k",
+      providerSpecificData: {},
+    });
+
+    // A free window still shows activity; it must not vanish as "no usage".
+    expect(usage.message).toBeUndefined();
+    expect(usage.quotas["Spent (7d)"]).toMatchObject({ total: 0, requestCount: 42, isSpend: true });
+  });
+
+  it("reports no usage when the new pricing window has no spend yet", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(jsonResponse({ range: "7d", totals: { request_count: 0, usage_usd: 0 } }))
+      .mockResolvedValueOnce(jsonResponse({ Plan: "free" }))
+      .mockResolvedValueOnce(jsonResponse({ range: "30d", totals: { request_count: 0, usage_usd: 0 } }));
+
+    const usage = await getUsageForProvider({
+      provider: "ollama",
+      apiKey: "k",
+      providerSpecificData: {},
+    });
+
+    expect(usage.message).toMatch(/no usage reported/i);
     expect(usage.quotas).toEqual({});
   });
 
@@ -242,6 +313,17 @@ describe("getUsageForProvider(ollama)", () => {
 });
 
 describe("parseQuotaData(ollama)", () => {
+  it("forwards rolling spend rows without a percentage", () => {
+    const rows = parseQuotaData("ollama", {
+      plan: "Pro",
+      quotas: { "Spent (7d)": { used: 0, total: 40.32, requestCount: 11645, isSpend: true, currency: "USD", resetAt: null } },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: "Spent (7d)", total: 40.32, isSpend: true, requestCount: 11645, currency: "USD" });
+    expect(rows[0].remainingPercentage).toBeUndefined();
+  });
+
   it("forwards remainingPercentage for dashboard bars", () => {
     const rows = parseQuotaData("ollama", {
       plan: "Max",

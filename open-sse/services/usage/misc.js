@@ -56,10 +56,16 @@ function nextMonthlyResetFromSignup(createdAt, now = new Date()) {
 
 /**
  * Ollama Cloud Usage
- * GET https://ollama.com/api/usage — `limits.<window>.usage` is a 0..1 ratio
- *   (1.0 = limit reached). Paid plans report session (5h) + weekly (7d); the
- *   free plan reports a single monthly window. No reset timestamp exposed;
- *   the free monthly reset is derived from the account's signup date.
+ * GET https://ollama.com/api/usage — two shapes, depending on the account:
+ *   * legacy plans: `limits.<window>.usage` is a 0..1 ratio (1.0 = limit
+ *     reached); paid plans report session (5h) + weekly (7d), the free plan a
+ *     single monthly window. Kept as-is for accounts still on that pricing.
+ *   * new pricing (2026-08-31, /blog/transparent-pricing): the 5h/weekly windows
+ *     no longer exist and `limits` is absent. The body carries `totals` /
+ *     `buckets` for a rolling window (range=24h|7d|30d) with `usage_usd` (spend,
+ *     NOT a remaining balance), `request_count` and token counts. There is no
+ *     billing-period or plan-pool figure in the API, so spend is surfaced as
+ *     plain "Spent (…)" rows — never a quota percentage.
  * POST https://ollama.com/api/me — plan label + CreatedAt (fail-open).
  * Auth: Authorization: Bearer <apiKey>
  */
@@ -130,9 +136,28 @@ export async function getOllamaUsage(apiKey, providerSpecificData, proxyOptions 
     }
 
     if (Object.keys(quotas).length === 0) {
+      // New pricing: `limits` is gone. Rebuild the old "used / limit" bar from
+      // rolling spend and the plan's monthly credit pool (published on the
+      // pricing page — the API exposes no pool figure). The spend is a rolling
+      // 30d window, the closest available proxy for a billing month; only the
+      // free plan's reset date is derivable, so paid rows carry no resetAt.
+      const spend = await collectOllamaSpend(apiKey, data, proxyOptions);
+      const out = {};
+      const pool = OLLAMA_PLAN_POOL_USD[planRaw.toLowerCase()];
+      const spend30 = spend["Spent (30d)"]?.total;
+      if (pool && Number.isFinite(spend30)) {
+        // Named "est." on purpose: the pool comes from the pricing page, the
+        // spend window is rolling, and /api/me cannot tell legacy from new
+        // plans — only the Spent rows below are exact API figures.
+        out[`Included usage (${plan} · est.)`] = poolQuota(spend30, pool);
+      }
+      Object.assign(out, spend);
+
+      if (Object.keys(out).length > 0) return { plan, quotas: out };
+
       return {
         plan,
-        message: "Ollama Cloud connected. No usage limits reported.",
+        message: "Ollama Cloud connected. No usage reported for this period.",
         quotas: {},
       };
     }
@@ -141,6 +166,59 @@ export async function getOllamaUsage(apiKey, providerSpecificData, proxyOptions 
   } catch (error) {
     return { message: `Ollama Cloud error: ${error.message}` };
   }
+}
+
+// Monthly usage credits included with each plan (ollama.com/pricing). The API
+// reports the plan name but not the pool, so this mapping is the only source.
+const OLLAMA_PLAN_POOL_USD = { pro: 60, max: 300, team: 1000 };
+
+// Rolling spend windows shown when the account is on the new per-token pricing.
+const OLLAMA_SPEND_RANGES = ["7d", "30d"];
+
+// Spend vs plan pool as a familiar used/total quota: the bar and the percentage
+// are what QuotaTable already renders for absolute windows (e.g. Groq/Codex).
+function poolQuota(usedUsd, totalUsd, resetAt = null) {
+  const used = Math.round(usedUsd * 100) / 100;
+  const remainingPercentage = Math.max(
+    0,
+    Math.min(100, Math.round((1 - used / totalUsd) * 100)),
+  );
+  return { used, total: totalUsd, remainingPercentage, resetAt, unlimited: false };
+}
+
+function ollamaSpendQuota(totals) {
+  const usd = Number(totals?.usage_usd);
+  // Missing/negative → malformed payload, not a zero reading.
+  if (!Number.isFinite(usd) || usd < 0) return null;
+  const requests = Number(totals?.request_count) || 0;
+  // A window with neither spend nor requests carries no information.
+  if (usd === 0 && requests === 0) return null;
+  return {
+    // `used`/`total` are unused by the spend renderer, but keep them numeric so
+    // the shared sort helpers never see undefined.
+    used: 0,
+    total: usd,
+    requestCount: requests,
+    isSpend: true,
+    currency: "USD",
+    resetAt: null,
+  };
+}
+
+async function collectOllamaSpend(apiKey, firstResponseData, proxyOptions) {
+  const spend = {};
+  for (const range of OLLAMA_SPEND_RANGES) {
+    // The first /api/usage call already carries the default range's totals.
+    const totals = firstResponseData?.range === range
+      ? firstResponseData?.totals
+      : await proxyAwareFetch(`https://ollama.com/api/usage?range=${range}`, {
+          headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+        }, proxyOptions).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((j) => j?.totals);
+
+    const quota = ollamaSpendQuota(totals);
+    if (quota) spend[`Spent (${range})`] = quota;
+  }
+  return spend;
 }
 
 

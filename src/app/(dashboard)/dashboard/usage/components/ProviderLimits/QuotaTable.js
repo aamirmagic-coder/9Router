@@ -152,6 +152,12 @@ export default function QuotaTable({
         {currentPageRows.map((quota) => {
           const isUnlimited = quota.unlimited === true;
           const isCreditBalance = quota.isCreditBalance === true;
+          // Spend rows (Ollama new pricing): money already spent in a rolling
+          // window. Not a balance and not a quota — no bar, no percentage.
+          const isSpend = quota.isSpend === true;
+          const spendAmount = (Number(quota.total) || 0).toFixed(2);
+          const spendCurrency = quota.currency || "USD";
+          const spendRequests = Number(quota.requestCount) || 0;
           const colors = isCreditBalance
             ? { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500", bgLight: "bg-blue-500/10", emoji: "💰" }
             : getColorClasses(quota.remaining);
@@ -209,7 +215,7 @@ export default function QuotaTable({
 
               {/* Progress + used/total */}
               <div className={`min-w-0 flex-1 ${compact ? "space-y-1" : "space-y-1.5"}`}>
-                {!isUnlimited && !isCreditBalance && (
+                {!isUnlimited && !isCreditBalance && !isSpend && (
                 <div className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden border ${colors.bgLight} ${
                   quota.remaining === 0 ? "border-black/10 dark:border-white/10" : "border-transparent"
                 }`}>
@@ -224,14 +230,18 @@ export default function QuotaTable({
                   <span
                     className="text-text-muted truncate"
                     title={
-                      isUnlimited
+                      isSpend
+                        ? `${spendAmount} ${spendCurrency} spent · ${spendRequests.toLocaleString()} requests`
+                        : isUnlimited
                         ? `${quota.used.toLocaleString()} used · Unlimited`
                         : isCreditBalance
                         ? `Credit balance: ${quota.total.toFixed(2)} ${quota.currency || ""}`
                         : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
                     }
                   >
-                    {isUnlimited
+                    {isSpend
+                      ? `${spendAmount} ${spendCurrency} · ${spendRequests.toLocaleString()} req`
+                      : isUnlimited
                       ? `${quota.used.toLocaleString()} used · Unlimited`
                       : isCreditBalance
                       ? `Credit: ${quota.total.toFixed(2)} ${quota.currency || ""}`
@@ -239,8 +249,8 @@ export default function QuotaTable({
                           quota.unit ? ` ${quota.unit}` : ""
                         }`}
                   </span>
-                  <span className={`font-medium ${isUnlimited ? "text-green-600 dark:text-green-400" : isCreditBalance ? "text-blue-600 dark:text-blue-400" : colors.text} shrink-0`}>
-                    {isUnlimited ? "Unlimited" : isCreditBalance ? "" : `${quota.remaining}%`}
+                  <span className={`font-medium ${isSpend ? "text-text-muted" : isUnlimited ? "text-green-600 dark:text-green-400" : isCreditBalance ? "text-blue-600 dark:text-blue-400" : colors.text} shrink-0`}>
+                    {isSpend ? "" : isUnlimited ? "Unlimited" : isCreditBalance ? "" : `${quota.remaining}%`}
                   </span>
                 </div>
               </div>

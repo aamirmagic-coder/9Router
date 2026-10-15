@@ -8,6 +8,17 @@ import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 const STRIP_RULES = [
   // All Claude models: temperature deprecated/rejected upstream (Anthropic 400). #1748
   { match: /claude/i, drop: ["temperature"] },
+  // OpenCode Go's Claude lane (/messages) is a strict Anthropic proxy. context_management
+  // is SUPPORTED there as long as its beta flag travels with the body (probed: 400 without
+  // the flag, 200 + applied_edits with it) — default.js now forwards the client's
+  // anthropic-beta for this lane, so that field must NOT be stripped.
+  // output_config.task_budget is different: the upstream rejects it even with its own
+  // task-budgets-2026-03-13 flag (probed: 400 "Extra inputs are not permitted"), so it has
+  // to go. output_config.effort stays — the upstream needs it.
+  // Scoped to models whose id contains "claude" — the same unanchored match the
+  // temperature rule above uses, and the only OpenCode Go ids that sit on the strict
+  // Anthropic lane. Non-Claude ids (deepseek/minimax/glm/kimi…) accept these fields.
+  { provider: "opencode-go", match: /claude/i, dropOutputConfigFields: ["task_budget"] },
   // GitHub Copilot gpt-5.4: temperature unsupported.
   { provider: "github", match: /gpt-5\.4/i, drop: ["temperature"] },
   // GitHub Copilot Claude (except opus/sonnet 4.6): thinking + reasoning_effort rejected. #713
@@ -52,6 +63,16 @@ export function stripUnsupportedParams(provider, model, body) {
     if (!matches(rule, model)) continue;
     for (const key of rule.drop || []) {
       if (body[key] !== undefined) delete body[key];
+    }
+    // Nested drops (e.g. output_config.task_budget): keep the rest of the object
+    // (effort, format) and drop the container only when it ends up empty — the same
+    // shape claude.js uses when it strips output_config.effort. No existing rule
+    // declares this key, so the loop is a no-op for every other provider/model.
+    for (const key of rule.dropOutputConfigFields || []) {
+      if (body.output_config && body.output_config[key] !== undefined) {
+        delete body.output_config[key];
+        if (Object.keys(body.output_config).length === 0) delete body.output_config;
+      }
     }
     // Per-message field drop (assistant turns only — that is where clients replay reasoning).
     if (Array.isArray(rule.dropMessageFields) && Array.isArray(body.messages)) {

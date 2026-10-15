@@ -278,7 +278,7 @@ export default function APIPageClient({ machineId }) {
           const res = await fetch("/api/providers");
           if (!res.ok) return [];
           const data = await res.json();
-          return (data.connections || []).filter((c) => c.isActive !== false);
+          return data.connections || [];
         } catch { return []; }
       };
 
@@ -1350,7 +1350,10 @@ export default function APIPageClient({ machineId }) {
                   size="sm"
                   variant="secondary"
                   icon="checklist"
-                  onClick={() => setShowModelSelectForCreate(true)}
+                  onClick={async () => {
+                    await fetchData();
+                    setShowModelSelectForCreate(true);
+                  }}
                   fullWidth
                   className="justify-center h-9 font-medium text-xs rounded-lg shadow-2xs"
                 >
@@ -1556,7 +1559,10 @@ export default function APIPageClient({ machineId }) {
                   size="sm"
                   variant="secondary"
                   icon="checklist"
-                  onClick={() => setShowModelSelectForEdit(true)}
+                  onClick={async () => {
+                    await fetchData();
+                    setShowModelSelectForEdit(true);
+                  }}
                   fullWidth
                   className="justify-center h-9 font-medium text-xs rounded-lg shadow-2xs"
                 >

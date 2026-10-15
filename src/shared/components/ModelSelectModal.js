@@ -9,6 +9,7 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
 import { parseSearchQuery, matchesSearch } from "@/shared/utils/modelSearchFilter";
+import { getDeactivatedProviderIds } from "@/shared/utils/connectionStatus";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -89,16 +90,45 @@ export default function ModelSelectModal({
   closeOnSelect = true,
   allowProviderWildcard = false,
 }) {
-  // Filter activeProviders by active state and serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
+  // Live-fetched connections on modal open, fallback to activeProviders prop
+  const [fetchedConnections, setFetchedConnections] = useState(null);
+
+  const fetchConnections = async () => {
+    try {
+      const res = await fetch("/api/providers");
+      if (!res.ok) throw new Error(`Failed to fetch providers: ${res.status}`);
+      const data = await res.json();
+      setFetchedConnections(data.connections || []);
+    } catch (error) {
+      console.error("Error fetching providers in ModelSelectModal:", error);
+      setFetchedConnections([]);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) fetchConnections();
+  }, [isOpen]);
+
+  const effectiveConnections = useMemo(() => {
+    return fetchedConnections !== null ? fetchedConnections : (activeProviders || []);
+  }, [fetchedConnections, activeProviders]);
+
+  // Filter effectiveConnections by active state and serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
   const filteredActiveProviders = useMemo(() => {
-    const activeOnly = (activeProviders || []).filter((p) => p && p.isActive !== false);
+    const activeOnly = effectiveConnections.filter((p) => p && p.isActive !== false);
     if (!kindFilter) return activeOnly;
     return activeOnly.filter((p) => {
       const info = AI_PROVIDERS[p.provider];
       const kinds = info?.serviceKinds || ["llm"];
       return kinds.includes(kindFilter);
     });
-  }, [activeProviders, kindFilter]);
+  }, [effectiveConnections, kindFilter]);
+
+  // Set of provider IDs that have connections configured, but ALL of them are deactivated (isActive === false)
+  const deactivatedProviderIds = useMemo(() => {
+    return getDeactivatedProviderIds(effectiveConnections);
+  }, [effectiveConnections]);
+
   const { getCaps } = useModelCaps();
   const [searchQuery, setSearchQuery] = useState("");
   const [combos, setCombos] = useState([]);
@@ -218,9 +248,9 @@ export default function ModelSelectModal({
     const activeConnectionIds = filteredActiveProviders.map(p => p.provider);
 
     // No-auth providers: filter by kindFilter as well
-    const noAuthIds = kindFilter
+    const noAuthIds = (kindFilter
       ? NO_AUTH_PROVIDER_IDS.filter((id) => (AI_PROVIDERS[id]?.serviceKinds || ["llm"]).includes(kindFilter))
-      : NO_AUTH_PROVIDER_IDS;
+      : NO_AUTH_PROVIDER_IDS).filter((id) => !deactivatedProviderIds.has(id));
 
     // Compatible nodes (OpenAI/Anthropic Compatible) that already have user-added
     // custom models should be selectable even without an API-key connection. Local /
@@ -233,14 +263,18 @@ export default function ModelSelectModal({
       ? []
       : customModels
           .map((m) => m.providerAlias)
-          .filter((alias) => (isOpenAICompatibleProvider(alias) || isAnthropicCompatibleProvider(alias)) && existingNodeIds.has(alias));
+          .filter((alias) =>
+            (isOpenAICompatibleProvider(alias) || isAnthropicCompatibleProvider(alias)) &&
+            existingNodeIds.has(alias) &&
+            !deactivatedProviderIds.has(alias)
+          );
 
     // Only show connected providers (including both standard and custom)
     const providerIdsToShow = new Set([
       ...activeConnectionIds,  // Only connected providers
       ...noAuthIds,            // No-auth providers (kind-filtered)
       ...compatibleNodeIds,    // Compatible nodes with user-added models
-    ]);
+    ].filter((id) => !deactivatedProviderIds.has(id)));
 
     // Sort by PROVIDER_ORDER
     const sortedProviderIds = [...providerIdsToShow].sort((a, b) => {
@@ -326,7 +360,7 @@ export default function ModelSelectModal({
         // Custom (openai/anthropic-compatible) providers are LLM-only — skip for typed media kinds
         if (kindFilter && TYPED_KINDS.has(kindFilter)) return;
         // Find connection object to get prefix synchronously without waiting for providerNodes fetch
-        const connection = filteredActiveProviders.find(p => p.provider === providerId) || activeProviders.find(p => p.provider === providerId);
+        const connection = filteredActiveProviders.find(p => p.provider === providerId) || effectiveConnections.find(p => p.provider === providerId);
         const matchedNode = providerNodes.find(node => node.id === providerId);
         const displayName = matchedNode?.name || connection?.name || providerInfo.name;
         const nodePrefix = connection?.providerSpecificData?.prefix || matchedNode?.prefix || providerId;
@@ -466,7 +500,7 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels, clineModels, clinepassModels, zedModels]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, effectiveConnections, deactivatedProviderIds, cursorModels, clineModels, clinepassModels, zedModels]);
 
   // Parse search query into structured query (regex, positive tokens, negative tokens)
   const parsedQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);

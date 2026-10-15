@@ -24,6 +24,7 @@ import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
+import { annotateDirectResponse } from "open-sse/services/routeAttribution.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
 
@@ -322,7 +323,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      return annotateDirectResponse({
+        requestedModel: requestedModel || modelStr,
+        resolvedModel: `${provider}/${model}`,
+      }, result.response);
+    }
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;
@@ -350,6 +356,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       continue;
     }
 
-    return result.response;
+    return annotateDirectResponse({
+      requestedModel: requestedModel || modelStr,
+      resolvedModel: `${provider}/${model}`,
+    }, result.response);
   }
 }

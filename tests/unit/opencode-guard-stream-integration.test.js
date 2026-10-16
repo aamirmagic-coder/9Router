@@ -67,7 +67,7 @@ function chatTool(name, finishReason = null) {
 describe("OpenCode guarded live SSE streams", () => {
   it("passes a legitimate caller Bash tool through unchanged", async () => {
     const metadata = fingerprintMetadata(["Bash"]);
-    const { output, failures } = await transform(`${chatTool("bash", "tool_calls")}data: [DONE]\n\n`, metadata);
+    const { output, failures } = await transform(`${chatTool("Bash", "tool_calls")}data: [DONE]\n\n`, metadata);
 
     expect(output).toContain('"name":"Bash"');
     expect(output).not.toContain('"error"');
@@ -75,11 +75,11 @@ describe("OpenCode guarded live SSE streams", () => {
   });
 
   it("rejects an injected Chat tool with one error frame before DONE", async () => {
-    const { output, failures } = await transform(`${chatTool("grep", "tool_calls")}data: [DONE]\n\n`, fingerprintMetadata());
+    const { output, failures } = await transform(`${chatTool("read", "tool_calls")}data: [DONE]\n\n`, fingerprintMetadata());
 
     expect(output).toContain('"code":"upstream_undeclared_tool"');
     expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
-    expect(output).not.toContain('"name":"grep"');
+    expect(output).not.toContain('"name":"read"');
     expect(failures).toEqual([expect.objectContaining({ status: 502, origin: "processing", code: "upstream_undeclared_tool" })]);
   });
 
@@ -98,7 +98,7 @@ describe("OpenCode guarded live SSE streams", () => {
     const metadata = fingerprintMetadata();
     const input = [
       "event: response.output_item.added",
-      `data: ${JSON.stringify({ type: "response.output_item.added", output_index: 0, item: { type: "function_call", name: "grep" } })}`,
+      `data: ${JSON.stringify({ type: "response.output_item.added", output_index: 0, item: { type: "function_call", name: "shell" } })}`,
       "",
     ].join("\n");
     const { output, failures } = await transform(input, metadata, {
@@ -117,7 +117,7 @@ describe("OpenCode guarded live SSE streams", () => {
   it("reports a processing failure and never calls request success after a guard rejection", async () => {
     const providerResponse = new Response(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode(`${chatTool("grep", "tool_calls")}data: [DONE]\n\n`));
+        controller.enqueue(encoder.encode(`${chatTool("read", "tool_calls")}data: [DONE]\n\n`));
         controller.close();
       },
     }), { headers: { "content-type": "text/event-stream" } });
@@ -194,7 +194,7 @@ describe("OpenCode guarded live SSE streams", () => {
   it("commits STREAM_FAILED before a concurrent client disconnect can record CLIENT_ABORTED", async () => {
     const providerResponse = new Response(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode(chatTool("grep", "tool_calls")));
+        controller.enqueue(encoder.encode(chatTool("shell", "tool_calls")));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       },

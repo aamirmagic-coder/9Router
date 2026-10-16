@@ -33,6 +33,21 @@ describe("OpenAI → Claude context mapping", () => {
     }));
   });
 
+  it("never forwards unsigned reasoning_content thinking to native Claude", () => {
+    // Anthropic rejects thinking blocks without a valid signature, so the
+    // native path must drop what reasoning_content produced.
+    const out = translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, "claude-sonnet-4-6", {
+      messages: [
+        { role: "user", content: "q" },
+        { role: "assistant", content: "a", reasoning_content: "my hidden reasoning" },
+        { role: "user", content: "next" },
+      ],
+    }, true, null, "claude");
+    expect(JSON.stringify(out)).not.toContain("my hidden reasoning");
+    const assistant = out.messages.find((m) => m.role === "assistant");
+    expect(assistant.content.some((b) => b.type === "text" && b.text === "a")).toBe(true);
+  });
+
   // openai-to-claude.js:298 — tool_choice "none" mapped to {type:"auto"} (loses "do not call" intent)
   // KNOWN BUG
   it.fails("tool_choice=none is not turned into auto", () => {

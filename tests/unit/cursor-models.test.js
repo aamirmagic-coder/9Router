@@ -5,7 +5,29 @@ import {
   resolveCursorModels,
 } from "../../open-sse/services/cursorModels.js";
 
-const originalFetch = global.fetch;
+// agent.api5.cursor.sh is HTTP/2-only, so cursorModels.js talks raw http2 (not fetch).
+// Fake http2.connect: each request answers with h2.reply = { status, body }.
+const h2 = vi.hoisted(() => ({ reply: { status: 200, body: new Uint8Array() }, connect: null, requests: [] }));
+
+vi.mock("http2", async () => {
+  const { EventEmitter } = await import("node:events");
+  h2.connect = vi.fn(() => {
+    const client = new EventEmitter();
+    client.close = vi.fn();
+    client.request = vi.fn((headers) => {
+      const req = new EventEmitter();
+      h2.requests.push(headers);
+      req.end = () => setImmediate(() => {
+        req.emit("response", { ":status": h2.reply.status });
+        req.emit("data", Buffer.from(h2.reply.body));
+        req.emit("end");
+      });
+      return req;
+    });
+    return client;
+  });
+  return { default: { connect: (...args) => h2.connect(...args) } };
+});
 
 function varint(value) {
   const bytes = [];
@@ -43,10 +65,12 @@ function model(id, name) {
 describe("Cursor live model catalog", () => {
   beforeEach(() => {
     clearCursorModelCache();
+    h2.requests.length = 0;
+    h2.connect.mockClear();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    h2.reply = { status: 200, body: new Uint8Array() };
     clearCursorModelCache();
   });
 
@@ -65,7 +89,7 @@ describe("Cursor live model catalog", () => {
 
   it("fetches the account-specific catalog and caches it", async () => {
     const payload = concat(model("claude-4.6-opus", "Claude 4.6 Opus"));
-    global.fetch = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    h2.reply = { status: 200, body: payload };
     const credentials = {
       accessToken: "cursor-token",
       providerSpecificData: { machineId: "machine-id" },
@@ -78,22 +102,21 @@ describe("Cursor live model catalog", () => {
       models: [{ id: "claude-4.6-opus", name: "Claude 4.6 Opus" }],
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(global.fetch).toHaveBeenCalledWith(
-      "https://agent.api5.cursor.sh/agent.v1.AgentService/GetUsableModels",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.any(Uint8Array),
-        headers: expect.objectContaining({
-          "content-type": "application/proto",
-          accept: "application/proto",
-        }),
-      }),
-    );
+    // Second call is served from cache: exactly one upstream connection/request.
+    expect(h2.connect).toHaveBeenCalledTimes(1);
+    expect(h2.connect).toHaveBeenCalledWith("https://agent.api5.cursor.sh");
+    expect(h2.requests).toHaveLength(1);
+    expect(h2.requests[0]).toEqual(expect.objectContaining({
+      ":method": "POST",
+      ":path": "/agent.v1.AgentService/GetUsableModels",
+      ":authority": "agent.api5.cursor.sh",
+      "content-type": "application/proto",
+      accept: "application/proto",
+    }));
   });
 
   it("fails open when the Cursor catalog request fails", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response("no", { status: 403 }));
+    h2.reply = { status: 403, body: new TextEncoder().encode("no") };
 
     await expect(resolveCursorModels({
       accessToken: "cursor-token",

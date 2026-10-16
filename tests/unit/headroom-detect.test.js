@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -39,7 +40,8 @@ describe("headroom detect", () => {
 
   it("prefers the interpreter that actually has headroom-ai installed", () => {
     // headroom binary lives in a bin dir; the python next to it has headroom-ai.
-    const binPython = "/opt/hr/bin/python3";
+    // detect.js builds it with path.join and probes python.exe first on Windows.
+    const binPython = path.join("/opt/hr/bin", process.platform === "win32" ? "python.exe" : "python3");
     mocks.execSync.mockImplementation((cmd) => {
       if (String(cmd).includes("where") || String(cmd).includes("which")) return Buffer.from("/opt/hr/bin/headroom\n");
       if (String(cmd).includes("--version")) return Buffer.from("Python 3.13.0\n");

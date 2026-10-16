@@ -16,21 +16,37 @@ import { lookup } from "node:dns/promises";
 import { Agent } from "undici";
 import { MAX_IMAGE_BYTES, FETCH_TIMEOUT_MS, IMAGE_SIGNATURES, BLOCKED_HOSTS } from "../../config/mediaConfig.js";
 
+// IPv4-mapped IPv6 written in hex (::ffff:7f00:1) -> dotted quad, else null.
+function hexMappedV4(ip) {
+  const m = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!m) return null;
+  const hi = Number.parseInt(m[1], 16);
+  const lo = Number.parseInt(m[2], 16);
+  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+}
+
 // True if an IPv4/IPv6 address is private/reserved (SSRF target).
 function isPrivateIp(ip) {
   if (!ip) return true;
-  // IPv6 loopback / unique-local / link-local
-  if (ip === "::1" || ip.startsWith("fc") || ip.startsWith("fd") || ip.startsWith("fe80")) return true;
-  // IPv4-mapped IPv6 (::ffff:a.b.c.d) -> extract tail
-  const v4 = ip.includes(".") ? ip.split(":").pop() : ip;
+  const addr = ip.toLowerCase();
+  // IPv6 unspecified / loopback
+  if (addr === "::" || addr === "::1") return true;
+  // IPv6 unique-local fc00::/7, link-local fe80::/10, multicast ff00::/8
+  if (/^(fc|fd|fe[89ab]|ff)/.test(addr)) return true;
+  // NAT64 64:ff9b::/96 can translate to any internal IPv4
+  if (addr.startsWith("64:ff9b:")) return true;
+  // IPv4-mapped IPv6 (::ffff:a.b.c.d or hex form) -> check the IPv4 tail
+  const v4 = hexMappedV4(addr) || (addr.includes(".") ? addr.split(":").pop() : addr);
   const parts = v4.split(".").map((n) => Number.parseInt(n, 10));
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return ip.includes(":") ? false : true;
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return addr.includes(":") ? false : true;
   const [a, b] = parts;
   if (a === 10 || a === 127 || a === 0) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 169 && b === 254) return true; // link-local + cloud metadata
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking 198.18.0.0/15
+  if (a >= 224) return true; // multicast, reserved, broadcast
   return false;
 }
 

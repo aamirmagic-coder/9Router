@@ -276,13 +276,13 @@ export class KiroExecutor extends BaseExecutor {
    * codewhisperer.* GenerateAssistantResponse endpoint can authenticate the key
    * but rejects the same valid payload with REQUEST_BODY_INVALID. Since a 400
    * is terminal in BaseExecutor, putting CodeWhisperer first prevents the working
-   * q.* endpoint from ever being tried. Keep q.* first only for api_key accounts.
+   * q.* endpoint from ever being tried.
    *
-   * The Kiro IDE gateway (runtime.*.kiro.dev) expects Kiro OIDC/social tokens
-   * and rejects TokenType=API_KEY. External IdP enterprise tokens instead
-   * use the CodeWhisperer surface, with the `TokenType: EXTERNAL_IDP` header.
-   * Other OAuth methods keep the default order (kiro.dev first) since their
-   * tokens are what that gateway accepts.
+   * Order for EVERY auth method: q.* first, then the other Amazon surfaces
+   * (codewhisperer.*, regionalized), then runtime.*.kiro.dev last. Amazon hosts
+   * answer foreign tokens with 401/403, which fall through; kiro.dev answers
+   * 400, which is terminal. External IdP tokens still carry the
+   * `TokenType: EXTERNAL_IDP` header.
    */
   getOrderedBaseUrls(credentials) {
     const baseUrls = this.getBaseUrls();

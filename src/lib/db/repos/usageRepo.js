@@ -11,6 +11,23 @@ function maskApiKey(key) {
   return trimmed.slice(0, 8) + "***" + trimmed.slice(-4);
 }
 
+// byApiKey counters are aggregated on the FULL api key on purpose: masking at
+// aggregation time collided keys sharing a prefix (team keys) into one bucket.
+// But the object is returned as-is by /api/usage/stats, so its OBJECT KEYS would
+// carry the raw api keys in the response. Re-key with the masked label right
+// before returning; no consumer reads these object keys, only the values
+// (keyName, apiKeyMasked, ...).
+function withRedactedApiKeyBuckets(byApiKey) {
+  const out = {};
+  for (const entry of Object.values(byApiKey || {})) {
+    const label = `${entry.apiKeyMasked || "local-no-key"}|${entry.rawModel || "unknown"}|${entry.provider || "unknown"}`;
+    let key = label;
+    for (let n = 2; out[key]; n += 1) key = `${label}#${n}`;
+    out[key] = entry;
+  }
+  return out;
+}
+
 const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
@@ -669,6 +686,7 @@ export async function getUsageStats(period = "all") {
   }
 
   stats.totalRequests = Object.values(stats.byProvider).reduce((sum, p) => sum + (p.requests || 0), 0);
+  stats.byApiKey = withRedactedApiKeyBuckets(stats.byApiKey);
   return stats;
 }
 

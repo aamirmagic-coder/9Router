@@ -15,6 +15,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { removeTempDir } from "./helpers/tolerant-cleanup.js";
 import {
   createZedNativeAuthData,
   parseZedCallbackPayload,
@@ -35,7 +36,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+  removeTempDir(process.env.DATA_DIR);
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
 });

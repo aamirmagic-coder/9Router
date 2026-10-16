@@ -253,6 +253,13 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
       }
     }
   } else if (msg.role === ROLE.ASSISTANT) {
+    // OpenAI-style reasoning (DeepSeek, Qwen, ...) -> leading unsigned thinking block.
+    // prepareClaudeRequest() then drops it for native Claude (no valid signature)
+    // and keeps it for DeepSeek, whose thinking mode requires prior reasoning.
+    const hasThinkingPart = Array.isArray(msg.content) && msg.content.some((p) => p?.type === CLAUDE_BLOCK.THINKING);
+    if (typeof msg.reasoning_content === "string" && msg.reasoning_content.trim() && !hasThinkingPart) {
+      blocks.push({ type: CLAUDE_BLOCK.THINKING, thinking: msg.reasoning_content });
+    }
     if (Array.isArray(msg.content)) {
       for (const part of msg.content) {
         if (part.type === OPENAI_BLOCK.TEXT && part.text) {

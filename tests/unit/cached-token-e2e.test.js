@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { canonicalizeUsage } from "../../open-sse/utils/usageTracking.js";
+import { removeTempDir } from "./helpers/tolerant-cleanup.js";
 
 const originalDataDir = process.env.DATA_DIR;
 let tempDir;
@@ -20,7 +21,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  removeTempDir(tempDir);
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
 });

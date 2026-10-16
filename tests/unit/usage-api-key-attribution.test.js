@@ -54,4 +54,34 @@ describe("Usage stats API key attribution", () => {
         .sort((a, b) => a - b)
     ).toEqual([10, 20]);
   });
+
+  it("AUDIT-002: never exposes a raw API key in the byApiKey field names", async () => {
+    const apiKeyA = "sk-machine-aaaaaa-11111111";
+    const apiKeyB = "sk-machine-bbbbbb-22222222";
+
+    for (const apiKey of [apiKeyA, apiKeyB]) {
+      await db.saveRequestUsage({
+        provider: "openai",
+        model: "gpt-4",
+        connectionId: "c1",
+        apiKey,
+        tokens: { prompt_tokens: 10, completion_tokens: 5 },
+        endpoint: "/v1/chat",
+        status: "ok",
+      });
+    }
+
+    const stats = await db.getUsageStats("24h");
+    const bucketNames = Object.keys(stats.byApiKey);
+
+    // Both keys stay in separate buckets...
+    expect(bucketNames).toHaveLength(2);
+    // ...and no object key carries the raw api key.
+    for (const name of bucketNames) {
+      expect(name).not.toContain(apiKeyA);
+      expect(name).not.toContain(apiKeyB);
+      expect(name).not.toContain("aaaaaa-11111111");
+      expect(name).not.toContain("bbbbbb-22222222");
+    }
+  });
 });

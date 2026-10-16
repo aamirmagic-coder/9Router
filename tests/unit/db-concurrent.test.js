@@ -4,10 +4,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { removeTempDir } from "./helpers/tolerant-cleanup.js";
 
 const originalDataDir = process.env.DATA_DIR;
 let tempDir;
 let db;
+
+// saveRequestUsage dedupes rows identical down to the timestamp (usageRepo),
+// so each simulated request gets its own millisecond, slightly in the past.
+function distinctTimestamps(n) {
+  const base = Date.now() - n - 1000;
+  return Array.from({ length: n }, (_, i) => new Date(base + i).toISOString());
+}
 
 beforeAll(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-concurrent-"));
@@ -18,7 +26,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  removeTempDir(tempDir);
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
 });
@@ -26,9 +34,11 @@ afterAll(() => {
 describe("DB Concurrency — atomic safety", () => {
   it("100 parallel saveRequestUsage → no count loss", async () => {
     const N = 100;
+    const stamps = distinctTimestamps(N);
     const promises = [];
     for (let i = 0; i < N; i++) {
       promises.push(db.saveRequestUsage({
+        timestamp: stamps[i],
         provider: "openai", model: "gpt-4", connectionId: "c1",
         tokens: { prompt_tokens: 10, completion_tokens: 5 },
         endpoint: "/v1/chat", status: "ok",
@@ -68,8 +78,10 @@ describe("DB Concurrency — atomic safety", () => {
 
   it("mixed concurrent: usage + details + connections + aliases", async () => {
     const ops = [];
+    const stamps = distinctTimestamps(50);
     for (let i = 0; i < 50; i++) {
       ops.push(db.saveRequestUsage({
+        timestamp: stamps[i],
         provider: "anthropic", model: `m-${i % 3}`, connectionId: "c2",
         tokens: { prompt_tokens: 20 }, status: "ok",
       }));
@@ -151,9 +163,11 @@ describe("DB Concurrency — atomic safety", () => {
 
   it("daily summary aggregates correctly under parallel writes", async () => {
     const N = 50;
+    const stamps = distinctTimestamps(N);
     const promises = [];
     for (let i = 0; i < N; i++) {
       promises.push(db.saveRequestUsage({
+        timestamp: stamps[i],
         provider: "google", model: "gemini-pro", connectionId: "cG",
         tokens: { prompt_tokens: 100, completion_tokens: 50 },
         status: "ok",

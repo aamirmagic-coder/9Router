@@ -118,6 +118,27 @@ Cursor/Cline/Any tool:
 
 ---
 
+## Combo Routing Strategies
+
+On **Dashboard → Combos**, you can choose how models within each combo are selected for incoming requests:
+
+### 1. Fallback (Default)
+Tries models sequentially in the configured order. The first model is always called first; if it returns a rate limit (429) or transient error (502/503/504), 9Router automatically falls back to the next model in the chain.
+
+### 2. Round Robin
+Rotates models across incoming requests to distribute load and prevent exhausting a single model's quota. You can configure a sticky limit (calls per model before rotating).
+
+### 3. Smart Router (System One)
+Uses a **System One decision model** (configured under **Media Providers → System One**) to evaluate the prompt and select the most capable model before generation begins.
+- **Fail-Open**: If the System One model is unreachable or times out (1.5s), 9Router safely falls back to standard sequential order.
+- **Session Sticky (Default: ON)**: Once a model is selected for a conversation session (`sessionId`), 9Router sticks to that model across subsequent turns to retain upstream prompt cache (Claude Prompt Cache, DeepSeek KV-cache, Gemini Implicit Cache). If the active model errors or rate-limits, the session mapping is cleared and failover occurs immediately.
+- **Min Confidence Threshold**: An optional threshold (e.g. 70%, 80%, 90%). When decision confidence is below this cutoff, 9Router preserves the default combo order rather than guessing.
+
+### 4. Fusion
+Queries all panel models in parallel, then uses a Judge model to synthesize one final high-quality answer. Best for complex reasoning where multiple perspectives are needed.
+
+---
+
 ## Cursor / Claude Default Combos
 
 Cursor and Claude Code send **unprefixed** model IDs (`composer-2.5`, `claude-opus-5`, `opus`), while 9Router routes with provider prefixes (`cu/composer-2.5`, `cc/claude-opus-5`). Default combo generators bridge that gap.

@@ -135,6 +135,7 @@ Uses a **System One decision model** (configured under **Media Providers → Sys
   - **Smart Switch (Default, adaptive ≥80% confidence)**: Remembers the chosen model for the session to keep upstream prompt cache warm (Claude Prompt Cache, DeepSeek KV-cache, Gemini Implicit Cache). If the user's task drastically changes on a subsequent turn and System One is highly confident (≥80%), the session automatically switches to the new optimal model.
   - **Strict Lock (1 task = 1 session)**: Evaluates System One once on the first turn, then locks that model for the entire session. Adds **0 ms latency** and **0 extra router calls** on follow-up turns, guaranteeing 100% prompt cache reuse.
   - **Per-Turn**: Evaluates System One on every turn independently without session stickiness.
+  - **Custom Threshold**: Choose your own confidence threshold (50%–95%) required to trigger a model switch.
 - **Resilience**: If the active model rate-limits (429) or fails, the session lock is cleared and standard fallback to the next model executes immediately.
 
 ### 4. Fusion

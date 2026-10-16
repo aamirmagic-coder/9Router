@@ -490,5 +490,56 @@ describe("System One Smart Combo Router", () => {
       expect(resolveSmartChoice).toHaveBeenCalledTimes(1);
       expect(calls[0]).toBe("ds/deepseek-v4");
     });
+
+    it("supports custom policy: applies user-specified confidence threshold", async () => {
+      const calls = [];
+      const handleSingleModel = vi.fn(async (_body, model) => {
+        calls.push(model);
+        return okResponse(`Answer from ${model}`);
+      });
+
+      let currentDecision = {
+        choice: "cx/gpt-5-mini",
+        confidence: 0.85,
+      };
+      const resolveSmartChoice = vi.fn(async () => currentDecision);
+
+      // Turn 1
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Initial task" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-custom",
+        smartPolicy: "custom",
+        confidenceThreshold: 0.75,
+        resolveSmartChoice,
+      });
+
+      expect(calls[0]).toBe("cx/gpt-5-mini");
+
+      // Turn 2: confidence is 0.76 (above 0.75 threshold) -> switches!
+      currentDecision = {
+        choice: "ds/deepseek-v4",
+        confidence: 0.76,
+      };
+
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Different task" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-custom",
+        smartPolicy: "custom",
+        confidenceThreshold: 0.75,
+        resolveSmartChoice,
+      });
+
+      expect(calls[1]).toBe("ds/deepseek-v4"); // Switched because 0.76 >= 0.75
+    });
   });
 });

@@ -328,9 +328,9 @@ export function isZeroContentResponse(data) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @param {boolean} [options.autoSwitch=true] - Capability auto-switching
  * @param {string|null} [options.sessionId=null] - Client session identifier for prompt cache retention
- * @param {string} [options.smartPolicy="smart-switch"] - Policy: "smart-switch" (adaptive), "strict" (lock 1st model), or "per-turn"
+ * @param {string} [options.smartPolicy="smart"] - Policy: "smart" (adaptive ≥80%), "strict" (lock 1st model), "per-turn", or "custom"
  * @param {boolean} [options.sessionSticky=true] - Keep chosen model across session requests to retain prompt cache
- * @param {number} [options.confidenceThreshold=0.8] - Minimum confidence required for smart-switch topic change (0-1)
+ * @param {number} [options.confidenceThreshold=0.8] - Minimum confidence required for model switch (0-1)
  * @param {Function|null} [options.resolveSmartChoice=null] - Smart router resolver callback: (body, models) => Promise<{ choice, probabilities, confidence } | null>
  * @returns {Promise<Response>}
  */
@@ -344,7 +344,7 @@ export async function handleComboChat({
   comboStickyLimit = 1,
   autoSwitch = true,
   sessionId = null,
-  smartPolicy = "smart-switch",
+  smartPolicy = "smart",
   sessionSticky = true,
   confidenceThreshold = 0.8,
   resolveSmartChoice = null,
@@ -353,14 +353,17 @@ export async function handleComboChat({
   let activeStickyModel = null;
 
   if (comboStrategy === "smart") {
-    const policy = (typeof smartPolicy === "string" ? smartPolicy : "smart-switch").toLowerCase();
+    const policy = (typeof smartPolicy === "string" ? smartPolicy : "smart").toLowerCase();
     const isPerTurn = policy === "per-turn" || sessionSticky === false;
     const isStrict = policy === "strict";
 
     let switchThreshold = 0.8;
-    if (policy === "smart-switch-70") switchThreshold = 0.7;
+    if (policy === "custom") {
+      const custom = Number(confidenceThreshold);
+      if (Number.isFinite(custom) && custom > 0) switchThreshold = custom;
+    } else if (policy === "smart-switch-70") switchThreshold = 0.7;
     else if (policy === "smart-switch-90") switchThreshold = 0.9;
-    else if (policy.startsWith("smart-switch")) {
+    else if (policy.startsWith("smart-switch") || policy === "smart") {
       const custom = Number(confidenceThreshold);
       if (Number.isFinite(custom) && custom > 0) switchThreshold = custom;
     }

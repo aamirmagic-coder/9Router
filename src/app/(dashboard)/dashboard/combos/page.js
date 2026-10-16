@@ -5,7 +5,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
-import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, Badge } from "@/shared/components";
+import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, Badge, SmartPolicyModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
@@ -54,27 +54,16 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-const SMART_POLICY_OPTIONS = [
-  { value: "smart-switch", label: "Smart Switch (adaptive ≥80%)" },
-  { value: "strict", label: "Strict Lock (1 task = 1 session)" },
-  { value: "smart-switch-90", label: "Conservative Switch (≥90%)" },
-  { value: "smart-switch-70", label: "Sensitive Switch (≥70%)" },
-  { value: "per-turn", label: "Per-Turn (evaluate every prompt)" },
-];
-
-function getPolicyDescription(policy) {
-  switch (policy) {
-    case "strict":
-      return "Locks first model for entire session (+0ms latency, 0 extra calls, 100% prompt cache)";
-    case "per-turn":
-      return "Evaluates System One on every prompt independently (no session caching)";
-    case "smart-switch-90":
-      return "High prompt cache retention; only switches on near-certainty (≥90% confidence)";
-    case "smart-switch-70":
-      return "Quickly adapts to topic shifts (≥70% confidence), balanced prompt cache retention";
-    default:
-      return "Retains prompt cache; switches model if task shifts with high confidence (≥80%)";
+function getPolicyBadgeLabel(strategy = {}) {
+  const policy = strategy.smartPolicy || (strategy.sessionSticky === false ? "per-turn" : "smart");
+  if (policy === "strict") return "Strict Lock";
+  if (policy === "per-turn") return "Per-Turn";
+  if (policy === "custom") {
+    const raw = strategy.confidenceThreshold;
+    const pct = Math.round((raw || 0.8) * (raw && raw <= 1 ? 100 : 1));
+    return `Custom (≥${pct || 80}%)`;
   }
+  return "Smart (≥80%)";
 }
 
 export default function CombosPage() {
@@ -614,6 +603,7 @@ function getRouterModelStatus(routerModel, activeProviders) {
 function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy, selected = false, onToggleSelect }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const [showRouterSelect, setShowRouterSelect] = useState(false);
+  const [showPolicyModal, setShowPolicyModal] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const routerModel = strategy.routerModel || "";
@@ -692,70 +682,52 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
                 )}
               </div>
             )}
-            {/* Smart: System One router picker and tuning */}
+            {/* Smart: System One router picker and policy modal trigger */}
             {isSmart && (() => {
               const routerStatus = getRouterModelStatus(routerModel, activeProviders);
-              const policy = strategy.smartPolicy || (strategy.sessionSticky === false ? "per-turn" : "smart-switch");
+              const policyLabel = getPolicyBadgeLabel(strategy);
               return (
-                <div className="mt-2.5 flex flex-col gap-2 rounded-lg border border-border/40 bg-black/[0.01] dark:bg-white/[0.01] p-2">
-                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] font-medium text-text-muted">Router</span>
-                    <button
-                      onClick={() => setShowRouterSelect(true)}
-                      className="inline-flex max-w-full items-center gap-1 rounded border border-dashed border-primary/40 px-1.5 py-0.5 font-mono text-[11px] text-primary hover:border-primary hover:bg-primary/5 transition-colors"
-                      title="Pick the System One model that decides model routing"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">psychology</span>
-                      <span className="truncate">{routerModel || "Auto — oc/jev-1.13-free"}</span>
-                    </button>
-                    {routerStatus.ready ? (
-                      <Badge variant="success" size="sm" dot>{routerStatus.label}</Badge>
-                    ) : (
-                      <span className="inline-flex items-center gap-1">
-                        <Badge variant="error" size="sm" dot>{routerStatus.label}</Badge>
-                        <Link
-                          href={`/dashboard/media-providers/systemone/${routerStatus.providerId}`}
-                          className="text-[10px] text-primary hover:underline font-medium"
-                          title="Configure in Media Providers"
-                        >
-                          Configure
-                        </Link>
-                      </span>
-                    )}
-                    {routerModel && (
-                      <button
-                        onClick={() => onSetStrategy({ routerModel: "" })}
-                        className="p-0.5 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                        title="Reset router to Auto"
+                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-text-muted">Router</span>
+                  <button
+                    onClick={() => setShowRouterSelect(true)}
+                    className="inline-flex max-w-full items-center gap-1 rounded border border-dashed border-primary/40 px-1.5 py-0.5 font-mono text-[11px] text-primary hover:border-primary hover:bg-primary/5 transition-colors"
+                    title="Pick the System One model that decides model routing"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">psychology</span>
+                    <span className="truncate">{routerModel || "Auto — oc/jev-1.13-free"}</span>
+                  </button>
+                  {routerStatus.ready ? (
+                    <Badge variant="success" size="sm" dot>{routerStatus.label}</Badge>
+                  ) : (
+                    <span className="inline-flex items-center gap-1">
+                      <Badge variant="error" size="sm" dot>{routerStatus.label}</Badge>
+                      <Link
+                        href={`/dashboard/media-providers/systemone/${routerStatus.providerId}`}
+                        className="text-[10px] text-primary hover:underline font-medium"
+                        title="Configure in Media Providers"
                       >
-                        <span className="material-symbols-outlined text-[13px]">close</span>
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pt-1 border-t border-border/30">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-medium text-text-muted">Session Policy</span>
-                      <div className="w-[230px]">
-                        <Select
-                          options={SMART_POLICY_OPTIONS}
-                          value={policy}
-                          onChange={(e) => {
-                            const nextPolicy = e.target.value;
-                            onSetStrategy({
-                              smartPolicy: nextPolicy,
-                              sessionSticky: nextPolicy !== "per-turn",
-                            });
-                          }}
-                          selectClassName="py-1 text-xs"
-                        />
-                      </div>
-                    </div>
-
-                    <p className="text-[10px] text-text-muted italic truncate">
-                      {getPolicyDescription(policy)}
-                    </p>
-                  </div>
+                        Configure
+                      </Link>
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setShowPolicyModal(true)}
+                    className="inline-flex items-center gap-1 rounded border border-border/70 bg-black/[0.02] dark:bg-white/[0.02] px-2 py-0.5 text-[11px] text-text-main hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                    title="Configure routing policy and prompt cache retention"
+                  >
+                    <span className="material-symbols-outlined text-[13px] text-text-muted">tune</span>
+                    <span className="font-medium">{policyLabel}</span>
+                  </button>
+                  {routerModel && (
+                    <button
+                      onClick={() => onSetStrategy({ routerModel: "" })}
+                      className="p-0.5 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                      title="Reset router to Auto"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">close</span>
+                    </button>
+                  )}
                 </div>
               );
             })()}
@@ -829,6 +801,18 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
           kindFilter="systemone"
           addedModelValues={routerModel ? [routerModel] : []}
           closeOnSelect={true}
+        />
+      )}
+
+      {/* Smart Router Policy Settings Modal */}
+      {showPolicyModal && (
+        <SmartPolicyModal
+          isOpen={showPolicyModal}
+          onClose={() => setShowPolicyModal(false)}
+          comboName={combo.name}
+          currentPolicy={strategy.smartPolicy || (strategy.sessionSticky === false ? "per-turn" : "smart")}
+          currentThreshold={strategy.confidenceThreshold ?? 80}
+          onSave={onSetStrategy}
         />
       )}
     </Card>

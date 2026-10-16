@@ -2,6 +2,7 @@
 
 import { safeParseJSON } from "../concerns/json.js";
 import { OPENAI_BLOCK } from "../schema/index.js";
+import { isGemini4Model } from "../../providers/capabilities.js";
 
 // Unsupported JSON Schema constraints that should be removed for Antigravity
 export const UNSUPPORTED_SCHEMA_CONSTRAINTS = [
@@ -314,12 +315,14 @@ function flattenTypeArrays(obj) {
 function ensureObjectType(obj) {
   if (!obj || typeof obj !== "object") return;
   if (obj.properties && !obj.type) obj.type = "object";
-  if (obj.properties && typeof obj.properties === "object") {
-    for (const value of Object.values(obj.properties)) {
-      if (value && typeof value === "object") ensureObjectType(value);
+  for (const [key, value] of Object.entries(obj)) {
+    if (!value || typeof value !== "object") continue;
+    if (key === "properties" && !Array.isArray(value)) {
+      for (const property of Object.values(value)) ensureObjectType(property);
+    } else {
+      ensureObjectType(value);
     }
   }
-  if (obj.items && typeof obj.items === "object") ensureObjectType(obj.items);
 }
 
 // Convert prefixItems (tuple validation) to items — Gemini cannot express tuples,
@@ -444,16 +447,51 @@ export function cleanJSONSchemaForAntigravity(schema) {
   return cleaned;
 }
 
+// Gemini / Cloud Code treat a `$ref` key inside functionResponse.response as a
+// pointer to functionResponse.parts and reject the request with
+// "The referenced name `#/$defs/...` in function_response.response does not match
+// to a display_name in the function_response.parts". Tool results that carry a
+// JSON Schema / OpenAPI document (webfetch, read, MCP) hit this, so rename the key.
+export const GEMINI_RESERVED_RESPONSE_KEYS = { "$ref": "_ref" };
+
+// Recursively rename reserved keys in a tool-result payload (arrays/objects only)
+export function sanitizeFunctionResponsePayload(value) {
+  if (Array.isArray(value)) return value.map(sanitizeFunctionResponsePayload);
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, val] of Object.entries(value)) {
+    out[GEMINI_RESERVED_RESPONSE_KEYS[key] ?? key] = sanitizeFunctionResponsePayload(val);
+  }
+  return out;
+}
+
+// Return the part with a sanitized functionResponse.response (same reference when untouched)
+function sanitizeFunctionResponsePart(part) {
+  const response = part?.functionResponse?.response;
+  if (!response || typeof response !== "object") return part;
+  return { ...part, functionResponse: { ...part.functionResponse, response: sanitizeFunctionResponsePayload(response) } };
+}
+
+// Gemini 4 rejects a merged user turn whose last part is not a functionResponse (#4802)
+function moveFunctionResponsesLast(parts) {
+  const responses = parts.filter(p => p.functionResponse);
+  if (!responses.length) return parts;
+  return [...parts.filter(p => !p.functionResponse), ...responses];
+}
+
 // Merge adjacent same-role messages, strip empty parts, ensure initial and terminal user turns
-export function normalizeGeminiContents(contents) {
+export function normalizeGeminiContents(contents, model = null) {
+  const frLast = isGemini4Model(model);
   const out = [];
   for (const c of contents || []) {
     if (!c?.role || !Array.isArray(c.parts)) continue;
-    const parts = c.parts.filter(p => p && Object.keys(p).length > 0);
+    const parts = c.parts.filter(p => p && Object.keys(p).length > 0).map(sanitizeFunctionResponsePart);
     if (parts.length === 0) continue;
     const last = out.at(-1);
-    if (last?.role === c.role) last.parts.push(...parts);
-    else out.push({ ...c, parts: [...parts] });
+    if (last?.role === c.role) {
+      last.parts.push(...parts);
+      if (frLast) last.parts = moveFunctionResponsesLast(last.parts);
+    } else out.push({ ...c, parts: [...parts] });
   }
   if (out.length > 0 && out[0].role !== "user") {
     out.unshift({ role: "user", parts: [{ text: "..." }] });

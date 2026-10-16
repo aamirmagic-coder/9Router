@@ -253,16 +253,18 @@ export default function Header({ onMenuClick, showMenuButton = true, sidebarOpen
       {/* Page title with breadcrumbs */}
       <div className="flex flex-col min-w-0 flex-1">
         {breadcrumbs.length > 0 ? (
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             {breadcrumbs.map((crumb, index) => {
               const isLast = index === breadcrumbs.length - 1;
               return (
                 <div
                   key={`${crumb.label}-${crumb.href || "current"}`}
-                  className={`flex items-center gap-2 min-w-0 ${isLast ? "flex-1" : "shrink-0"}`}
+                  className={`items-center gap-1.5 sm:gap-2 min-w-0 ${
+                    isLast ? "flex flex-1" : "hidden sm:flex shrink-0"
+                  }`}
                 >
                   {index > 0 && (
-                    <span className="material-symbols-outlined text-text-muted text-base shrink-0">
+                    <span className="material-symbols-outlined text-text-muted text-base hidden sm:inline">
                       chevron_right
                     </span>
                   )}
@@ -274,13 +276,13 @@ export default function Header({ onMenuClick, showMenuButton = true, sidebarOpen
                       {crumb.label}
                     </Link>
                   ) : (
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                       {crumb.image && (
                         <ProviderIcon
                           src={crumb.image}
                           alt={crumb.label}
                           size={28}
-                          className="object-contain rounded max-w-[28px] max-h-[28px] shrink-0"
+                          className="object-contain rounded max-w-[24px] max-h-[24px] sm:max-w-[28px] sm:max-h-[28px] shrink-0"
                           fallbackText={crumb.label.slice(0, 2).toUpperCase()}
                         />
                       )}

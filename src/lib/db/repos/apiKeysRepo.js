@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
+import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
+import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
 function parseJsonArray(value, defaultValue) {
   if (!value) return defaultValue;
@@ -28,6 +30,7 @@ function rowToKey(row) {
     maxRequestsPerDay: row.maxRequestsPerDay ?? null,
     maxSpendUsdPerDay: row.maxSpendUsdPerDay ?? null,
     createdAt: row.createdAt,
+    access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
 }
 
@@ -54,6 +57,14 @@ export async function getApiKeyById(id) {
   return rowToKey(row);
 }
 
+// Used by the /v1 handlers to read the presented key's access settings.
+export async function getApiKeyByKey(key) {
+  if (!key) return null;
+  const db = await getAdapter();
+  const row = db.get(`SELECT * FROM apiKeys WHERE key = ?`, [key]);
+  return rowToKey(row);
+}
+
 export async function createApiKey(name, machineId, extra = {}) {
   if (!machineId) throw new Error("machineId is required");
   const db = await getAdapter();
@@ -74,11 +85,13 @@ export async function createApiKey(name, machineId, extra = {}) {
     maxRequestsPerDay: extra.maxRequestsPerDay ?? null,
     maxSpendUsdPerDay: extra.maxSpendUsdPerDay ?? null,
     createdAt: new Date().toISOString(),
+    access: { restricted: false, allow: [] },
   };
   const row = keyToRow(apiKey);
+  const cols = keyAccessToColumns(KEY_ACCESS_UNRESTRICTED);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, allowedModels, blockedModels, allowedCombos, scopes, expiresAt, lastUsedAt, maxRequestsPerDay, maxSpendUsdPerDay, createdAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [row.id, row.key, row.name, row.machineId, row.isActive, row.allowedModels, row.blockedModels, row.allowedCombos, row.scopes, row.expiresAt, row.lastUsedAt, row.maxRequestsPerDay, row.maxSpendUsdPerDay, row.createdAt]
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, allowedModels, blockedModels, allowedCombos, scopes, expiresAt, lastUsedAt, maxRequestsPerDay, maxSpendUsdPerDay, createdAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [row.id, row.key, row.name, row.machineId, row.isActive, row.allowedModels, row.blockedModels, row.allowedCombos, row.scopes, row.expiresAt, row.lastUsedAt, row.maxRequestsPerDay, row.maxSpendUsdPerDay, row.createdAt, cols.accessRestricted, cols.accessAllow]
   );
   return apiKey;
 }
@@ -90,7 +103,8 @@ export async function updateApiKey(id, data) {
     const row = db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]);
     if (!row) return;
     const merged = {
-      ...rowToKey(row),      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...rowToKey(row),
+      ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       ...(data.allowedModels !== undefined ? { allowedModels: data.allowedModels } : {}),
       ...(data.blockedModels !== undefined ? { blockedModels: data.blockedModels } : {}),
@@ -99,13 +113,15 @@ export async function updateApiKey(id, data) {
       ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
       ...(data.maxRequestsPerDay !== undefined ? { maxRequestsPerDay: data.maxRequestsPerDay } : {}),
       ...(data.maxSpendUsdPerDay !== undefined ? { maxSpendUsdPerDay: data.maxSpendUsdPerDay } : {}),
+      ...(data.access !== undefined ? { access: data.access } : {}),
     };
     const r = keyToRow(merged);
+    const cols = keyAccessToColumns(merged.access);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, allowedModels = ?, blockedModels = ?, allowedCombos = ?, scopes = ?, expiresAt = ?, maxRequestsPerDay = ?, maxSpendUsdPerDay = ? WHERE id = ?`,
-      [r.key, r.name, r.machineId, r.isActive, r.allowedModels, r.blockedModels, r.allowedCombos, r.scopes, r.expiresAt, r.maxRequestsPerDay, r.maxSpendUsdPerDay, id]
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, allowedModels = ?, blockedModels = ?, allowedCombos = ?, scopes = ?, expiresAt = ?, maxRequestsPerDay = ?, maxSpendUsdPerDay = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
+      [r.key, r.name, r.machineId, r.isActive, r.allowedModels, r.blockedModels, r.allowedCombos, r.scopes, r.expiresAt, r.maxRequestsPerDay, r.maxSpendUsdPerDay, cols.accessRestricted, cols.accessAllow, id]
     );
-    result = merged;
+    result = rowToKey(db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]));
   });
   return result;
 }

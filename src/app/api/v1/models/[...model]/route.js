@@ -2,6 +2,7 @@ import { buildModelsList } from "../route.js";
 import { getApiKeyMetadata } from "@/lib/localDb";
 import { extractApiKey } from "@/sse/services/auth";
 import { modelPatternMatches } from "@/shared/utils/modelPermissions.js";
+import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 
 // URL slug → service kind(s). `web` covers both webSearch and webFetch.
 const KIND_SLUG_MAP = {
@@ -53,11 +54,12 @@ export async function GET(request, { params }) {
     const path = Array.isArray(model) ? model : [model];
     const identifier = path.filter(Boolean).join("/");
     const kindFilter = path.length === 1 ? KIND_SLUG_MAP[identifier] : null;
+    const keyAccess = await getKeyAccessContext(request);
 
     const allowedModels = await getAllowedModelsFilter(request);
 
     if (kindFilter) {
-      let data = await buildModelsList(kindFilter);
+      let data = await filterModelsListForKey(keyAccess, await buildModelsList(kindFilter));
       if (allowedModels) {
         data = data.filter((m) => allowedModels.some((p) => modelPatternMatches(p, [m.id])));
       }
@@ -66,7 +68,7 @@ export async function GET(request, { params }) {
 
     // Match the same LLM catalog exposed by GET /v1/models. A catch-all
     // parameter is required because provider-prefixed IDs contain a slash.
-    const models = await buildModelsList([LLM_KIND]);
+    const models = await filterModelsListForKey(keyAccess, await buildModelsList([LLM_KIND]));
     const matchedModel = models.find((candidate) => candidate.id === identifier);
 
     if (!matchedModel || (allowedModels && !allowedModels.some((p) => modelPatternMatches(p, [matchedModel.id])))) {

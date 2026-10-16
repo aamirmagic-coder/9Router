@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createOpenCodeToolResponseGuard } from "open-sse/utils/opencodeToolResponseGuard.js";
-import { applyFingerprintTools, takeFingerprintMetadata } from "open-sse/utils/opencodeFingerprint.js";
+import { applyFingerprintTools, takeFingerprintMetadata, restoreToolNames } from "open-sse/utils/opencodeFingerprint.js";
 
 const chatTools = (names) => names.map((name) => ({ type: "function", function: { name } }));
 
@@ -37,7 +37,7 @@ describe("OpenCode tool response guard", () => {
 
   it("rejects an injected-only Chat call only when finish_reason makes its name definitive", () => {
     const guard = createOpenCodeToolResponseGuard(fingerprintMetadata());
-    expect(guard.consume(call(chat(0, 0, "grep"), "blocked")).releasedEvents).toEqual([]);
+    expect(guard.consume(call(chat(0, 0, "read"), "blocked")).releasedEvents).toEqual([]);
     expectGuardError(() => guard.consume(call({ choices: [{ index: 0, finish_reason: "tool_calls" }] }, "finish")), "upstream_undeclared_tool");
   });
 
@@ -69,26 +69,35 @@ describe("OpenCode tool response guard", () => {
   it("rejects complete Responses and Claude injected-only names immediately", () => {
     const responses = createOpenCodeToolResponseGuard(fingerprintMetadata());
     expectGuardError(
-      () => responses.consume(call({ output_index: 0, item: { type: "function_call", name: "grep" } })),
+      () => responses.consume(call({ output_index: 0, item: { type: "function_call", name: "read" } })),
       "upstream_undeclared_tool",
     );
     const nestedResponses = createOpenCodeToolResponseGuard(fingerprintMetadata());
-    expectGuardError(() => nestedResponses.consume(call({ response: { output: [{ type: "function_call", name: "grep" }] } })), "upstream_undeclared_tool");
+    expectGuardError(() => nestedResponses.consume(call({ response: { output: [{ type: "function_call", name: "shell" }] } })), "upstream_undeclared_tool");
     const claude = createOpenCodeToolResponseGuard(fingerprintMetadata());
     expectGuardError(
-      () => claude.consume(call({ index: 0, type: "content_block_start", content_block: { type: "tool_use", name: "grep" } })),
+      () => claude.consume(call({ index: 0, type: "content_block_start", content_block: { type: "tool_use", name: "read" } })),
       "upstream_undeclared_tool",
     );
   });
 
-  it("permits an actual caller Grep canonicalized by applyFingerprintTools", () => {
-    const metadata = fingerprintMetadata(["Grep"]);
+  it("aliases an exact caller read collision and restores read_client to read", () => {
+    const metadata = fingerprintMetadata(["read"]);
     const guard = createOpenCodeToolResponseGuard(metadata);
-    expect(metadata.renameMap.get("grep")).toBe("Grep");
-    expect(metadata.injectedNames.has("grep")).toBe(false);
-    expect(guard.consume(call(chat(0, 0, "grep"), "grep")).releasedEvents).toEqual([]);
+    expect(metadata.renameMap.get("read_client")).toBe("read");
+    expect(metadata.injectedNames.has("read")).toBe(true);
+
+    const aliased = chat(0, 0, "read_client");
+    expect(guard.consume(call(aliased, "aliased")).releasedEvents).toEqual([]);
     expect(guard.consume(call({ choices: [{ index: 0, finish_reason: "tool_calls" }] }, "finish")).releasedEvents)
-      .toEqual(["grep", "finish"]);
+      .toEqual(["aliased", "finish"]);
+
+    const restored = restoreToolNames(aliased, metadata);
+    expect(restored.choices[0].delta.tool_calls[0].function.name).toBe("read");
+
+    const injected = createOpenCodeToolResponseGuard(metadata);
+    expect(injected.consume(call(chat(0, 0, "read"), "injected")).releasedEvents).toEqual([]);
+    expectGuardError(() => injected.consume(call({ choices: [{ index: 0, finish_reason: "tool_calls" }] }, "finish")), "upstream_undeclared_tool");
   });
 
   it("rejects malformed identities and unresolved suffixes at finish", () => {
@@ -189,7 +198,7 @@ describe("OpenCode tool response guard", () => {
   it("releases ordinary text events immediately and holds an injected fragment until finish", () => {
     const guard = createOpenCodeToolResponseGuard(fingerprintMetadata());
     expect(guard.consume(call({ choices: [{ index: 0, delta: { content: "text" } }] }, "text")).releasedEvents).toEqual(["text"]);
-    expect(guard.consume(call(chat(0, 0, "grep"), "blocked")).releasedEvents).toEqual([]);
+    expect(guard.consume(call(chat(0, 0, "read"), "blocked")).releasedEvents).toEqual([]);
     expectGuardError(() => guard.finish(), "upstream_tool_unresolved");
   });
 });

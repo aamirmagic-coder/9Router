@@ -157,7 +157,7 @@ describe("forced-SSE JSON path for a Responses-API client behind a chat upstream
     const ctx = sseCtx(FORMATS.OPENAI, FORMATS.OPENAI);
     ctx.toolNameMap = fingerprintMetadata();
     const raw = [
-      'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"grep","arguments":"{\\"secret\\":\\"nope\\"}"}}]},"finish_reason":null}]}',
+      'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"{\\"secret\\":\\"nope\\"}"}}]},"finish_reason":null}]}',
       'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
       'data: [DONE]',
       "",
@@ -181,7 +181,7 @@ describe("forced-SSE JSON path for a Responses-API client behind a chat upstream
     ctx.provider = "codex";
     ctx.toolNameMap = fingerprintMetadata();
     const raw = [
-      'event: response.completed\ndata: {"response":{"output":[{"type":"function_call","name":"grep","call_id":"x","arguments":"{\\"token\\":\\"nope\\"}"}]}}',
+      'event: response.completed\ndata: {"response":{"output":[{"type":"function_call","name":"shell","call_id":"x","arguments":"{\\"token\\":\\"nope\\"}"}]}}',
       "",
     ].join("\n");
     const encoder = new TextEncoder();

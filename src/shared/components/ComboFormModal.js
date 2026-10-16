@@ -9,6 +9,10 @@ import { getComboModelValue, setComboModelValue } from "@/shared/utils/comboMode
 
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 
+export function removeComboModels(models, values) {
+  return models.filter((entry) => !values.has(getComboModelValue(entry)));
+}
+
 // Inline editable model item
 function ModelItem({ index, model, isFirst, isLast, onEdit, onMoveUp, onMoveDown, onRemove }) {
   const modelValue = getComboModelValue(model);
@@ -172,6 +176,14 @@ export default function ComboFormModal({ isOpen, combo, onClose, onSave, activeP
       {showModelSelect && (
         <ModelSelectModal isOpen={showModelSelect} onClose={() => setShowModelSelect(false)}
           onSelect={handleAddModel} onDeselect={handleDeselectModel}
+          onSelectBatch={(items) => {
+            const vals = items.map((m) => m?.value || m?.name || m).filter(Boolean);
+            setModels((prev) => [...new Set([...prev, ...vals])]);
+          }}
+          onDeselectBatch={(items) => {
+            const vals = new Set(items.map((m) => m?.value || m?.name || m).filter(Boolean));
+            setModels((prev) => removeComboModels(prev, vals));
+          }}
           activeProviders={activeProviders} modelAliases={modelAliases}
           title="Add Model to Combo" kindFilter={kindFilter}
           addedModelValues={models.map(getComboModelValue)} closeOnSelect={false} />

@@ -117,8 +117,10 @@ export default function SmartPolicyModal({
                     >
                       {isSelected && <span className="size-1.5 rounded-full bg-white" />}
                     </span>
-                    <span className="material-symbols-outlined text-[17px] text-text-muted">
-                      {p.icon}
+                    <span className="size-5 rounded flex items-center justify-center shrink-0 text-text-muted">
+                      <span className="material-symbols-outlined text-[15px] leading-none select-none inline-block">
+                        {p.icon}
+                      </span>
                     </span>
                     <span className="text-sm font-medium text-text-main">
                       {p.title}

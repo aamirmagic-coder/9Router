@@ -4,6 +4,7 @@ import { checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
 import {
   DEFAULT_SYSTEMONE_ROUTER_MODEL,
+  DEFAULT_SYSTEMONE_TIMEOUT_MS,
   extractPromptState,
   buildChoiceCriteria,
   parseSystemOneRouteAnswer,
@@ -22,7 +23,7 @@ import {
  * @param {string[]} opts.models - Combo model candidate array
  * @param {string} [opts.routerModel] - System One router model (defaults to oc/jev-1.13-free)
  * @param {object} [opts.log] - Logger
- * @param {number} [opts.timeoutMs=1500] - Hard ceiling for router evaluation
+ * @param {number} [opts.timeoutMs=DEFAULT_SYSTEMONE_TIMEOUT_MS] - Hard ceiling for router evaluation
  * @returns {Promise<{ choice: string, confidence: number|null, probabilities: Record<string, number>|null } | null>}
  */
 export async function resolveSmartChoice({
@@ -30,7 +31,7 @@ export async function resolveSmartChoice({
   models,
   routerModel = DEFAULT_SYSTEMONE_ROUTER_MODEL,
   log,
-  timeoutMs = 1500,
+  timeoutMs = DEFAULT_SYSTEMONE_TIMEOUT_MS,
 }) {
   if (!Array.isArray(models) || models.length <= 1) return null;
 

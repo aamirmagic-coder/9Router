@@ -130,7 +130,7 @@ Rotates models across incoming requests to distribute load and prevent exhaustin
 
 ### 3. Smart Router (System One)
 Uses a **System One decision model** (configured under **Media Providers → System One**) to evaluate user prompts and dynamically pick the optimal model before generation begins.
-- **Fail-Open**: If the System One model is unreachable or times out (1.5s), 9Router safely falls back to standard sequential order.
+- **Fail-Open**: If the System One model is unreachable or times out (default 8s), 9Router safely falls back to standard sequential order.
 - **Session Policies (Prompt Cache Retention)**:
   - **Smart Switch (Default, adaptive ≥80% confidence)**: Remembers the chosen model for the session to keep upstream prompt cache warm (Claude Prompt Cache, DeepSeek KV-cache, Gemini Implicit Cache). If the user's task drastically changes on a subsequent turn and System One is highly confident (≥80%), the session automatically switches to the new optimal model.
   - **Strict Lock (1 task = 1 session)**: Evaluates System One once on the first turn, then locks that model for the entire session. Adds **0 ms latency** and **0 extra router calls** on follow-up turns, guaranteeing 100% prompt cache reuse.

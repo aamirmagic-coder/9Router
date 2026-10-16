@@ -5,6 +5,7 @@
  */
 
 export const DEFAULT_SYSTEMONE_ROUTER_MODEL = "oc/jev-1.13-free";
+export const DEFAULT_SYSTEMONE_TIMEOUT_MS = 8000;
 export const MAX_STATE_CHARS = 2000;
 export const MAX_STICKY_SESSIONS = 5000;
 export const STICKY_SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours

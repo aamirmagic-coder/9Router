@@ -9,6 +9,7 @@ import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModa
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import { updateComboStrategy } from "@/shared/utils/comboStrategy";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -47,6 +48,7 @@ function normalizeCapEntry(entry) {
 }
 
 const STRATEGY_OPTIONS = [
+  { value: "inherit", label: "Inherit global strategy" },
   { value: "fallback", label: "Fallback — try in order" },
   { value: "round-robin", label: "Round Robin — rotate" },
   { value: "fusion", label: "Fusion — panel + judge" },
@@ -59,6 +61,7 @@ export default function CombosPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
+  const [globalComboStrategy, setGlobalComboStrategy] = useState("fallback");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -170,6 +173,7 @@ export default function CombosPage() {
         setActiveProviders((providersData.connections || []).filter((c) => c.isActive !== false));
       }
       setComboStrategies(settingsData.comboStrategies || {});
+      setGlobalComboStrategy(settingsData.comboStrategy || "fallback");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -308,20 +312,10 @@ export default function CombosPage() {
     });
   };
 
-  // Merge a per-combo strategy patch into settings.comboStrategies. Passing an empty
-  // patch (strategy back to default "fallback") drops the entry entirely.
+  // An explicit fallback must override the global strategy; only Inherit removes it.
   const handleSetComboStrategy = async (comboName, patch) => {
     try {
-      const updated = { ...comboStrategies };
-      const next = { ...(updated[comboName] || {}), ...patch };
-      // Prune to keep settings clean: default fallback with no extras = no entry.
-      if (!next.fallbackStrategy || next.fallbackStrategy === "fallback") {
-        delete updated[comboName];
-      } else {
-        updated[comboName] = next;
-      }
-
-      await persistComboStrategies(updated);
+      await persistComboStrategies(updateComboStrategy(comboStrategies, comboName, patch));
     } catch (error) {
       console.log("Error updating combo strategy:", error);
     }
@@ -331,16 +325,9 @@ export default function CombosPage() {
     if (selectedCombos.length === 0 || !strategy) return;
     setBulkBusy(true);
     try {
-      const updated = { ...comboStrategies };
+      let updated = { ...comboStrategies };
       for (const combo of selectedCombos) {
-        if (!strategy || strategy === "fallback") {
-          delete updated[combo.name];
-        } else {
-          updated[combo.name] = {
-            ...(updated[combo.name] || {}),
-            fallbackStrategy: strategy,
-          };
-        }
+        updated = updateComboStrategy(updated, combo.name, { fallbackStrategy: strategy });
       }
       await persistComboStrategies(updated);
     } catch (error) {
@@ -499,6 +486,7 @@ export default function CombosPage() {
                   onEdit={() => setEditingCombo(combo)}
                   onDelete={() => handleDelete(combo.id)}
                   strategy={comboStrategies[combo.name] || {}}
+                  globalComboStrategy={globalComboStrategy}
                   onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
                   selected={selectedIds.includes(combo.id)}
                   onToggleSelect={() => toggleSelect(combo.id)}
@@ -563,11 +551,11 @@ const fmtK = (n) => {
   return `${Math.round(n / 1000)}k`;
 };
 
-function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy, selected = false, onToggleSelect }) {
+function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, globalComboStrategy = "fallback", onSetStrategy, selected = false, onToggleSelect }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
-  const current = strategy.fallbackStrategy || "fallback";
+  const current = strategy.fallbackStrategy || "inherit";
   const judge = strategy.judgeModel || "";
-  const isFusion = current === "fusion";
+  const isFusion = (current === "inherit" ? globalComboStrategy : current) === "fusion";
   // The synced catalog is server-only, so resolving here would fall back to the
   // generic patterns and under-report the limits. getCaps carries the server's
   // answer for /api/models.
@@ -649,7 +637,9 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
           {/* Strategy selector — always visible */}
           <div className="w-full sm:w-[200px]">
             <Select
-              options={STRATEGY_OPTIONS}
+              options={STRATEGY_OPTIONS.map((option) => option.value === "inherit"
+                ? { ...option, label: `Inherit global — ${globalComboStrategy}` }
+                : option)}
               value={current}
               onChange={(e) => onSetStrategy({ fallbackStrategy: e.target.value })}
               selectClassName="py-1.5 text-xs"

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import initSqlJs from "sql.js";
 import { PRAGMA_SQL } from "../schema.js";
 
@@ -23,7 +24,15 @@ export async function createSqlJsAdapter(filePath) {
 
   function persist() {
     const data = db.export();
-    fs.writeFileSync(filePath, Buffer.from(data));
+    const temporary = `${filePath}.tmp`;
+    const fd = fs.openSync(temporary, 'w', 0o600);
+    try { fs.writeFileSync(fd, Buffer.from(data)); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    fs.renameSync(temporary, filePath);
+    if (process.platform !== 'win32') {
+      const dir = fs.openSync(path.dirname(filePath), 'r');
+      try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
+    }
     dirty = false;
   }
 
@@ -111,5 +120,9 @@ export async function createSqlJsAdapter(filePath) {
   process.on("SIGINT", flush);
   process.on("SIGTERM", flush);
 
-  return { driver: "sql.js", run, get, all, exec, transaction, close, raw: db };
+  function flushDurable() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (dirty) persist();
+  }
+  return { driver: "sql.js", run, get, all, exec, transaction, close, flushDurable, raw: db };
 }

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -19,6 +19,15 @@ PRAGMA busy_timeout = 5000;
 // auto-add missing tables/columns/indexes after versioned migrations.
 // For destructive changes (drop/rename/type-change), write a migration file.
 export const TABLES = {
+  haEvents: {
+    columns: { position: 'INTEGER PRIMARY KEY AUTOINCREMENT', id: 'TEXT UNIQUE NOT NULL', origin: 'TEXT NOT NULL', seq: 'INTEGER NOT NULL', data: 'TEXT NOT NULL' },
+    indexes: ['CREATE UNIQUE INDEX IF NOT EXISTS idx_ha_origin_seq ON haEvents(origin,seq)'],
+  },
+  haVersions: {
+    columns: { entity: 'TEXT NOT NULL', field: 'TEXT NOT NULL', eventId: 'TEXT NOT NULL', data: 'TEXT NOT NULL' },
+    primaryKey: 'PRIMARY KEY(entity,field,eventId)',
+  },
+  haMeta: { columns: { key: 'TEXT PRIMARY KEY', value: 'TEXT NOT NULL' } },
   _meta: {
     columns: {
       key: "TEXT PRIMARY KEY",

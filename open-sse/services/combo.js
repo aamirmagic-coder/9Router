@@ -328,8 +328,9 @@ export function isZeroContentResponse(data) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @param {boolean} [options.autoSwitch=true] - Capability auto-switching
  * @param {string|null} [options.sessionId=null] - Client session identifier for prompt cache retention
+ * @param {string} [options.smartPolicy="smart-switch"] - Policy: "smart-switch" (adaptive), "strict" (lock 1st model), or "per-turn"
  * @param {boolean} [options.sessionSticky=true] - Keep chosen model across session requests to retain prompt cache
- * @param {number} [options.confidenceThreshold=0] - Minimum confidence required to accept decision (0-1)
+ * @param {number} [options.confidenceThreshold=0.8] - Minimum confidence required for smart-switch topic change (0-1)
  * @param {Function|null} [options.resolveSmartChoice=null] - Smart router resolver callback: (body, models) => Promise<{ choice, probabilities, confidence } | null>
  * @returns {Promise<Response>}
  */
@@ -343,34 +344,77 @@ export async function handleComboChat({
   comboStickyLimit = 1,
   autoSwitch = true,
   sessionId = null,
+  smartPolicy = "smart-switch",
   sessionSticky = true,
-  confidenceThreshold = 0,
+  confidenceThreshold = 0.8,
   resolveSmartChoice = null,
 }) {
   let rotatedModels = models;
   let activeStickyModel = null;
 
   if (comboStrategy === "smart") {
-    if (sessionSticky && sessionId) {
+    const policy = (typeof smartPolicy === "string" ? smartPolicy : "smart-switch").toLowerCase();
+    const isPerTurn = policy === "per-turn" || sessionSticky === false;
+    const isStrict = policy === "strict";
+
+    let switchThreshold = 0.8;
+    if (policy === "smart-switch-70") switchThreshold = 0.7;
+    else if (policy === "smart-switch-90") switchThreshold = 0.9;
+    else if (policy.startsWith("smart-switch")) {
+      const custom = Number(confidenceThreshold);
+      if (Number.isFinite(custom) && custom > 0) switchThreshold = custom;
+    }
+
+    if (!isPerTurn && sessionId) {
       activeStickyModel = getStickyComboModel(comboName, sessionId, models);
     }
 
     if (activeStickyModel) {
-      rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
-      log.info("COMBO", `smart-router sticky session "${sessionId}" → ${activeStickyModel}`);
+      if (isStrict) {
+        // Strict Lock: re-use sticky model without invoking System One (0ms, 0 extra tokens)
+        rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
+        log.info("COMBO", `smart-router [strict] locked session "${sessionId}" → ${activeStickyModel}`);
+      } else if (typeof resolveSmartChoice === "function") {
+        // Smart Switch (Adaptive): check if the user's task drastically shifted
+        try {
+          const smartResult = await resolveSmartChoice(body, models);
+          const newChoice = smartResult?.choice;
+          const conf = typeof smartResult?.confidence === "number" ? smartResult.confidence : null;
+
+          if (newChoice && newChoice !== activeStickyModel && models.includes(newChoice) && conf !== null && conf >= switchThreshold) {
+            // Task changed with high confidence: switch model and update session
+            rotatedModels = orderModelsByChoice(models, smartResult);
+            log.info("COMBO", `smart-router [smart-switch] task changed → switched from ${activeStickyModel} to ${newChoice} (confidence: ${conf} >= ${switchThreshold})`);
+            if (sessionId) {
+              setStickyComboModel(comboName, sessionId, newChoice);
+              activeStickyModel = newChoice;
+            }
+          } else {
+            // Stay on current model to preserve warm prompt cache
+            rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
+            log.info("COMBO", `smart-router [smart-switch] retained prompt cache model "${activeStickyModel}"`);
+          }
+        } catch (err) {
+          // Fail open to active sticky model
+          rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
+          log.warn("COMBO", `smart-router error, retained model "${activeStickyModel}"`, { error: err?.message || String(err) });
+        }
+      } else {
+        rotatedModels = [activeStickyModel, ...models.filter((m) => m !== activeStickyModel)];
+      }
     } else if (typeof resolveSmartChoice === "function") {
+      // Turn 1 or per-turn: evaluate System One to select initial model
       try {
         const smartResult = await resolveSmartChoice(body, models);
-        const minConf = Number.isFinite(Number(confidenceThreshold)) ? Number(confidenceThreshold) : 0;
         const conf = typeof smartResult?.confidence === "number" ? smartResult.confidence : null;
 
         if (smartResult?.choice && models.includes(smartResult.choice)) {
-          if (minConf > 0 && conf !== null && conf < minConf) {
-            log.info("COMBO", `smart-router confidence (${conf}) below threshold (${minConf}), fallback to order: [${models.join(", ")}]`);
+          if (switchThreshold > 0 && conf !== null && conf < switchThreshold) {
+            log.info("COMBO", `smart-router confidence (${conf}) below threshold (${switchThreshold}), fallback to order: [${models.join(", ")}]`);
           } else {
             rotatedModels = orderModelsByChoice(models, smartResult);
             log.info("COMBO", `smart-router selected ${smartResult.choice} (confidence: ${conf ?? "N/A"})`);
-            if (sessionSticky && sessionId) {
+            if (!isPerTurn && sessionId) {
               setStickyComboModel(comboName, sessionId, smartResult.choice);
               activeStickyModel = smartResult.choice;
             }

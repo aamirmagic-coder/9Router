@@ -54,12 +54,28 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-const CONFIDENCE_OPTIONS = [
-  { value: "0", label: "Auto (any confidence)" },
-  { value: "0.7", label: "70% min confidence" },
-  { value: "0.8", label: "80% min confidence" },
-  { value: "0.9", label: "90% min confidence" },
+const SMART_POLICY_OPTIONS = [
+  { value: "smart-switch", label: "Smart Switch (adaptive ≥80%)" },
+  { value: "strict", label: "Strict Lock (1 task = 1 session)" },
+  { value: "smart-switch-90", label: "Conservative Switch (≥90%)" },
+  { value: "smart-switch-70", label: "Sensitive Switch (≥70%)" },
+  { value: "per-turn", label: "Per-Turn (evaluate every prompt)" },
 ];
+
+function getPolicyDescription(policy) {
+  switch (policy) {
+    case "strict":
+      return "Locks first model for entire session (+0ms latency, 0 extra calls, 100% prompt cache)";
+    case "per-turn":
+      return "Evaluates System One on every prompt independently (no session caching)";
+    case "smart-switch-90":
+      return "High prompt cache retention; only switches on near-certainty (≥90% confidence)";
+    case "smart-switch-70":
+      return "Quickly adapts to topic shifts (≥70% confidence), balanced prompt cache retention";
+    default:
+      return "Retains prompt cache; switches model if task shifts with high confidence (≥80%)";
+  }
+}
 
 export default function CombosPage() {
   const [combos, setCombos] = useState([]);
@@ -380,7 +396,7 @@ export default function CombosPage() {
           <ul className="text-sm text-text-muted mt-2 flex flex-col gap-1">
             <li><span className="font-medium text-text-main">Fallback</span> — tries models in order (next on failure)</li>
             <li><span className="font-medium text-text-main">Round Robin</span> — rotates models across requests to spread load</li>
-            <li><span className="font-medium text-text-main">Smart Router</span> — queries a System One decision model to pick the optimal model per request or session before generation, with session stickiness for prompt-cache retention</li>
+            <li><span className="font-medium text-text-main">Smart Router</span> — queries a System One decision model to pick the optimal model before generation; supports Smart Switch (adaptive hysteresis), Strict Lock (1 task = 1 session, +0ms latency), and Per-Turn modes to maximize prompt-cache retention</li>
             <li><span className="font-medium text-text-main">Fusion</span> — queries all models in parallel, then a judge synthesizes one answer. Best quality, but costs the most: every request bills all panel models + the judge (N+1 calls)</li>
           </ul>
           <p className="hidden text-xs text-text-muted mt-3 max-w-2xl">
@@ -679,8 +695,7 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
             {/* Smart: System One router picker and tuning */}
             {isSmart && (() => {
               const routerStatus = getRouterModelStatus(routerModel, activeProviders);
-              const isSticky = strategy.sessionSticky !== false;
-              const confVal = String(strategy.confidenceThreshold ?? "0");
+              const policy = strategy.smartPolicy || (strategy.sessionSticky === false ? "per-turn" : "smart-switch");
               return (
                 <div className="mt-2.5 flex flex-col gap-2 rounded-lg border border-border/40 bg-black/[0.01] dark:bg-white/[0.01] p-2">
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -718,35 +733,28 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-border/30">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pt-1 border-t border-border/30">
                     <div className="flex items-center gap-2">
-                      <Toggle
-                        size="sm"
-                        checked={isSticky}
-                        onChange={(val) => onSetStrategy({ sessionSticky: val })}
-                      />
-                      <span
-                        className="text-[11px] font-medium text-text-muted cursor-pointer"
-                        onClick={() => onSetStrategy({ sessionSticky: !isSticky })}
-                      >
-                        Session Sticky
-                      </span>
-                      <span className="text-[10px] text-text-muted hidden sm:inline">
-                        ({isSticky ? "retains prompt cache across turns" : "evaluates every turn"})
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-text-muted">Min Confidence</span>
-                      <div className="w-[155px]">
+                      <span className="text-[11px] font-medium text-text-muted">Session Policy</span>
+                      <div className="w-[230px]">
                         <Select
-                          options={CONFIDENCE_OPTIONS}
-                          value={confVal}
-                          onChange={(e) => onSetStrategy({ confidenceThreshold: parseFloat(e.target.value) || 0 })}
+                          options={SMART_POLICY_OPTIONS}
+                          value={policy}
+                          onChange={(e) => {
+                            const nextPolicy = e.target.value;
+                            onSetStrategy({
+                              smartPolicy: nextPolicy,
+                              sessionSticky: nextPolicy !== "per-turn",
+                            });
+                          }}
                           selectClassName="py-1 text-xs"
                         />
                       </div>
                     </div>
+
+                    <p className="text-[10px] text-text-muted italic truncate">
+                      {getPolicyDescription(policy)}
+                    </p>
                   </div>
                 </div>
               );

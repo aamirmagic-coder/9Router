@@ -180,6 +180,7 @@ describe("System One Smart Combo Router", () => {
         comboName: "dev-combo",
         comboStrategy: "smart",
         sessionId: "session-abc",
+        smartPolicy: "strict",
         resolveSmartChoice,
       });
 
@@ -187,7 +188,7 @@ describe("System One Smart Combo Router", () => {
       expect(resolveSmartChoice).toHaveBeenCalledTimes(1);
       expect(calls[0]).toBe("ds/deepseek-v4");
 
-      // Turn 2: same session, resolveSmartChoice should NOT be called again (session sticky!)
+      // Turn 2: same session, resolveSmartChoice should NOT be called again (strict policy!)
       const res2 = await handleComboChat({
         body: { messages: [{ role: "user", content: "Add unit tests for it" }] },
         models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
@@ -196,6 +197,7 @@ describe("System One Smart Combo Router", () => {
         comboName: "dev-combo",
         comboStrategy: "smart",
         sessionId: "session-abc",
+        smartPolicy: "strict",
         resolveSmartChoice,
       });
 
@@ -335,6 +337,129 @@ describe("System One Smart Combo Router", () => {
       expect(resolveSmartChoice).toHaveBeenCalledTimes(1);
       // Because confidence 0.65 < threshold 0.8, preserved default order (cx/gpt-5-mini first)
       expect(calls[0]).toBe("cx/gpt-5-mini");
+    });
+
+    it("supports strict lock policy: never calls router on subsequent turns", async () => {
+      const calls = [];
+      const handleSingleModel = vi.fn(async (_body, model) => {
+        calls.push(model);
+        return okResponse(`Answer from ${model}`);
+      });
+
+      const resolveSmartChoice = vi.fn(async () => ({
+        choice: "ds/deepseek-v4",
+        confidence: 0.9,
+      }));
+
+      // Turn 1
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Initial task" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-strict",
+        smartPolicy: "strict",
+        resolveSmartChoice,
+      });
+
+      expect(resolveSmartChoice).toHaveBeenCalledTimes(1);
+      expect(calls[0]).toBe("ds/deepseek-v4");
+
+      // Turn 2: Strict lock means resolveSmartChoice is NOT called at all (+0ms latency)
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Follow-up question" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-strict",
+        smartPolicy: "strict",
+        resolveSmartChoice,
+      });
+
+      expect(resolveSmartChoice).toHaveBeenCalledTimes(1); // Still exactly 1!
+      expect(calls[1]).toBe("ds/deepseek-v4");
+    });
+
+    it("supports smart-switch adaptive hysteresis: retains cache on minor changes, switches on high confidence", async () => {
+      const calls = [];
+      const handleSingleModel = vi.fn(async (_body, model) => {
+        calls.push(model);
+        return okResponse(`Answer from ${model}`);
+      });
+
+      let currentDecision = {
+        choice: "cx/gpt-5-mini",
+        confidence: 0.85,
+      };
+      const resolveSmartChoice = vi.fn(async () => currentDecision);
+
+      // Turn 1: selects gpt-5-mini
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Explain async/await" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-adaptive",
+        smartPolicy: "smart-switch",
+        resolveSmartChoice,
+      });
+
+      expect(calls[0]).toBe("cx/gpt-5-mini");
+      expect(resolveSmartChoice).toHaveBeenCalledTimes(1);
+
+      // Turn 2: System One suggests deepseek, but confidence is only 0.65 (< 0.8 threshold)
+      // Must RETAIN cx/gpt-5-mini to preserve warm prompt cache!
+      currentDecision = {
+        choice: "ds/deepseek-v4",
+        confidence: 0.65,
+      };
+
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Can you give a quick example?" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-adaptive",
+        smartPolicy: "smart-switch",
+        resolveSmartChoice,
+      });
+
+      expect(resolveSmartChoice).toHaveBeenCalledTimes(2);
+      expect(calls[1]).toBe("cx/gpt-5-mini"); // Retained! Cache protected.
+
+      // Turn 3: User drastically changes task to complex SIMD / kernel hacking.
+      // System One suggests deepseek with high confidence 0.95 (>= 0.8 threshold).
+      // Must SWITCH to ds/deepseek-v4!
+      currentDecision = {
+        choice: "ds/deepseek-v4",
+        confidence: 0.95,
+      };
+
+      await handleComboChat({
+        body: { messages: [{ role: "user", content: "Now write an AVX-512 SIMD matrix multiply in assembly" }] },
+        models: ["cx/gpt-5-mini", "ds/deepseek-v4"],
+        handleSingleModel,
+        log,
+        comboName: "dev-combo",
+        comboStrategy: "smart",
+        sessionId: "session-adaptive",
+        smartPolicy: "smart-switch",
+        resolveSmartChoice,
+      });
+
+      expect(resolveSmartChoice).toHaveBeenCalledTimes(3);
+      expect(calls[2]).toBe("ds/deepseek-v4"); // Switched!
+
+      // Verify the session now holds deepseek as its new sticky model
+      expect(getStickyComboModel("dev-combo", "session-adaptive", ["cx/gpt-5-mini", "ds/deepseek-v4"])).toBe("ds/deepseek-v4");
     });
 
     it("accepts chosen model when confidence meets or exceeds confidenceThreshold", async () => {

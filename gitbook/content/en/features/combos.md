@@ -129,10 +129,13 @@ Tries models sequentially in the configured order. The first model is always cal
 Rotates models across incoming requests to distribute load and prevent exhausting a single model's quota. You can configure a sticky limit (calls per model before rotating).
 
 ### 3. Smart Router (System One)
-Uses a **System One decision model** (configured under **Media Providers → System One**) to evaluate the prompt and select the most capable model before generation begins.
+Uses a **System One decision model** (configured under **Media Providers → System One**) to evaluate user prompts and dynamically pick the optimal model before generation begins.
 - **Fail-Open**: If the System One model is unreachable or times out (1.5s), 9Router safely falls back to standard sequential order.
-- **Session Sticky (Default: ON)**: Once a model is selected for a conversation session (`sessionId`), 9Router sticks to that model across subsequent turns to retain upstream prompt cache (Claude Prompt Cache, DeepSeek KV-cache, Gemini Implicit Cache). If the active model errors or rate-limits, the session mapping is cleared and failover occurs immediately.
-- **Min Confidence Threshold**: An optional threshold (e.g. 70%, 80%, 90%). When decision confidence is below this cutoff, 9Router preserves the default combo order rather than guessing.
+- **Session Policies (Prompt Cache Retention)**:
+  - **Smart Switch (Default, adaptive ≥80% confidence)**: Remembers the chosen model for the session to keep upstream prompt cache warm (Claude Prompt Cache, DeepSeek KV-cache, Gemini Implicit Cache). If the user's task drastically changes on a subsequent turn and System One is highly confident (≥80%), the session automatically switches to the new optimal model.
+  - **Strict Lock (1 task = 1 session)**: Evaluates System One once on the first turn, then locks that model for the entire session. Adds **0 ms latency** and **0 extra router calls** on follow-up turns, guaranteeing 100% prompt cache reuse.
+  - **Per-Turn**: Evaluates System One on every turn independently without session stickiness.
+- **Resilience**: If the active model rate-limits (429) or fails, the session lock is cleared and standard fallback to the next model executes immediately.
 
 ### 4. Fusion
 Queries all panel models in parallel, then uses a Judge model to synthesize one final high-quality answer. Best for complex reasoning where multiple perspectives are needed.

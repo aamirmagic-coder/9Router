@@ -18,6 +18,7 @@ import EndpointRow from "./components/EndpointRow";
 import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
+import KeyAccessControls from "./components/KeyAccessControls";
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -698,7 +699,6 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
-
   const fetchUsageStats = async (keyId, period) => {
     const cacheKey = `${keyId}:${period}`;
     if (usageDataCache[cacheKey]) {
@@ -741,21 +741,18 @@ export default function APIPageClient({ machineId }) {
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
-
       const payload = {
         allowedModels: allowedModelsArray,
-        blockedModels: [], // Explicitly clear any legacy blocked models
+        blockedModels: [],
         expiresAt: editForm.expiresAt ? new Date(editForm.expiresAt).toISOString() : null,
         maxRequestsPerDay: editForm.maxRequestsPerDay ? Number(editForm.maxRequestsPerDay) : null,
         maxSpendUsdPerDay: editForm.maxSpendUsdPerDay ? Number(editForm.maxSpendUsdPerDay) : null,
       };
-
       const res = await fetch(`/api/keys/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       const data = await res.json();
       if (res.ok && data.key) {
         setKeys(prev => prev.map(k => k.id === id ? { ...k, ...data.key } : k));
@@ -766,6 +763,24 @@ export default function APIPageClient({ machineId }) {
       }
     } catch (error) {
       console.log("Error updating key policy:", error);
+    }
+  };
+
+  const handleUpdateKeyAccess = async (id, access) => {
+    try {
+      const res = await fetch(`/api/keys/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.key) {
+        setKeys(prev => prev.map(k => k.id === id ? { ...k, access: data.key.access } : k));
+      } else {
+        console.log("Error updating key access:", data.error || res.status);
+      }
+    } catch (error) {
+      console.log("Error updating key access:", error);
     }
   };
 
@@ -1116,18 +1131,13 @@ export default function APIPageClient({ machineId }) {
                           ? `$${Number(usedVal).toFixed(2)} / $${Number(limitVal).toFixed(2)}`
                           : `${usedVal} / ${limitVal} req`;
                         const variant = pct >= 100 ? "error" : pct >= 80 ? "warning" : "success";
-
-                        return (
-                          <Badge variant={variant} size="sm">
-                            {label} limit
-                          </Badge>
-                        );
+                        return <Badge variant={variant} size="sm">{label} limit</Badge>;
                       }
                       return null;
                     })()}
                   </p>
-                  <div className="flex flex-wrap items-center gap-2 mt-1">
-                    <code className="text-xs text-text-muted font-mono break-all">
+                  <div className="flex flex-wrap items-center gap-2 mt-1 min-w-0">
+                    <code className="text-xs text-text-muted font-mono break-all min-w-0">
                       {visibleKeys.has(key.id) ? key.key : maskKey(key.key)}
                     </code>
                     <div className="flex items-center gap-1 shrink-0">
@@ -1156,8 +1166,19 @@ export default function APIPageClient({ machineId }) {
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
+                  <KeyAccessControls
+                    apiKey={key}
+                    onChange={(access) => handleUpdateKeyAccess(key.id, access)}
+                    onRequestRestrict={() => setConfirmState({
+                      title: "Restrict API Key",
+                      message: `Restrict API key "${key.name}"?\n\nIt will only be able to call the combos and models you add. Until you add one, it can call nothing.`,
+                      onConfirm: async () => {
+                        setConfirmState(null);
+                        handleUpdateKeyAccess(key.id, { restricted: true, allow: key.access?.allow || [] });
+                      }
+                    })}
+                  />
                 </div>
-
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mt-3 sm:mt-0 w-full sm:w-auto">
                   <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end">
                     <Button
@@ -1179,7 +1200,7 @@ export default function APIPageClient({ machineId }) {
                           allowedModels: key.allowedModels || [],
                           expiresAt: key.expiresAt ? new Date(key.expiresAt).toISOString().split('T')[0] : "",
                           maxRequestsPerDay: key.maxRequestsPerDay ?? null,
-                          maxSpendUsdPerDay: key.maxSpendUsdPerDay ?? null
+                          maxSpendUsdPerDay: key.maxSpendUsdPerDay ?? null,
                         });
                       }}
                       className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
@@ -1205,7 +1226,7 @@ export default function APIPageClient({ machineId }) {
                             onConfirm: async () => {
                               setConfirmState(null);
                               handleToggleKey(key.id, checked);
-                            }
+                            },
                           });
                         } else {
                           handleToggleKey(key.id, checked);

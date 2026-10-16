@@ -47,8 +47,20 @@ export async function resolveConnectionProxyConfig(providerSpecificData = {}, co
       poolStrictProxy = proxyPool?.strictProxy === true;
       if (proxyPool && proxyPool.isActive === true && proxyUrl) {
         const observedFitnessVersion = scope ? await observePoolFitnessVersion(selectedPoolId, scope) : 0;
-        if (["vercel", "cloudflare", "deno"].includes(proxyPool.type)) {
-          return { source: proxyPool.type, proxyPoolId: selectedPoolId, proxyPool, observedFitnessVersion, connectionProxyEnabled: false, connectionProxyUrl: "", connectionNoProxy: noProxy, strictProxy: proxyPool.strictProxy === true, vercelRelayUrl: proxyUrl };
+        // Vercel/Cloudflare/Deno/Netlify relay proxies use base URL rewriting
+        // instead of HTTP_PROXY environment variables.
+        if (["vercel", "cloudflare", "deno", "netlify"].includes(proxyPool.type)) {
+          return {
+            source: proxyPool.type,
+            proxyPoolId: selectedPoolId,
+            proxyPool,
+            observedFitnessVersion,
+            connectionProxyEnabled: false,
+            connectionProxyUrl: "",
+            connectionNoProxy: noProxy,
+            strictProxy: proxyPool.strictProxy === true,
+            vercelRelayUrl: proxyUrl,
+          };
         }
         return { source: "pool", proxyPoolId: selectedPoolId, proxyPool, observedFitnessVersion, connectionProxyEnabled: true, connectionProxyUrl: proxyUrl, connectionNoProxy: noProxy, strictProxy: proxyPool.strictProxy === true };
       }
@@ -73,7 +85,7 @@ export function getProxyBucketIdentity(resolvedConfig) {
   const source = resolvedConfig.source;
   if (source === "error" || (resolvedConfig.noFitPool === true && source === "pool" && !resolvedConfig.proxyPoolId)) return null;
   if (source === "none") return `direct:${digest("direct-egress")}`;
-  if (["pool", "vercel", "cloudflare", "deno"].includes(source)) {
+  if (["pool", "vercel", "cloudflare", "deno", "netlify"].includes(source)) {
     return resolvedConfig.proxyPoolId ? `pool:${String(resolvedConfig.proxyPoolId)}` : null;
   }
   if (source === "legacy") {

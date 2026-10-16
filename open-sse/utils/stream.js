@@ -22,6 +22,11 @@ const STREAM_MODE = {
   PASSTHROUGH: "passthrough" // No translation, normalize output, extract usage
 };
 
+// Upper bound on the deferred response.completed wait: a chat->responses stream
+// that saw finish_reason without usage must not hold the client's terminal event
+// forever when the upstream stalls with no usage trailer and no [DONE].
+const PENDING_COMPLETION_FLUSH_MS = 3000;
+
 /**
  * Create unified SSE transform stream
  * @param {object} options
@@ -49,7 +54,8 @@ export function createSSEStream(options = {}) {
     connectionId = null,
     body = null,
     onStreamComplete = null,
-    apiKey = null
+    apiKey = null,
+    credentials = null
   } = options;
 
   let buffer = "";
@@ -59,7 +65,13 @@ export function createSSEStream(options = {}) {
   const decoder = new TextDecoder("utf-8", { fatal: false });
 
   const state = mode === STREAM_MODE.TRANSLATE
-    ? { ...initState(sourceFormat), provider, toolNameMap, customToolNames: new Set(customToolNames || []), model }
+    ? { ...initState(sourceFormat), provider, toolNameMap, customToolNames: new Set(customToolNames || []), model, sessionId: credentials?._clientSessionId || null,
+        // Which upstream format this stream came from. A response translator can be
+        // reached either directly (target === its registered source) or as the second
+        // hop of a pivot, and on the terminal null chunk the pivot drops it — so a
+        // translator that defers closing events until flush needs to know which case
+        // it is in. Absent/undefined means "unknown", i.e. do not defer.
+        targetFormat }
     : null;
 
   let totalContentLength = 0;
@@ -77,6 +89,52 @@ export function createSSEStream(options = {}) {
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let passthroughFinishSeen = false;  // passthrough: duplicate finish chunks from upstream
   let passthroughDoneSent = false;    // passthrough: upstream already sent [DONE]
+  let passthroughToolCallsSeen = false;
+  let finalized = false;
+  let completionFlushTimer = null;
+
+  // Usage/logging tail, callable from transform() as well as flush(): a client that
+  // closes right after the terminal event cancels the reader, and flush() never runs.
+  const finalizeStream = () => {
+    if (completionFlushTimer) { clearTimeout(completionFlushTimer); completionFlushTimer = null; }
+    if (finalized) return;
+    finalized = true;
+
+    const isPassthrough = mode === STREAM_MODE.PASSTHROUGH;
+    let finalUsage = isPassthrough ? usage : state?.usage;
+
+    if (!hasValidUsage(finalUsage) && totalContentLength > 0) {
+      finalUsage = estimateUsage(body, totalContentLength, isPassthrough ? FORMATS.OPENAI : sourceFormat);
+      if (isPassthrough) usage = finalUsage; else state.usage = finalUsage;
+    }
+
+    if (hasValidUsage(finalUsage)) {
+      logUsage(isPassthrough ? provider : (state?.provider || targetFormat), finalUsage, model, connectionId, apiKey);
+    } else {
+      appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
+    }
+
+    if (onStreamComplete) {
+      onStreamComplete({
+        content: accumulatedContent,
+        thinking: accumulatedThinking
+      }, finalUsage, ttftAt);
+    }
+  };
+
+  // Emit the deferred response.completed now — at [DONE], or when the watchdog
+  // below gives up on a usage trailer that never arrives.
+  const flushPendingCompletion = (controller) => {
+    const completed = translateResponse(targetFormat, sourceFormat, null, state);
+    for (const item of completed || []) {
+      if (item === null || item === undefined) continue;
+      const output = formatSSE(item, sourceFormat);
+      reqLogger?.appendConvertedChunk?.(output);
+      controller.enqueue(sharedEncoder.encode(output));
+      sseEmittedCount++;
+    }
+    finalizeStream();
+  };
 
   return new TransformStream({
     transform(chunk, controller) {
@@ -107,6 +165,7 @@ export function createSSEStream(options = {}) {
         if (mode === STREAM_MODE.PASSTHROUGH) {
           let output;
           let injectedUsage = false;
+          let responsesTerminal = false;
 
           // Dedup terminators: some upstreams (e.g. stealth/ox-alpha) send the
           // finish chunk twice and/or their own [DONE]; clients like AI SDK
@@ -156,10 +215,6 @@ export function createSSEStream(options = {}) {
                 }
               }
 
-              if (!hasValuableContent(parsed, FORMATS.OPENAI)) {
-                continue;
-              }
-
               const delta = parsed.choices?.[0]?.delta;
               // OpenRouter-style gateways (e.g. stealth/ox-alpha) stream
               // reasoning under `delta.reasoning`, but OpenAI-compatible
@@ -170,6 +225,8 @@ export function createSSEStream(options = {}) {
                 delete delta.reasoning;
                 fieldsInjected = true; // force output from the mutated parsed
               }
+              if (!hasValuableContent(parsed, FORMATS.OPENAI)) continue;
+              if (delta?.tool_calls?.length) passthroughToolCallsSeen = true;
               const content = delta?.content;
               const reasoning = delta?.reasoning_content;
               if (content && typeof content === "string") {
@@ -183,23 +240,25 @@ export function createSSEStream(options = {}) {
 
               const extracted = extractUsage(parsed);
               if (extracted) {
-                usage = mergeUsage(usage, extracted);
+                usage = mergeUsage(usage?.estimated ? null : usage, extracted);
               }
+
+              responsesTerminal = isOpenAIResponsesTerminalEvent(currentOpenAIResponsesEvent, parsed);
 
               const isFinishChunk = parsed.choices?.[0]?.finish_reason;
               const nativeReason = parsed.choices?.[0]?.native_finish_reason;
               // Detect upstream gateway errors masked as HTTP 200 (e.g. OpenRouter
               // sending finish_reason:"stop" with native_finish_reason:"network_error"
               // and empty content). Error out so the stream aborts and combo fallbacks.
-              if (isFinishChunk && nativeReason && ["network_error", "error", "server_error", "timeout"].includes(nativeReason) && totalContentLength === 0) {
+              if (isFinishChunk && nativeReason && ["network_error", "error", "server_error", "timeout"].includes(nativeReason) && totalContentLength === 0 && !passthroughToolCallsSeen) {
                 controller.error(new Error(`Upstream stream failed: ${nativeReason}`));
                 return;
               }
               if (isFinishChunk && passthroughFinishSeen) {
-                // Duplicate finish chunk (the second usually carries only
-                // upstream-side usage) — drop it: two finish_reasons in one
-                // stream break AI SDK clients ("content after finish reason").
-                continue;
+                if (!hasValidUsage(parsed.usage)) continue;
+                // Retain the provider's final counts as an OpenAI usage-only trailer.
+                parsed.choices = [];
+                fieldsInjected = true;
               }
               if (isFinishChunk) passthroughFinishSeen = true;
               if (isFinishChunk && !hasValidUsage(parsed.usage)) {
@@ -235,6 +294,8 @@ export function createSSEStream(options = {}) {
 
           reqLogger?.appendConvertedChunk?.(output);
           controller.enqueue(sharedEncoder.encode(output));
+          // Responses clients (codex CLI) close on response.completed instead of [DONE]
+          if (responsesTerminal) finalizeStream();
           continue;
         }
 
@@ -258,6 +319,14 @@ export function createSSEStream(options = {}) {
         // For Ollama: done=true is the final chunk with finish_reason/usage, must translate
         // For other formats: done=true is the [DONE] sentinel, skip
         if (parsed && parsed.done && targetFormat !== FORMATS.OLLAMA) {
+          // A direct Chat-to-Responses translation can defer response.completed
+          // while waiting for a usage trailer. [DONE] ends that opportunity even
+          // if the upstream keeps the HTTP connection open, so finish now.
+          if (targetFormat === FORMATS.OPENAI && sourceFormat === FORMATS.OPENAI_RESPONSES &&
+              state.completionPending && !state.completedSent) {
+            flushPendingCompletion(controller);
+          }
+
           // Synthesize response.failed if the Responses stream never sent a terminal event
           if (keepsOpenAIResponsesFormat && !openAIResponsesTerminalSeen) {
             const failedOutput = formatIncompleteOpenAIResponsesStreamFailure();
@@ -325,6 +394,8 @@ export function createSSEStream(options = {}) {
           controller.enqueue(sharedEncoder.encode(output));
           currentOpenAIResponsesEvent = null;
           sseEmittedCount++;
+          // Responses clients (codex) close on response.completed instead of [DONE]
+          if (openAIResponsesTerminalSeen) finalizeStream();
           continue;
         }
 
@@ -367,6 +438,18 @@ export function createSSEStream(options = {}) {
             sseEmittedCount++;
           }
         }
+
+        // The completion deferral can outlive the upstream: a broken chat upstream
+        // may stall after finish_reason with no usage trailer and no [DONE], holding
+        // the connection open. Bound the wait so the client still gets a terminal event.
+        if (targetFormat === FORMATS.OPENAI && sourceFormat === FORMATS.OPENAI_RESPONSES &&
+            state?.completionPending && !state?.completedSent && !completionFlushTimer) {
+          completionFlushTimer = setTimeout(() => {
+            completionFlushTimer = null;
+            if (state?.completedSent) return;
+            try { flushPendingCompletion(controller); } catch { /* controller already closed */ }
+          }, PENDING_COMPLETION_FLUSH_MS);
+        }
       }
     },
 
@@ -380,28 +463,10 @@ export function createSSEStream(options = {}) {
 
         if (mode === STREAM_MODE.PASSTHROUGH) {
           if (buffer) {
-            let output = buffer;
-            if (buffer.startsWith("data:") && !buffer.startsWith("data: ")) {
-              output = "data: " + buffer.slice(5);
-            }
-            // Ensure the trailing SSE frame ends with a newline before the
-            // [DONE] sentinel — upstreams that close without a final \n
-            // would glue "...}data: [DONE]" together and break client parsers.
-            if (!output.endsWith("\n")) output += "\n";
-            reqLogger?.appendConvertedChunk?.(output);
-            controller.enqueue(sharedEncoder.encode(output));
+            // Apply the same normalization/dedup to an unterminated final frame.
+            this.transform(sharedEncoder.encode("\n\n"), controller);
           }
 
-          if (!hasValidUsage(usage) && totalContentLength > 0) {
-            usage = estimateUsage(body, totalContentLength, FORMATS.OPENAI);
-          }
-
-          if (hasValidUsage(usage)) {
-            logUsage(provider, usage, model, connectionId, apiKey);
-          } else {
-            appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
-          }
-          
           // IMPORTANT: In passthrough mode we still must terminate the SSE stream.
           // Some clients (e.g. OpenClaw) expect the OpenAI-style sentinel:
           //   data: [DONE]\n\n
@@ -414,18 +479,26 @@ export function createSSEStream(options = {}) {
             controller.enqueue(sharedEncoder.encode(doneOutput));
           }
 
-          if (onStreamComplete) {
-            onStreamComplete({
-              content: accumulatedContent,
-              thinking: accumulatedThinking
-            }, usage, ttftAt);
-          }
+          finalizeStream();
           return;
         }
 
         if (buffer.trim()) {
-          const parsed = parseSSELine(buffer.trim());
-          if (parsed && !parsed.done) {
+          // Same parse as the transform loop: without targetFormat this only
+          // accepts "data: " lines, so an NDJSON provider (Ollama) lost whatever
+          // arrived without its closing newline.
+          const parsed = parseSSELine(buffer.trim(), targetFormat);
+          // parseSSELine turns the SSE sentinel "data: [DONE]" into { done: true },
+          // which must not be translated. An Ollama chunk also carries done:true,
+          // but it is the real final chunk — it holds finish_reason and the token
+          // counts — so it has to go through.
+          const isDoneSentinel = parsed?.done && targetFormat !== FORMATS.OLLAMA;
+          if (parsed && !isDoneSentinel) {
+            // Same accumulation the transform loop does, so finalizeStream() can
+            // log a tail chunk's tokens instead of falling back to null.
+            const extracted = extractUsage(parsed);
+            if (extracted) state.usage = mergeUsage(state.usage, extracted);
+
             const translated = translateResponse(targetFormat, sourceFormat, parsed, state);
 
             if (translated?._openaiIntermediate) {
@@ -481,30 +554,16 @@ export function createSSEStream(options = {}) {
           streamDoneSent = true;
         }
 
-        if (!hasValidUsage(state?.usage) && totalContentLength > 0) {
-          state.usage = estimateUsage(body, totalContentLength, sourceFormat);
-        }
-
-        if (hasValidUsage(state?.usage)) {
-          logUsage(state.provider || targetFormat, state.usage, model, connectionId, apiKey);
-        } else {
-          appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
-        }
-        
-        if (onStreamComplete) {
-          onStreamComplete({
-            content: accumulatedContent,
-            thinking: accumulatedThinking
-          }, state?.usage, ttftAt);
-        }
+        finalizeStream();
       } catch (error) {
         console.log("Error in flush:", error);
+        finalizeStream();
       }
     }
   });
 }
 
-export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, provider = null, reqLogger = null, toolNameMap = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, customToolNames = null) {
+export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, provider = null, reqLogger = null, toolNameMap = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, customToolNames = null, credentials = null) {
   return createSSEStream({
     mode: STREAM_MODE.TRANSLATE,
     targetFormat,
@@ -517,7 +576,8 @@ export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, p
     connectionId,
     body,
     onStreamComplete,
-    apiKey
+    apiKey,
+    credentials
   });
 }
 

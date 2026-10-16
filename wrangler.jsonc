@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "9router",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-05-05",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "NODE_ENV": "production",
+    "DATA_DIR": "/tmp/.9router",
+    "JWT_SECRET": "6f6dcffee2db4c26ab35631a38fe3216fd273a7637b64efc8dfd816ee3083afe"
+  }
+}

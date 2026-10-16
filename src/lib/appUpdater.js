@@ -10,10 +10,11 @@ const PROCESS_WAIT_MS = 1500;
 // Kill MITM server by PID file (MITM may run as admin/sudo)
 function killMitmByPidFile() {
   try {
+    const home = (typeof os.homedir === "function" ? os.homedir() : "") || "/tmp";
     const mitmPidFile = path.join(
-      process.platform === "win32"
-        ? path.join(process.env.APPDATA || "", "9router")
-        : path.join(os.homedir(), ".9router"),
+      process.platform === "win32" && process.env.APPDATA
+        ? path.join(process.env.APPDATA, "9router")
+        : path.join(home, ".9router"),
       "mitm",
       ".mitm.pid"
     );
@@ -98,10 +99,11 @@ function collectAppPids() {
 // Copy updater.js into DATA_DIR so npm -g can overwrite node_modules safely
 function getDataDir() {
   if (process.env.DATA_DIR) return process.env.DATA_DIR;
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router");
+  const home = (typeof os.homedir === "function" ? os.homedir() : "") || "/tmp";
+  if (process.platform === "win32" && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, "9router");
   }
-  return path.join(os.homedir(), ".9router");
+  return path.join(home, ".9router");
 }
 
 function resolveBundledUpdaterPath() {

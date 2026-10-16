@@ -3,21 +3,20 @@
 // and after every UI write.
 import fs from "fs";
 import path from "path";
-import os from "os";
-
-const DATA_DIR = process.env.DATA_DIR
-  || (process.platform === "win32"
-    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router")
-    : path.join(os.homedir(), ".9router"));
+import { DATA_DIR } from "@/lib/dataDir.js";
 
 const CACHE_FILE = path.join(DATA_DIR, "mitm", "aliases.json");
 
 function writeAtomic(data) {
-  const dir = path.dirname(CACHE_FILE);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${CACHE_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-  fs.renameSync(tmp, CACHE_FILE);
+  try {
+    const dir = path.dirname(CACHE_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+    fs.renameSync(tmp, CACHE_FILE);
+  } catch (e) {
+    // Best-effort in read-only / serverless runtimes
+  }
 }
 
 // Sync entire mitmAlias map from DB → JSON file

@@ -73,6 +73,15 @@ scripts/agSniffer/*
 gitbooks/*
 gitbook/README.md
 
+# cloudflare / opennext
+.open-next/
+.wrangler/
+cloudflare-env.d.ts
+
+# Local runtime data (DB, secrets, machine-id)
+.data/
+wrangler_dev.log
+
 # Refactor backup reference (do not bundle/lint)
 open-sse.old/
 .graphifyignore

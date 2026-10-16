@@ -30,7 +30,9 @@ import { killAllBridges } from "@/lib/mcp/stdioSseBridge";
   try { initDbHooks(getSettings, updateSettings); } catch { /* ignore */ }
 })();
 
-process.setMaxListeners(20);
+if (typeof process !== "undefined" && typeof process.setMaxListeners === "function") {
+  try { process.setMaxListeners(20); } catch { /* ignore */ }
+}
 
 // Defer heavy startup work so the first HTTP request (login → dashboard) isn't
 // starved by DB cleanup, cloudflared download, lsof/DNS probes and OAuth pings.
@@ -50,6 +52,12 @@ const g = global.__appSingleton ??= {
 };
 
 export async function initializeApp() {
+  const isCloudflare =
+    typeof WebSocketPair !== "undefined" ||
+    (typeof navigator !== "undefined" && navigator?.userAgent === "Cloudflare-Workers") ||
+    process.env.OPENNEXT_CLOUDFLARE === "1";
+  if (isCloudflare) return;
+
   try {
     // Register cleanup + exit-respawn callback immediately so signals and
     // unexpected cloudflared exits are handled even during the deferred window.

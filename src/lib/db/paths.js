@@ -13,6 +13,11 @@ export const LEGACY_FILES = {
 };
 export function ensureDirs() {
   for (const dir of [DATA_DIR, DB_DIR, BACKUPS_DIR]) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      // In serverless / read-only environments (e.g. Cloudflare Workers), filesystem creation may fail
+      console.warn(`[paths] could not create dir ${dir}: ${e.message}`);
+    }
   }
 }

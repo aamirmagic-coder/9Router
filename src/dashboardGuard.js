@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { getSettings, validateApiKey } from "@/lib/localDb";
-import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 
@@ -9,7 +7,14 @@ const CLI_TOKEN_SALT = "9r-cli-auth";
 
 let cachedCliToken = null;
 async function getCliToken() {
-  if (!cachedCliToken) cachedCliToken = await getConsistentMachineId(CLI_TOKEN_SALT);
+  if (!cachedCliToken) {
+    try {
+      const { getConsistentMachineId } = await import("@/shared/utils/machineId");
+      cachedCliToken = await getConsistentMachineId(CLI_TOKEN_SALT);
+    } catch {
+      cachedCliToken = null;
+    }
+  }
   return cachedCliToken;
 }
 
@@ -151,7 +156,12 @@ function extractApiKey(request) {
 async function hasValidApiKey(request) {
   const apiKey = extractApiKey(request);
   if (!apiKey) return false;
-  return await validateApiKey(apiKey);
+  try {
+    const { validateApiKey } = await import("@/lib/localDb");
+    return await validateApiKey(apiKey);
+  } catch {
+    return false;
+  }
 }
 
 async function canAccessPublicLlmApi(request) {
@@ -175,6 +185,7 @@ async function hasValidToken(request) {
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
 async function loadSettings() {
   try {
+    const { getSettings } = await import("@/lib/localDb");
     return await getSettings();
   } catch {
     return null;

@@ -12,7 +12,14 @@ async function loadSql() {
 
 export async function createSqlJsAdapter(filePath) {
   const SQLLib = await loadSql();
-  const buf = fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
+  let buf = null;
+  try {
+    if (fs.existsSync(filePath)) {
+      buf = fs.readFileSync(filePath);
+    }
+  } catch {
+    buf = null;
+  }
   const db = new SQLLib.Database(buf);
   db.exec(PRAGMA_SQL);
   // Schema is created/synced by migrate.js after adapter init
@@ -22,9 +29,13 @@ export async function createSqlJsAdapter(filePath) {
   const SAVE_DEBOUNCE_MS = 100;
 
   function persist() {
-    const data = db.export();
-    fs.writeFileSync(filePath, Buffer.from(data));
-    dirty = false;
+    try {
+      const data = db.export();
+      fs.writeFileSync(filePath, Buffer.from(data));
+      dirty = false;
+    } catch (e) {
+      console.warn("[sqljs] save failed:", e.message);
+    }
   }
 
   function scheduleSave() {

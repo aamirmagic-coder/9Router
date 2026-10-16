@@ -18,8 +18,16 @@ export async function ensureOutboundProxyInitialized() {
 }
 
 // Defer init so HTTP server accepts connections first
-setImmediate(() => {
-  ensureOutboundProxyInitialized().catch(console.log);
-});
+// Skip in Cloudflare Workers where setImmediate and proxy env are not applicable
+const _isCloudflare =
+  typeof WebSocketPair !== "undefined" ||
+  (typeof navigator !== "undefined" && navigator?.userAgent === "Cloudflare-Workers") ||
+  process.env.OPENNEXT_CLOUDFLARE === "1";
+
+if (!_isCloudflare && typeof setImmediate === "function") {
+  setImmediate(() => {
+    ensureOutboundProxyInitialized().catch(console.log);
+  });
+}
 
 export default ensureOutboundProxyInitialized;

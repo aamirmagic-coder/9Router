@@ -1,10 +1,24 @@
-import Database from "better-sqlite3";
+import { createRequire } from "node:module";
 import { PRAGMA_SQL } from "../schema.js";
+
+const require = createRequire(import.meta.url);
+
+function loadBetterSqlite() {
+  try {
+    return require("better-sqlite3");
+  } catch {
+    return null;
+  }
+}
 
 // Periodic checkpoint to keep WAL file small (avoid huge -wal/-shm growth)
 const CHECKPOINT_INTERVAL_MS = 60 * 1000;
 
 export function createBetterSqliteAdapter(filePath) {
+  const Database = loadBetterSqlite();
+  if (!Database) {
+    throw new Error("better-sqlite3 native module is not available");
+  }
   const db = new Database(filePath);
   db.exec(PRAGMA_SQL);
   // Schema is created/synced by migrate.js after adapter init

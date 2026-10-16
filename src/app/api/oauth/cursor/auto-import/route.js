@@ -78,9 +78,21 @@ const normalize = (value) => {
  */
 function extractTokensViaBetterSqlite(dbPath) {
   // Dynamic require so the route stays importable even if native bindings fail
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const Database = require("better-sqlite3");
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  let Database;
+  try {
+    const { createRequire } = require("node:module");
+    Database = createRequire(import.meta.url)("better-sqlite3");
+  } catch {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      Database = require("better-sqlite3");
+    } catch {
+      return null;
+    }
+  }
+  if (!Database) return null;
+  const DbClass = Database.default || Database;
+  const db = new DbClass(dbPath, { readonly: true, fileMustExist: true });
 
   const query = (key) => {
     const row = db.prepare("SELECT value FROM itemTable WHERE key=? LIMIT 1").get(key);

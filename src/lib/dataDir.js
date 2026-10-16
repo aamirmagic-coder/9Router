@@ -5,10 +5,11 @@ import os from "os";
 const APP_NAME = "9router";
 
 function defaultDir() {
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), APP_NAME);
+  const home = (typeof os.homedir === "function" ? os.homedir() : "") || "/tmp";
+  if (process.platform === "win32" && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, APP_NAME);
   }
-  return path.join(os.homedir(), `.${APP_NAME}`);
+  return path.join(home, `.${APP_NAME}`);
 }
 
 export function getDataDir() {
@@ -30,8 +31,11 @@ export function getDataDir() {
       console.warn(`[DATA_DIR] '${configured}' not writable → fallback ~/.${APP_NAME}`);
       return defaultDir();
     }
-    throw e;
+    // In serverless / edge runtimes (e.g. Cloudflare Workers unenv stub) fs.mkdirSync is not implemented
+    return configured;
   }
 }
 
 export const DATA_DIR = getDataDir();
+
+

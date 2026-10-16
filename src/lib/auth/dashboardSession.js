@@ -9,16 +9,41 @@ import { getSettings } from "@/lib/localDb";
 const DEFAULT_PASSWORD = "123456";
 const SESSION_MAX_AGE_SEC = 24 * 60 * 60;
 
+function isCloudflareWorker() {
+  try {
+    if (typeof WebSocketPair !== "undefined") return true;
+    if (typeof navigator !== "undefined" && navigator?.userAgent === "Cloudflare-Workers") return true;
+    if (process.env.OPENNEXT_CLOUDFLARE === "1") return true;
+  } catch {}
+  return false;
+}
+
 function loadJwtSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+
+  // On Cloudflare Workers / serverless edge, filesystem is unavailable.
+  // Use a deterministic fallback stored in globalThis to stay stable within the isolate,
+  // but warn loudly — callers should set JWT_SECRET env var for cross-isolate consistency.
+  if (isCloudflareWorker()) {
+    if (!globalThis.__jwtSecretFallback) {
+      globalThis.__jwtSecretFallback = crypto.randomBytes(32).toString("hex");
+      console.warn("[Auth] JWT_SECRET env var not set — using ephemeral secret. Sessions will not survive cold starts or cross middleware/server boundaries. Set JWT_SECRET in wrangler.jsonc vars.");
+    }
+    return globalThis.__jwtSecretFallback;
+  }
+
   const file = path.join(DATA_DIR, "jwt-secret");
   try {
     return fs.readFileSync(file, "utf8").trim();
   } catch {}
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const generated = crypto.randomBytes(32).toString("hex");
-  fs.writeFileSync(file, generated, { mode: 0o600 });
-  return generated;
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const generated = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(file, generated, { mode: 0o600 });
+    return generated;
+  } catch {
+    return crypto.randomBytes(32).toString("hex");
+  }
 }
 
 const SECRET = new TextEncoder().encode(loadJwtSecret());

@@ -5,8 +5,11 @@ import { PRAGMA_SQL } from "../schema.js";
 const CHECKPOINT_INTERVAL_MS = 60 * 1000;
 
 export async function createBunSqliteAdapter(filePath) {
-  // Dynamic import — only resolves under Bun runtime
-  const { Database } = await import("bun:sqlite");
+  // Bun runtime provides Bun.Database globally
+  const Database = globalThis.Bun?.Database;
+  if (!Database) {
+    throw new Error("bun:sqlite is only available under Bun runtime");
+  }
   const db = new Database(filePath, { create: true });
   db.exec(PRAGMA_SQL);
 

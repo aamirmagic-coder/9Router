@@ -2,6 +2,7 @@
 import { PROVIDERS } from "../providers/index.js";
 export { PROVIDERS, PROVIDER_OAUTH } from "../providers/index.js";
 
+
 export const OLLAMA_LOCAL_DEFAULT_HOST = "http://localhost:11434";
 
 export function resolveOllamaLocalHost(credentials) {

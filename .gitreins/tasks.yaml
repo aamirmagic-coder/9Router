@@ -1567,3 +1567,12 @@ tasks:
   status: complete
   created_at: '2026-10-14T11:35:05.785482+00:00'
   completed_at: '2026-10-14T11:49:19.640862+00:00'
+- id: GITREINS-9ROUTER-CFG-001
+  title: Quote 'on:' stage keys in .gitreins/config.yaml (YAML 1.1 bool-True judge
+    crash)
+  criteria:
+  - config.yaml stage stages carry quoted 'on' keys; pipeline.py receives string 'on'
+    instead of True; gitreins task complete runs without stage AttributeError
+  status: complete
+  created_at: '2026-10-14T18:24:01.388689+00:00'
+  completed_at: '2026-10-14T18:24:08.271653+00:00'

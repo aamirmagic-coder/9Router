@@ -1,9 +1,10 @@
-import { HTTP_STATUS, RETRY_CONFIG, DEFAULT_RETRY_CONFIG, resolveRetryEntry, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
+import { HTTP_STATUS, RETRY_CONFIG, DEFAULT_RETRY_CONFIG, resolveRetryEntry, FETCH_CONNECT_TIMEOUT_MS, NO_RETRY_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
+import { createTurn, run as runWithTurn, addHeaders as addBuddyHeaders, isBuddyProvider } from "../utils/buddyRequestContext.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -97,7 +98,25 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
+  async execute(opts) {
+    // CodeBuddy / WorkBuddy run a channel check that needs conversation-scoped
+    // identity headers. Bind one turn per execute() call: the context is per
+    // request (AsyncLocalStorage), so parallel accounts never trade ids, and the
+    // turn survives every retry/fallback inside this call while message + span
+    // ids are regenerated per outbound request.
+    if (isBuddyProvider(this.provider)) {
+      const credentials = opts?.credentials || {};
+      const turn = createTurn(credentials.rawHeaders || {}, {
+        body: opts?.body ?? null,
+        connectionId: credentials.connectionId ?? null,
+        scope: this.provider,
+      });
+      return runWithTurn(turn, () => this._executeWithIdentity(opts));
+    }
+    return this._executeWithIdentity(opts);
+  }
+
+  async _executeWithIdentity({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -136,6 +155,9 @@ export class BaseExecutor {
       // Abort if upstream doesn't return response headers within connection timeout
       const connectCtrl = new AbortController();
       const timeoutMs = this.config?.timeoutMs || FETCH_CONNECT_TIMEOUT_MS;
+      // Threshold above which a connect timeout means "unreachable", not "slow"
+      // (see the catch block). Injectable so tests don't need real delays.
+      const noRetryTimeoutMs = this.config?.noRetryTimeoutMs ?? NO_RETRY_TIMEOUT_MS;
       const connectTimer = setTimeout(() => connectCtrl.abort(new Error("fetch connect timeout")), timeoutMs);
       const mergedSignal = signal ? AbortSignal.any([signal, connectCtrl.signal]) : connectCtrl.signal;
 
@@ -166,10 +188,26 @@ export class BaseExecutor {
       } catch (error) {
         clearTimeout(connectTimer);
         lastError = error;
-        const isConnectTimeout = connectCtrl.signal.aborted && error.name === "AbortError";
+        // `AbortController.abort(reason)` makes fetch reject with `reason`
+        // ITSELF — not a DOMException named "AbortError" — so sniffing
+        // `error.name` never detects this timeout. The signal flags are the
+        // reliable test: our timer fired, and the caller did not abort.
+        const callerAborted = signal?.aborted === true;
+        const isConnectTimeout = connectCtrl.signal.aborted && !callerAborted;
         dbg("FETCH", `${this.provider.toUpperCase()} ✖ ${error.name}: ${error.message}${isConnectTimeout ? " (connect timeout)" : ""}`);
-        // Connect timeout is internal — convert to retryable network error, don't propagate AbortError
-        if (error.name === "AbortError" && !isConnectTimeout) throw error;
+        // Caller-initiated aborts must propagate untouched (client hung up).
+        if (callerAborted) throw error;
+
+        // A connect timeout on a provider whose budget is already large (e.g.
+        // antigravity at 120 s) means the upstream is unreachable, NOT slow:
+        // a healthy-but-slow upstream answers well inside the window (measured
+        // 23 s worst case). Retrying such a timeout `attempts` times multiplies
+        // the stall with no chance of success — surface it immediately so the
+        // caller rotates accounts instead of burning the whole budget.
+        if (isConnectTimeout && timeoutMs >= noRetryTimeoutMs) {
+          log?.debug?.("RETRY", `connect timeout ${timeoutMs}ms on ${url} — not retrying, failing fast`);
+          throw error;
+        }
 
         // Map network/fetch exceptions to 502 retry config
         if (await tryRetry(urlIndex, HTTP_STATUS.BAD_GATEWAY, `network "${error.message}"`)) { urlIndex--; continue; }

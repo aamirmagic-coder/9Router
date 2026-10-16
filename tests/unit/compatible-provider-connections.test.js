@@ -32,8 +32,17 @@ async function setupTestContext(nodeData) {
     node,
     POST,
     getProviderConnections,
-    cleanup() {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+    async cleanup() {
+      // Close the sqlite handle first: on Windows the file stays locked while
+      // the driver holds it, so rmSync throws EPERM and the whole file is
+      // reported failed even when the assertions passed.
+      try {
+        const { closeDatabase } = await import("@/lib/db/index.js");
+        closeDatabase?.();
+      } catch {}
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
     },
   };
 }
@@ -67,17 +76,17 @@ function expectCompatibleConnection(connection, node, { apiType } = {}) {
 }
 
 describe("compatible provider connections API", () => {
-  let cleanup = () => {};
+  let cleanup = async () => {};
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.doUnmock("next/server");
     vi.resetModules();
     vi.clearAllMocks();
-    cleanup();
+    await cleanup();
     cleanup = () => {};
     if (originalDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = originalDataDir;

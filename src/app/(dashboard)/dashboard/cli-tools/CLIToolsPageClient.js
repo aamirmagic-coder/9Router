@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { CardSkeleton } from "@/shared/components";
 import { CLI_TOOLS, MITM_TOOLS } from "@/shared/constants/cliTools";
+import { Reveal, HoverLift } from "@/shared/motion/primitives";
 import { MitmLinkCard } from "./components";
 import ToolSummaryCard from "./components/ToolSummaryCard";
 
@@ -51,13 +52,15 @@ export default function CLIToolsPageClient({ machineId }) {
         ))}
       </div>
       <div className="flex flex-col gap-3 sm:gap-4">
-        <div className="flex items-center gap-2 px-1">
+        <Reveal className="flex items-center gap-2 px-1">
           <span className="material-symbols-outlined text-[18px] text-primary">security</span>
           <h2 className="text-sm font-semibold text-text-main">MITM Tools</h2>
-        </div>
+        </Reveal>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {mitmTools.map(([toolId, tool]) => (
-            <MitmLinkCard key={toolId} tool={tool} />
+            <HoverLift key={toolId}>
+              <MitmLinkCard tool={tool} />
+            </HoverLift>
           ))}
         </div>
       </div>

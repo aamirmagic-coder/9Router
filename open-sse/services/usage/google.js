@@ -235,41 +235,36 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
         proxyOptions
       );
 
-      // Reconcile short-window session quota if models are exhausted:
-      // If every model in a family is locked/exhausted (remainingPercentage === 0)
-      // until a future reset time, update the 5h session row (not the weekly row).
+      // Reconcile the 5h session rows against model-family status: when every
+      // model in a family is locked/exhausted (remainingPercentage === 0) until
+      // a future reset, the session row cannot still be available.
+      //
+      // Only the session rows are reconciled, never the weekly ones: the two
+      // describe different windows, and forcing the weekly row to 0 from model
+      // status would clobber a genuine weekly reading (the session row is the
+      // one that goes to 0 when the short window is spent).
       const entries = Object.entries(quotas);
       const geminiModels = entries.filter(([k]) => k.startsWith("gemini-") && !k.includes("image"));
       const claudeModels = entries.filter(([k]) => k.startsWith("claude-"));
 
-      if (weeklyQuotas.gemini_session && geminiModels.length > 0) {
-        const allGeminiExhausted = geminiModels.every(([, q]) => (q.remainingPercentage ?? 0) === 0);
-        if (allGeminiExhausted && weeklyQuotas.gemini_session.remainingPercentage > 0) {
-          const maxResetAt = geminiModels.reduce((max, [, q]) =>
-            !max || (q.resetAt && new Date(q.resetAt) > new Date(max)) ? q.resetAt : max, null
-          );
-          weeklyQuotas.gemini_session.used = weeklyQuotas.gemini_session.total;
-          weeklyQuotas.gemini_session.remainingPercentage = 0;
-          if (maxResetAt) {
-            weeklyQuotas.gemini_session.resetAt = maxResetAt;
-          }
-        }
-      }
+      const reconcileSession = (poolKey, family) => {
+        const pool = weeklyQuotas[poolKey];
+        if (!pool || family.length === 0) return;
+        const allExhausted = family.every(([, q]) => (q.remainingPercentage ?? 0) === 0);
+        if (!allExhausted || pool.remainingPercentage <= 0) return;
+        const maxResetAt = family.reduce((max, [, q]) =>
+          !max || (q.resetAt && new Date(q.resetAt) > new Date(max)) ? q.resetAt : max, null
+        );
+        pool.used = pool.total;
+        pool.remainingPercentage = 0;
+        if (maxResetAt) pool.resetAt = maxResetAt;
+      };
 
-      if (weeklyQuotas.claude_gpt_session && claudeModels.length > 0) {
-        const allClaudeExhausted = claudeModels.every(([, q]) => (q.remainingPercentage ?? 0) === 0);
-        if (allClaudeExhausted && weeklyQuotas.claude_gpt_session.remainingPercentage > 0) {
-          const maxResetAt = claudeModels.reduce((max, [, q]) =>
-            !max || (q.resetAt && new Date(q.resetAt) > new Date(max)) ? q.resetAt : max, null
-          );
-          weeklyQuotas.claude_gpt_session.used = weeklyQuotas.claude_gpt_session.total;
-          weeklyQuotas.claude_gpt_session.remainingPercentage = 0;
-          if (maxResetAt) {
-            weeklyQuotas.claude_gpt_session.resetAt = maxResetAt;
-          }
-        }
-      }
+      reconcileSession("gemini_session", geminiModels);
+      reconcileSession("claude_gpt_session", claudeModels);
 
+      // Weekly/session rows live in their own map — merge them into the payload
+      // the dashboard reads, otherwise the pooled rows never reach the UI.
       Object.assign(quotas, weeklyQuotas);
     } catch {
       // Silently ignore — weekly is best-effort

@@ -1,9 +1,9 @@
 {
-  "name": "9router",
-  "version": "0.5.104",
-  "description": "9Router CLI - Start and manage 9Router server",
+  "name": "9router-imagefix",
+  "version": "0.5.143",
+  "description": "9Router CLI - Start and manage 9Router server (with image fix)",
   "bin": {
-    "9router": "./cli.js"
+    "9router-imagefix": "./cli.js"
   },
   "files": [
     "cli.js",
@@ -20,7 +20,7 @@
     "pack:cli": "npm run build && npm pack --pack-destination ..",
     "publish:cli": "npm run build && npm publish",
     "postinstall": "node hooks/postinstall.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && node scripts/build-cli.js --assert-clean app"
   },
   "dependencies": {
     "enquirer": "^2.4.1",

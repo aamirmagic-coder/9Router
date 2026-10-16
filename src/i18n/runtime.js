@@ -83,25 +83,46 @@ function processTextNode(node) {
 
   if (skipTags.includes(tagName)) return;
 
-  // React reuses text nodes and rewrites their value on re-render (a
-  // characterData mutation, no childList event). When the current value is
-  // neither our last translation nor the recorded original, it is fresh
-  // source text — re-capture it as the new original before translating.
-  const isOurTranslation = node._translated != null && current === node._translated;
-  const isSameAsOriginal = current === node._originalText;
-  if (!isOurTranslation && !isSameAsOriginal) {
-    node._originalText = current;
+  // React memakai ULANG text node saat re-render — hanya `nodeValue` yang
+  // berubah, node-nya tetap sama. Jadi `_originalText` TIDAK boleh dianggap
+  // permanen: kalau nilai saat ini bukan yang terakhir KITA tulis, berarti
+  // React baru menulisnya, dan nilai itu adalah sumber kebenaran yang baru.
+  if (node._i18nWritten !== undefined && node.nodeValue !== node._i18nWritten) {
+    node._originalText = node.nodeValue;
+    node._i18nWritten = undefined;
   }
-  if (node._originalText == null) node._originalText = current;
 
-  // Translate from the recorded original so locale switches stay idempotent
-  const translated = translate(node._originalText);
-  node._translated = translated;
+  if (node._originalText === undefined) {
+    node._originalText = node.nodeValue;
+  }
+
+  const original = node._originalText;
+  const translated = translate(original);
+
+  if (translated === original) {
+    // Tidak ada terjemahan untuk teks ini → node milik React, JANGAN disentuh.
+    //
+    // Ini penyebab angka dashboard "beku": angka tidak punya terjemahan, tapi
+    // dulu tetap ditulis ulang dari `_originalText` yang basi — sehingga nilai
+    // baru hasil render React ("10075") langsung ditimpa balik ke nilai
+    // pertama ("944") setiap kali period diganti.
+    //
+    // Pengecualian: kalau KITA yang pernah menulis terjemahan ke node ini
+    // (mis. locale kembali ke "en" sehingga `translate()` mengembalikan teks
+    // apa adanya), pulihkan teks aslinya.
+    if (node._i18nWritten !== undefined && node.nodeValue !== original) {
+      node.nodeValue = original;
+      node._i18nWritten = undefined;
+    }
+    return;
+  }
 
   // Only update if different to avoid unnecessary DOM mutations
   if (translated !== node.nodeValue) {
     node.nodeValue = translated;
   }
+  // Catat apa yang KITA tulis, agar bisa dibedakan dari tulisan React.
+  node._i18nWritten = translated;
 }
 
 // Process all text nodes in element
@@ -137,10 +158,14 @@ export async function initRuntimeI18n() {
   // Process existing DOM
   processElement(document.body);
   
-  // Watch for new nodes AND in-place text rewrites. React reuses text nodes on
-  // re-render (only nodeValue changes → a characterData mutation with no
-  // childList event), so observing childList alone leaves later-updated labels
-  // untranslated.
+  // Pantau node BARU dan penulisan ulang teks di tempat.
+  //
+  // React memakai ulang text node saat re-render — hanya `nodeValue` yang
+  // berubah, sehingga yang muncul adalah mutasi `characterData` TANPA event
+  // `childList`. Mengamati `childList` saja membuat label yang diperbarui
+  // setelah render awal tidak pernah diterjemahkan.
+  //
+  // Sumber: upstream decolua/9router 910db749.
   const observer = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       if (mutation.type === "characterData") {
@@ -156,13 +181,18 @@ export async function initRuntimeI18n() {
       });
     });
   });
-  
+
   observer.observe(document.body, {
     childList: true,
     subtree: true,
     characterData: true,
   });
 }
+
+// Diekspor HANYA untuk pengujian. `processTextNode` sengaja tidak dipakai di
+// luar modul ini, tapi bug "angka dashboard beku" (v0.5.112) hidup di sini dan
+// tidak bisa dijangkau lewat API publik tanpa browser sungguhan.
+export const __processTextNodeForTest = processTextNode;
 
 // Reload translations when locale changes
 export async function reloadTranslations() {

@@ -30,7 +30,19 @@ export default {
   authModes: ["oauth", "apikey"],
   hasOAuth: true,
   transport: {
-    baseUrl: "https://api.meta.ai/v1/chat/completions",
+    baseUrl: "https://api.meta.ai/v1/responses",
+    // Setiap model di sini di-pin ke Responses (lihat catatan di bawah), jadi
+    // default pun harus menunjuk /responses. Kalau tidak, jalur yang TIDAK
+    // melewati `transports` (mis. override koneksi) mengirim body Responses ke
+    // /chat/completions dan Meta menjawab 400 `unknown parameter 'input'`.
+    format: "openai-responses",
+    // Responses hanya dilayani sebagai SSE — body JSON non-stream dijawab
+    // event-stream juga. Semua konsumen Meta yang sudah ada (meta-code)
+    // memakai forceStream karena alasan yang sama.
+    forceStream: true,
+    // Meta 400s on Chat-style top-level `reasoning_effort`; it must be nested
+    // as `reasoning.effort` — sama seperti meta-code.
+    quirks: { foldReasoningEffort: true },
     validateUrl: "https://api.meta.ai/v1/models",
     modelsUrl: "https://api.meta.ai/v1/models",
     auth: { combined: true, header: "Authorization", scheme: "bearer", hooks: ["museHeaders"] },
@@ -39,6 +51,19 @@ export default {
   // the same key (https://dev.meta.ai/docs/protocols). Muse Spark reasoning
   // (incl. encrypted_content replay) only round-trips on Responses, so models
   // pin targetFormat there.
+  //
+  // The transports below are the accepted grammar of this engine — the
+  // sourceFormat-matched pick at chatCore.js:108-120 — but they are NOT what
+  // currently routes these models. Because every model declares
+  // `supportedFormats: ["openai-responses"]`, the guard at chatCore.js:113
+  // rejects the match for any other client format and `modelTargetFormat`
+  // wins; the URL then comes from `transport.baseUrl` above.
+  //
+  // Consequence to keep in mind: an OpenAI-*format* client (Claude Code,
+  // dashboard probe, /v1/chat/completions) is still TRANSLATED to Responses
+  // and answered from /responses. That is intended — Meta's Muse Spark
+  // reasoning only round-trips on Responses. Only a client that already
+  // speaks `openai-responses` takes the zero-translation lane.
   transports: [
     {
       format: "openai",

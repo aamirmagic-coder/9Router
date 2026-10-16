@@ -23,7 +23,104 @@ const EXCLUDE_PATTERNS = [
   "*.log",          // Log files
   "tmp",            // Temp files
   ".DS_Store",      // macOS files
+  ".build-home",    // Build sandbox HOME/APPDATA — holds generated state, not shipped code
 ];
+
+// Secrets that must never reach a published tarball, wherever they sit in the
+// tree. `cli/.build-home/` is a scratch HOME/APPDATA used during the build, and
+// the Next.js runner writes a `jwt-secret` into it; the db dir next to it can
+// hold account rows. `.gitignore` keeps them out of git but npm packs from the
+// filesystem, so the build has to drop them explicitly or they end up in the
+// published package.
+const SECRET_NAMES = new Set([
+  "jwt-secret", "jwt_secret",
+  "api-key-secret", "api_key_secret",
+  "machine-id-salt", "machine_id_salt",
+  ".engine-token.txt",
+  "cookies.txt", "creds.json", "config.json",
+]);
+
+// Scratch/personal subtrees, matched by directory NAME.
+//
+// Name matching is safe ONLY for names that third-party code does not use.
+// Every entry here is highly specific — a dotfile-like build sandbox, or a
+// scratch dir this repo invented. Do NOT add generic names like "cli":
+//
+//   An earlier version matched "cli" by name to drop the repo's scratch
+//   `cli/.build-home` tree, and thereby deleted
+//   `node_modules/next/dist/cli/` — which Next.js requires at runtime. Every
+//   package built that way crashed on boot with
+//   `Cannot find module '../cli/next-test'`. "cli" is an ordinary directory
+//   name inside node_modules; it can never be matched globally.
+//
+// The build sandbox lives at a path that depends on Next.js's tracing root
+// (e.g. `.next-cli-build/standalone/<pkg>/cli/.build-home`), so anchoring to a
+// fixed path misses it. Matching the specific leaf name hits every location.
+const SCRATCH_DIR_NAMES = new Set([
+  ".build-home",                    // build sandbox HOME/APPDATA: generated jwt-secret + db rows
+  "_muse-re", "_muse-cli-check",    // reverse-engineering scratch (holds muse.ai session cookies)
+  "muse-bridge",                    // local Python sidecar (venv + session cookies), not shipped
+]);
+
+function isScratchDir(entryPath) {
+  return SCRATCH_DIR_NAMES.has(path.basename(entryPath));
+}
+
+function isSecretPath(srcPath) {
+  return SECRET_NAMES.has(path.basename(srcPath));
+}
+
+// ── publish guard ────────────────────────────────────────────────────────
+// Scans the directory npm is about to pack and refuses to continue if anything
+// secret or scratch is still there.
+//
+// This deliberately walks the publish directory instead of inspecting an
+// already-built .tgz: `npm publish` re-packs from disk, so a tarball produced
+// earlier can be stale, and a check against it would pass while the publish
+// itself ships something different.
+//
+// Reports secret FILES by name, and additionally flags scratch paths that are
+// still present — but scratch matching is anchored to the publish root, so it
+// can never mistake `node_modules/next/dist/cli` for the repo's own scratch
+// tree. node_modules is skipped entirely: it is third-party code, and the
+// paths we care about never live there.
+function collectUnsafeFiles(rootDir) {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (isScratchDir(p)) {
+          found.push(p);
+          continue;
+        }
+        walk(p);
+      } else if (entry.isFile() && SECRET_NAMES.has(entry.name)) {
+        found.push(p);
+      }
+    }
+  };
+  walk(rootDir);
+  return found;
+}
+
+function assertPublishDirClean(dir) {
+  const bad = collectUnsafeFiles(dir);
+  if (bad.length) {
+    console.error(`\n❌ Refusing to publish — secret files found under ${dir}:`);
+    for (const b of bad.slice(0, 20)) console.error(`   ${path.relative(dir, b)}`);
+    console.error(`\n   ${bad.length} file. Hapus dari pohon publish sebelum mengulang.\n`);
+    process.exit(1);
+  }
+  console.log("✅ Publish dir clean: no secret files\n");
+}
 
 function shouldExclude(name) {
   return EXCLUDE_PATTERNS.some(pattern => {
@@ -47,11 +144,12 @@ function copyRecursive(src, dest) {
 
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
-    if (shouldExclude(entry.name)) {
-      continue;
-    }
+    const entryPath = path.join(src, entry.name);
+    if (shouldExclude(entry.name)) continue;
+    if (entry.isDirectory() && isScratchDir(entryPath)) continue;
+    if (entry.isFile() && isSecretPath(entryPath)) continue;
 
-    const srcPath = path.join(src, entry.name);
+    const srcPath = entryPath;
     const destPath = path.join(dest, entry.name);
 
     // Skip broken symlinks (common in workspace setups)
@@ -345,10 +443,18 @@ function buildCliPackage() {
 
 module.exports = {
   assertRequiredApiArtifacts,
+  assertPublishDirClean,
   copyStandaloneBuild,
   mergeServerArtifacts,
 };
 
 if (require.main === module) {
-  buildCliPackage();
+  const arg = process.argv[2];
+  if (arg === "--assert-clean") {
+    // Called from prepublishOnly AFTER the build regenerated cli/app, so the
+    // check and the publish see exactly the same tree.
+    assertPublishDirClean(process.argv[3] || path.join(__dirname, "..", "app"));
+  } else {
+    buildCliPackage();
+  }
 }

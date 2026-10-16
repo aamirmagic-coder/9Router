@@ -9,6 +9,7 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
+import { addHeaders as addBuddyHeaders, isBuddyProvider } from "../utils/buddyRequestContext.js";
 
 // Auth header descriptors — derived from registry transport.auth, fallback to hardcoded defaults.
 const BEARER = { combined: true, header: "Authorization", scheme: "bearer" };
@@ -27,8 +28,13 @@ function setAuth(headers, spec, token) {
 // Resolve auth onto headers from a descriptor.
 function applyAuth(headers, desc, credentials) {
   if (desc.combined) {
-    // combined providers always set the header (legacy behavior, incl. noAuth → "Bearer undefined")
-    setAuth(headers, desc, credentials.apiKey || credentials.accessToken);
+    // combined providers always set the header (legacy behavior, incl. noAuth → "Bearer undefined") —
+    // unless the descriptor opts into preserveHookAuth: a hook then owns the
+    // Authorization value (e.g. Cline needs workos:-prefixed OAuth tokens but
+    // plain API keys, which a single merged token can't express).
+    if (!(desc.preserveHookAuth && headers[desc.header])) {
+      setAuth(headers, desc, credentials.apiKey || credentials.accessToken);
+    }
     if (desc.anthropicVersion && !headers["anthropic-version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
     return;
   }
@@ -88,10 +94,24 @@ export class DefaultExecutor extends BaseExecutor {
       if (this.config.quirks?.dropClientMetadata) {
         delete transformed.client_metadata;
       }
+      // quirk: Responses-API upstreams (Meta) reject Chat-style top-level
+      // `reasoning_effort` with HTTP 400 — it must be nested as `reasoning.effort`.
+      if (this.config.quirks?.foldReasoningEffort && transformed.reasoning_effort != null) {
+        const effort = transformed.reasoning_effort;
+        delete transformed.reasoning_effort;
+        transformed.reasoning = { ...(transformed.reasoning || {}), effort };
+      }
       stripUnsupportedParams(this.provider, model, transformed);
     }
 
-    return injectReasoningContent({ provider: this.provider, model, body: transformed });
+    const injected = injectReasoningContent({ provider: this.provider, model, body: transformed });
+
+    // Ensure unsupported params (such as reasoning_content on Cerebras) remain stripped after injection
+    if (injected && typeof injected === "object") {
+      stripUnsupportedParams(this.provider, model, injected);
+    }
+
+    return injected;
   }
 
   applyNousAttribution(model, body, stream, credentials) {
@@ -251,6 +271,13 @@ export class DefaultExecutor extends BaseExecutor {
     }
 
     if (stream) headers["Accept"] = "text/event-stream";
+
+    // CodeBuddy / WorkBuddy channel check: the official client sends a family of
+    // conversation/turn/message/trace headers, and the gateway refuses calls
+    // without them (HTTP 400, code 11128). Applied last so auth, proxy and
+    // registry headers above are preserved untouched.
+    if (isBuddyProvider(this.provider)) addBuddyHeaders(headers);
+
     return headers;
   }
 

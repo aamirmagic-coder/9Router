@@ -30,8 +30,9 @@ export default {
   category: "oauth",
   authModes: ["oauth", "apikey"],
   hasOAuth: true,
-  // Keys are cluster-specific. MiMo Desktop declares five regions
-  // (CN/SGP/AMS/RU/IN) — host + sid follow mimo-server-<code> / mimo<code>.
+  // Kunci bersifat per-cluster. MiMo Desktop mendeklarasikan lima region
+  // (CN/SGP/AMS/RU/IN) — host dan sid mengikuti pola mimo-server-<kode> /
+  // mimo<kode>. Region tak dikenal jatuh ke sgp.
   regions: [
     { id: "cn", label: "China (中国大陆)" },
     { id: "sgp", label: "Singapore (新加坡)" },
@@ -40,6 +41,26 @@ export default {
     { id: "in", label: "India (印度)" },
   ],
   defaultRegion: "sgp",
+  // MiMo menjalankan DUA permukaan API yang terpisah dan TIDAK saling
+  // menerima kunci satu sama lain (diukur 24 Sep 2026):
+  //
+  //   platform (pay-as-you-go) : api.xiaomimimo.com
+  //     - kunci sk- dari console/api-keys
+  //     - saldo terpisah; kunci Token Plan ditolak di sini
+  //
+  //   Token Plan (langganan)   : token-plan-<region>.xiaomimimo.com
+  //     - kunci "Dedicated API Key" dari console/plan-manage
+  //     - kuota bulanan (mis. Lite = 4,1 M credits), BUKAN saldo
+  //     - kunci platform ditolak 401 "Invalid API Key"
+  //
+  // Karena itu permukaan dipilih PER KONEKSI lewat
+  // `providerSpecificData.mimoSurface` ("platform" | "token-plan"), bukan
+  // hardcode di registry. Region mengikuti `regions` di atas.
+  surfaces: [
+    { id: "platform", label: "Platform (pay-as-you-go)", host: "api.xiaomimimo.com" },
+    { id: "token-plan", label: "Token Plan (langganan)", hostTemplate: "token-plan-{region}.xiaomimimo.com" },
+  ],
+  defaultSurface: "platform",
   serviceKinds: ["llm", "tts"],
   transport: {
     baseUrl: "https://api.xiaomimimo.com/v1/chat/completions",
@@ -60,7 +81,9 @@ export default {
     },
   ],
   models: [
-    // Cloud API & Desktop dual-route models (prefers the desktop account quota when available)
+    // Model dual-route v2.6: memakai kuota akun Desktop bila kredensialnya ada,
+    // jika tidak jatuh ke cloud API (kunci sk-). Menggantikan id
+    // mimo-x-*-preview yang sudah usang.
     { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro", upstreamModelId: "xiaomi/mimo-v2.6-pro", supportedFormats: ["openai"] },
     { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash", upstreamModelId: "xiaomi/mimo-v2.6-flash", supportedFormats: ["openai"] },
     { id: "mimo-v2.6-pro-ultraspeed", name: "MiMo V2.6 Pro UltraSpeed", upstreamModelId: "xiaomi/mimo-v2.6-pro-ultraspeed", supportedFormats: ["openai"] },

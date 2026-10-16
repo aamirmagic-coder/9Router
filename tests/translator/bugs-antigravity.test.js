@@ -137,3 +137,86 @@ describe("Antigravity executor", () => {
     expect(system).not.toContain("Please ignore the following [ignore]");
   });
 });
+
+describe("Claude → Antigravity image preservation (pivot claude→openai→antigravity)", () => {
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const AG = (model, body) =>
+    translateRequest(FORMATS.CLAUDE, FORMATS.ANTIGRAVITY, model, body, true, { accessToken: "t", email: "x@y.z" }, "antigravity");
+
+  // Dulu image di pesan user dibuang oleh pivot (envelope Claude tidak punya
+  // cabang IMAGE). Sekarang harus selamat sebagai inlineData.
+  it("Claude-backed model keeps image in user message as inlineData", () => {
+    const out = AG("claude-opus-4-6", {
+      model: "claude-opus-4-6",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "What is in this image?" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } },
+        ],
+      }],
+    });
+    const parts = out.request.contents[0].parts;
+    const inline = parts.find((p) => p.inlineData);
+    expect(inline, "image dropped for Claude model").toBeTruthy();
+    // Satu bentuk saja: mimeType, konsisten dengan convertOpenAIContentToParts.
+    // Google menerima mime_type maupun mimeType (terukur 2026-09-20), jadi yang
+    // penting adalah TIDAK ada dua bentuk berbeda dalam satu codebase.
+    expect(inline.inlineData.mimeType).toBe("image/png");
+    expect(inline.inlineData.data).toBe(PNG);
+  });
+
+  // Bentuk mime tunggal (camelCase), konsisten di seluruh pivot.
+  it("Gemini-backed model keeps image with camelCase mimeType", () => {
+    const out = AG("gemini-3.6-flash-high", {
+      model: "gemini-3.6-flash-high",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "hi" },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: PNG } },
+        ],
+      }],
+    });
+    const inline = out.request.contents[0].parts.find((p) => p.inlineData);
+    expect(inline, "image dropped for Gemini model").toBeTruthy();
+    expect(inline.inlineData.mimeType).toBe("image/jpeg");
+    expect(JSON.stringify(out)).not.toContain("mime_type");
+  });
+
+  // Image di dalam tool_result dulu di-stringify jadi teks JSON oleh
+  // claude-to-openai. Sekarang harus mendarat di functionResponse.parts
+  // sebagai inlineData, teks tetap di response.result.
+  it("image inside tool_result lands in functionResponse.parts as inlineData", () => {
+    const out = AG("claude-opus-4-6", {
+      model: "claude-opus-4-6",
+      messages: [
+        { role: "user", content: "Read this image." },
+        { role: "assistant", content: [{ type: "text", text: "OK" }] },
+        { role: "user", content: [{
+          type: "tool_result",
+          tool_use_id: "toolu_1",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } },
+            { type: "text", text: "Here is the screenshot." },
+          ],
+        }] },
+      ],
+    });
+    const last = out.request.contents[out.request.contents.length - 1];
+    const funcResp = last.parts.find((p) => p.functionResponse);
+    expect(funcResp).toBeTruthy();
+    expect(funcResp.functionResponse.parts[0].inlineData.mimeType).toBe("image/png");
+    expect(funcResp.functionResponse.parts[0].inlineData.data).toBe(PNG);
+    expect(funcResp.functionResponse.response.result).toContain("Here is the screenshot.");
+  });
+
+  // Non-image request must keep the previous double-hop path (regression guard).
+  it("non-image request still goes through the fallback (text preserved)", () => {
+    const out = AG("claude-opus-4-6", {
+      model: "claude-opus-4-6",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(JSON.stringify(out.request.contents)).toContain("hello");
+  });
+});

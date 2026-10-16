@@ -59,8 +59,13 @@ describe("Gemini Cloud Code endpoint isolation", () => {
       "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
       expect.objectContaining({ method: "POST" })
     );
-    // Chat transport still uses the daily host to bypass prod 429.
-    expect(antigravity.transport.baseUrls).toEqual(["https://daily-cloudcode-pa.googleapis.com"]);
+    // Chat transport masih memakai daily sebagai host PERTAMA (menghindari
+    // 429 prod), tapi kini diikuti pool sandbox sebagai cadangan kapasitas.
+    // Lihat AntigravityExecutor.shouldRetry + ANTIGRAVITY_IDE_BASE_URLS.
+    expect(antigravity.transport.baseUrls[0]).toBe("https://daily-cloudcode-pa.googleapis.com");
+    expect(antigravity.transport.baseUrls.length).toBeGreaterThan(1);
+    // Prod tetap hanya untuk discovery, tidak pernah jadi host chat.
+    expect(antigravity.transport.baseUrls).not.toContain("https://cloudcode-pa.googleapis.com");
     removeConnection(connectionId);
   });
 });

@@ -12,6 +12,10 @@ export default {
   },
   category: "free",
   noAuth: true,
+  // Free tier is stream-only: a non-streaming upstream call is answered with
+  // 403 FreeTierError. chatCore reads this to call the provider with SSE and
+  // then convert back to JSON for clients that asked for a non-streaming body.
+  forceStream: true,
   transport: {
     baseUrl: "https://opencode.ai",
     headers: {
@@ -31,6 +35,11 @@ export default {
     },
   },
   models: [
+    // The muse-spark family is served by /zen/v1/responses; the rest stay on
+    // /chat/completions, so the format is declared per-model, not per-provider.
+    // The executor keys off the "muse-spark" family (RESPONSES_MODEL_FAMILIES),
+    // so new variants like 1.3 route correctly without an executor change.
+    { id: "muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Contributor Free", targetFormat: "openai-responses" },
     // Endpoint formats differ per model, so declare non-chat models explicitly.
     { id: "muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Contributor Free", targetFormat: "openai-responses" },
     { id: "muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Contributor Free", targetFormat: "openai-responses" },

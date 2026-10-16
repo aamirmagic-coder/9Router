@@ -40,11 +40,17 @@
   --color-border: #e5e7eb;
   --color-border-subtle: #f1f1f3;
 
-  /* Text */
+  /* Text.
+     `subtle` DIUKUR, bukan dikira-kira: nilainya harus lulus WCAG AA (4.5:1)
+     terhadap tiga latar terang yang benar-benar dipakai halaman ini —
+     #FDFAF6 (--color-bg, 5,6:1), #F7F3EE (--color-bg-subtle, latar mode switch
+     dan lapis terbuka, 5,2:1), dan #E7E7E9 (--color-surface-3, 4,7:1).
+     Nilai sebelumnya #9CA3AF hanya mencapai 2,44:1 dan gagal di ketiganya,
+     padahal kelas `text-text-subtle` dipakai 29 kali untuk teks sungguhan. */
   --color-text: #0a0a0a;
   --color-text-main: #0a0a0a;
-  --color-text-muted: #6B7280;
-  --color-text-subtle: #9CA3AF;
+  --color-text-muted: #5F6673;
+  --color-text-subtle: #5F6673;
 
   /* Status */
   --color-danger: #cf222e;
@@ -96,10 +102,13 @@
   --color-border: #333333;
   --color-border-subtle: #2a2a2a;
 
+  /* Tema gelap: nilainya memang SUDAH benar, hanya TERTUKAR dengan tema
+     terang. #9CA3AF mencapai 6,9:1 di #1a1a1a dan #8B93A1 mencapai 4,9:1 di
+     #262626 (—color-surface, latar mode switch gelap). */
   --color-text: #ededed;
   --color-text-main: #ededed;
   --color-text-muted: #9ca3af;
-  --color-text-subtle: #6b7280;
+  --color-text-subtle: #8b93a1;
 
   --color-danger: #ef4444;
   --color-success: #22c55e;
@@ -169,6 +178,30 @@ select {
   --color-success: var(--color-success);
   --color-warning: var(--color-warning);
   --color-info: var(--color-info);
+
+  /* Aliases yang dipakai di UI tapi belum pernah terdefinisi.
+     Di Tailwind v4, kelas warna tanpa token = tidak menghasilkan CSS apa pun —
+     jadi `bg-bg-subtle` dan `bg-bg-hover` selama ini berarti "tanpa latar",
+     dan `text-text-primary` berarti teks tanpa warna eksplisit. Terlihat paling
+     parah di /dashboard/quota, di mana panel kehilangan latarnya.
+     Didefinisikan di sini (bukan dengan mengganti nama kelas di ~40 tempat)
+     supaya kelas yang sudah ditulis di kode tetap bekerja dan permukaan
+     memperoleh warna yang dimaksud. */
+  --color-bg-subtle: var(--color-bg-alt);
+  --color-bg-hover: var(--color-surface-2);
+  --color-text-primary: var(--color-text-main);
+  /* `error` juga tidak pernah terdefinisi — kelas `text-error`/`bg-error`/
+     `border-error` dipakai di banner gagal impor/ekspor halaman Usage
+     (page.js), sehingga kegagalan tampil sebagai teks biasa tanpa warna.
+     Dipetakan ke `--color-danger` yang sudah ada, bukan token baru. */
+  --color-error: var(--color-danger);
+
+  /* Oranye sebagai LATAR tombol aktif butuh nilai lebih gelap dari brand-500
+     (#E56A4A): teks putih di atasnya hanya 3,23:1 dan gagal AA. brand-700
+     (#a64027) mencapai 6,21:1 dan masih keluarga warna yang sama.
+     Dipakai lewat `text-white`; tidak mengubah `--color-primary` supaya
+     aksen brand di seluruh aplikasi tidak ikut bergeser. */
+  --color-primary-strong: var(--color-brand-700);
 
   /* Static fallbacks (explicit per-mode usage if needed) */
   --color-bg-light: #FCFBF9;
@@ -413,6 +446,59 @@ button:disabled,
 .fade-in { animation: fadeIn 0.2s ease-out forwards; }
 .slide-in-top { animation: slideInFromTop 0.18s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 
+/* Angka yang baru masuk. Dipakai halaman Usage untuk nilai yang berubah dari
+   SSE: opacity saja, TANPA transform — angka yang bergeser sedikit pun akan
+   merusak kolom `tabular-nums` yang lebarnya sengaja dikunci supaya baris
+   tidak melompat saat data mengalir. 180ms sesuai tata bahasa gerak yang
+   disepakati di kontrak arah. */
+@keyframes valueFade {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+.value-fade { animation: valueFade 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Hormati permintaan sistem untuk mengurangi gerak.
+ *
+ * Sebelum ini halaman Usage beranimasi tanpa jalan keluar: angka yang berjalan,
+ * kalender yang membesar saat disorot, chart yang menggambar ulang. Operator
+ * yang sudah mematikan animasi di sistemnya punya alasan — motion sickness,
+ * perangkat lemah, atau sekadar tidak tahan melihat angka bergerak sambil
+ * bekerja — dan halaman ini dipakai berjam-jam, bukan dilihat sekilas.
+ *
+ * Yang dimatikan hanya DURASI-nya, bukan perubahannya: transisi dan animasi
+ * tetap "berjalan" dengan durasi 0, sehingga keadaannya tetap sampai dan tidak
+ * ada layout yang bergantung pada selesainya sebuah animasi. Menghapus
+ * `transition` sama sekali juga sah, tapi durasi 0 lebih sulit salah.
+ *
+ * `scroll-behavior` ikut dimatikan karena halaman ini menggulir sendiri saat
+ * operator membuka lapis.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Teks yang hanya untuk pembaca layar. Dipakai halaman Usage supaya rincian
+   token (input/cached/output) tidak perlu bergantung pada `title` — atribut itu
+   tidak pernah muncul di perangkat sentuh dan tidak dijangkau keyboard. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 @keyframes pulseGlow {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50% { opacity: 0.7; transform: scale(1.05); }
@@ -471,92 +557,6 @@ button:disabled,
 }
 .dark .landing-grid {
   opacity: 0.04;
-}
-
-/* Topology: router card pulse (no flying rings) + electric edge beam */
-@keyframes topology-router-pulse {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow:
-      0 0 8px #fde047,
-      0 0 20px color-mix(in srgb, var(--color-primary) 65%, transparent),
-      0 0 32px rgba(34, 211, 238, 0.4),
-      inset 0 0 10px rgba(253, 224, 71, 0.3);
-  }
-  50% {
-    transform: scale(1.06);
-    box-shadow:
-      0 0 14px #fef08a,
-      0 0 28px #facc15,
-      0 0 44px rgba(34, 211, 238, 0.6),
-      inset 0 0 14px rgba(255, 255, 255, 0.25);
-  }
-}
-@keyframes topology-router-icon-shake {
-  0%, 100% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 2px #fde047); }
-  25% { transform: rotate(-5deg) scale(1.08); filter: drop-shadow(0 0 6px #facc15); }
-  75% { transform: rotate(5deg) scale(1.08); filter: drop-shadow(0 0 6px #22d3ee); }
-}
-@keyframes topology-router-label-flicker {
-  0%, 100% { text-shadow: 0 0 6px #fde047, 0 0 12px #22d3ee; }
-  50% { text-shadow: 0 0 10px #fff, 0 0 18px #facc15; }
-}
-@keyframes topology-edge-dash {
-  to { stroke-dashoffset: -36; }
-}
-@keyframes topology-edge-flicker {
-  0%, 100% { opacity: 0.85; }
-  40% { opacity: 1; }
-  55% { opacity: 0.55; }
-  70% { opacity: 1; }
-}
-.topology-router-core {
-  animation: topology-router-pulse 0.75s ease-in-out infinite;
-  border-color: #fde047 !important;
-}
-.topology-router-icon {
-  animation: topology-router-icon-shake 0.45s ease-in-out infinite;
-}
-.topology-router-label {
-  animation: topology-router-label-flicker 0.7s ease-in-out infinite;
-}
-.topology-router-badge {
-  box-shadow: 0 0 10px #fde047, 0 0 16px rgba(34, 211, 238, 0.6);
-}
-.topology-edge-kame {
-  stroke-dasharray: 8 6;
-  animation: topology-edge-dash 0.22s linear infinite;
-}
-.topology-edge-halo {
-  animation: topology-edge-flicker 0.18s steps(2) infinite;
-}
-.topology-edge-plasma {
-  stroke-dasharray: 14 10;
-  animation: topology-edge-dash 0.18s linear infinite, topology-edge-flicker 0.22s steps(3) infinite;
-}
-
-/* React Flow controls: match app theme */
-.react-flow-controls-custom {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: var(--shadow-soft);
-  overflow: hidden;
-}
-
-.react-flow-controls-custom button {
-  background: var(--color-surface);
-  color: var(--color-text-main);
-  border: 0;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.react-flow-controls-custom button:last-child {
-  border-bottom: 0;
-}
-
-.react-flow-controls-custom button:hover {
-  background: var(--color-bg-alt);
 }
 
 /* Changelog markdown body */

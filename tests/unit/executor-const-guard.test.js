@@ -39,12 +39,25 @@ describe("provider baseUrl const (full path, no trailing slash)", () => {
   });
 });
 
-describe("antigravity retry (intentional change: 429=6, 503=3)", () => {
-  it("429 attempts = 6", () => {
-    expect(antigravity.transport.retry["429"].attempts).toBe(6);
+describe("antigravity retry (intentional change: no same-host retries, rotate host instead)", () => {
+  // attempts: 0 untuk ketiganya. Retry di host yang sama tidak berguna untuk
+  // 429 (rate limit per akun) maupun 503 "No capacity available" (pool
+  // kapasitas per host) — keduanya tidak sembuh dalam hitungan detik.
+  // chatCore langsung memutar akun, dan AntigravityExecutor.shouldRetry
+  // memutar host (daily -> sandbox), jadi menunggu backoff 2s+4s+8s di host
+  // yang sudah mati kapasitasnya hanya membuang waktu.
+  it("429 attempts = 2 (retry in-place di host yang sama, delay dari quotaResetDelay)", () => {
+    expect(antigravity.transport.retry["429"].attempts).toBe(2);
   });
-  it("503 attempts = 3", () => {
-    expect(antigravity.transport.retry["503"].attempts).toBe(3);
+  it("500 attempts = 0", () => {
+    expect(antigravity.transport.retry["500"].attempts).toBe(0);
+  });
+  it("503 attempts = 0", () => {
+    expect(antigravity.transport.retry["503"].attempts).toBe(0);
+  });
+  it("declares more than one inference host so capacity rotation can happen", () => {
+    expect(Array.isArray(antigravity.transport.baseUrls)).toBe(true);
+    expect(antigravity.transport.baseUrls.length).toBeGreaterThan(1);
   });
 });
 
@@ -83,5 +96,73 @@ describe("OpenCode Free endpoint routing", () => {
     expect(chat.max_tokens).toBe(4096);
     expect(chat.max_output_tokens).toBeUndefined();
     expect(chat.reasoning_effort).toBe("high");
+  });
+
+  // Free tier answers a non-streaming upstream call with 403 FreeTierError
+  // (verified live 2026-09-17: stream:false and a missing `stream` both 403,
+  // across every free model). The executor must always ask upstream for SSE.
+  it("forces streaming upstream even when the client asked for JSON", () => {
+    const executor = new OpenCodeExecutor();
+    const body = { model: "big-pickle", messages: [{ role: "user", content: "hi" }], stream: false };
+    executor.transformRequest("big-pickle", body, false, {});
+    expect(body.stream).toBe(true);
+
+    const missing = { model: "big-pickle", messages: [{ role: "user", content: "hi" }] };
+    executor.transformRequest("big-pickle", missing, false, {});
+    expect(missing.stream).toBe(true);
+
+    // The registry flag drives chatCore's SSE->JSON conversion for such clients.
+    expect(opencode.forceStream).toBe(true);
+  });
+
+  // Fourth upstream gate (verified live 2026-09-18): the free tier fingerprints
+  // the official agentic client by the file-search quartet. 0-3 of these names
+  // → 403 FreeTierError; the quartet plus any extras → 200. Plain chat callers
+  // send no tools, so without injection every such request 403s.
+  it("injects the file-search tool quartet on Chat bodies", () => {
+    const executor = new OpenCodeExecutor();
+    const body = { model: "big-pickle", messages: [{ role: "user", content: "hi" }] };
+    executor.transformRequest("big-pickle", body, true, {});
+
+    const names = body.tools.map((t) => t.function.name).sort();
+    expect(names).toEqual(["read", "shell"]);
+    for (const tool of body.tools) {
+      expect(tool.type).toBe("function");
+      // v2: OpenCode's own definitions, not empty stubs — upstream matches them verbatim.
+      expect(tool.function.parameters.type).toBe("object");
+      expect(Object.keys(tool.function.parameters.properties).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps caller tools verbatim and only appends the missing quartet names", () => {
+    const executor = new OpenCodeExecutor();
+    const body = {
+      model: "big-pickle",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [
+        { type: "function", function: { name: "my_tool", description: "mine", parameters: { type: "object", properties: {} } } },
+        { type: "function", function: { name: "bash", description: "punyaku", parameters: { type: "object", properties: {} } } },
+      ],
+    };
+    executor.transformRequest("big-pickle", body, true, {});
+
+    const names = body.tools.map((t) => t.function.name);
+    // `bash` is not part of the v2 fingerprint set (read/shell), so the caller's
+    // own declaration stays verbatim and the two members are appended after it.
+    expect(names).toEqual(["my_tool", "bash", "read", "shell"]);
+    expect(body.tools[1].function.description).toBe("punyaku");
+  });
+
+  it("injects the quartet in Responses flat shape on the Responses endpoint", () => {
+    const executor = new OpenCodeExecutor();
+    const body = { input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }] };
+    executor.transformRequest("muse-spark-1.3-contributor-free", body, true, {});
+
+    const names = body.tools.map((t) => t.name).sort();
+    expect(names).toEqual(["read", "shell"]);
+    for (const tool of body.tools) {
+      expect(tool.type).toBe("function");
+      expect(tool.function).toBeUndefined(); // flat shape, not nested
+    }
   });
 });

@@ -1,6 +1,7 @@
 import { getApiKeys } from "@/lib/localDb";
 import { resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
+import { parseSSEToOpenAIResponse } from "open-sse/handlers/chatCore/sseToJsonHandler.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 
@@ -185,6 +186,17 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
   const rawText = await res.text().catch(() => "");
   let parsed = null;
   try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
+
+  // A provider may answer with SSE even though this probe asked for
+  // stream:false — any transport marked `forceStream` does exactly that
+  // (muse-ai, meta-code, …), because the upstream only speaks streaming and
+  // 9router converts it downstream. JSON.parse then yields null and the probe
+  // reports "no completion choices", which reads as a broken connection even
+  // though the same request succeeds through /v1. Rebuild the response from
+  // the stream instead, using the same parser the non-streaming path uses.
+  if (!parsed && /^\s*data:/m.test(rawText)) {
+    parsed = parseSSEToOpenAIResponse(rawText, model);
+  }
 
   // Unwrap before the choices checks below. No-op for providers that do not
   // opt in via transport.quirks.clineEnvelope.

@@ -146,6 +146,20 @@ const OAUTH_TEST_CONFIG = {
       402: "Connected, but Grok Build credits are exhausted (spending limit). Add credits or upgrade SuperGrok.",
     },
   },
+  // Meta Code — probe /v1/models. The minted `LLM|…` key authenticates here; 402 means
+  // billing needs setup (pay-as-you-go), which is a soft failure, not a dead credential.
+  "meta-code": {
+    url: `${PROVIDERS["meta-code"]?.transport?.validateUrl || "https://api.meta.ai/v1/models"}`,
+    method: "GET",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    extraHeaders: { Accept: "application/json" },
+    refreshable: true,
+    acceptStatuses: [402],
+    softFailMessage: {
+      402: "Connected, but Model API billing is not set up. Add a payment method at dev.meta.ai/billing.",
+    },
+  },
   // Muse Code subscription — probe /v1/models with the minted LLM|… key
   "muse": {
     url: "https://api.meta.ai/v1/models",

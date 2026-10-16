@@ -1,0 +1,8 @@
+# Credentials and account state — never commit these.
+cookies.txt
+cookies.txt.bak
+config.json
+__pycache__/
+*.pyc
+.venv/
+venv/

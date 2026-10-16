@@ -29,6 +29,25 @@ const strikeCounts = new Map(); // "connectionId|model" → { count, windowStart
 const strikeBlocks = new Map(); // "connectionId|model" → blockedUntil ms
 
 /**
+ * Deteksi tingkat-POOL.
+ *
+ * Strike per-akun tidak pernah memicu saat 429 melanda SEMUA akun, karena
+ * router berpindah akun setiap kali kegagalan — tiap akun hanya pernah
+ * mencapai 1 strike. Terukur 2026-09-20 (log produksi): gemini-3.8-flash-high
+ * kena 429 di tujuh akun berbeda berturut-turut tanpa satu pun terblokir,
+ * sehingga puluhan akun terbakar dalam ~2 menit untuk model yang sama.
+ *
+ * Bila banyak akun BERBEDA gagal pada model yang sama dalam jendela singkat,
+ * itu kondisi upstream, bukan akun. Blokir model itu untuk semua akun
+ * sementara, agar router berhenti membakar sisa pool.
+ */
+const POOL_WINDOW_MS = 60_000;
+const POOL_DISTINCT_THRESHOLD = 5;   // akun berbeda yang gagal pada model sama
+const POOL_BLOCK_MS = 3 * 60_000;    // blokir lebih pendek dari strike akun
+const poolFailures = new Map();      // model → Map(connectionId → timestamp)
+const poolBlocks = new Map();        // model → blockedUntil ms
+
+/**
  * Re-apply active strike blocks onto a fresh quotas snapshot so the auth
  * pre-filter (which reads this cache) keeps skipping the blocked pair across
  * requests until the block expires — same channel as the exhausted-0% path.
@@ -157,6 +176,15 @@ export function getAntigravityModelQuota(quotas, model) {
 export function clearAntigravityStrikes(connectionId, model) {
   const key = `${connectionId}|${model}`;
   strikeCounts.delete(key);
+  // Catat keberhasilan pada model ini: bersihkan riwayat kegagalan pool supaya
+  // blokir pool tidak pernah terbentuk dari kegagalan yang sudah lampau.
+  if (model) {
+    const seen = poolFailures.get(model);
+    if (seen) {
+      seen.delete(connectionId);
+      if (seen.size === 0) poolFailures.delete(model);
+    }
+  }
   const until = strikeBlocks.get(key);
   if (until === undefined) return;
   strikeBlocks.delete(key);
@@ -165,6 +193,8 @@ export function clearAntigravityStrikes(connectionId, model) {
   if (cached?.[model]?.resetAt === iso) {
     delete cached[model];
   }
+  // Kuota sesi Antigravity dikelompokkan per keluarga (claude_gpt / gemini):
+  // membuka strike sebuah model harus membuka baris sesi keluarganya juga.
   const family = getAntigravityModelFamily(model);
   if (family === "claude_gpt" && cached?.claude_gpt_session?.resetAt === iso) {
     delete cached.claude_gpt_session;
@@ -172,6 +202,60 @@ export function clearAntigravityStrikes(connectionId, model) {
     delete cached.gemini_session;
   }
   quotaCache.set(connectionId, cached);
+}
+
+/** True bila model sedang diblokir karena 429 melanda banyak akun. */
+export function isAntigravityPoolBlocked(model) {
+  if (!model) return false;
+  const until = poolBlocks.get(model);
+  if (until === undefined) return false;
+  if (until <= Date.now()) {
+    poolBlocks.delete(model);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Catat satu kegagalan 429/409 pada model dan kembalikan blockedUntil bila
+ * ambang pool terlampaui.
+ * @returns {number|null} blockedUntil ms, atau null bila belum terlampaui
+ */
+function recordPoolFailure(connectionId, model, status) {
+  if (!model) return null;
+  const now = Date.now();
+  let seen = poolFailures.get(model);
+  if (!seen) {
+    seen = new Map();
+    poolFailures.set(model, seen);
+  }
+  // Buang entri di luar jendela supaya hitungan mencerminkan kegagalan terkini.
+  for (const [id, ts] of seen) {
+    if (now - ts > POOL_WINDOW_MS) seen.delete(id);
+  }
+  seen.set(connectionId, now);
+
+  if (seen.size < POOL_DISTINCT_THRESHOLD) return null;
+
+  const blockedUntil = now + POOL_BLOCK_MS;
+  poolBlocks.set(model, blockedUntil);
+  seen.clear();
+  log.warn(
+    "AG_QUOTA",
+    `POOL_BLOCK ${model} — ${POOL_DISTINCT_THRESHOLD}+ akun berbeda kena ${status} dalam ${POOL_WINDOW_MS / 1000}s; blokir model ${POOL_BLOCK_MS / 60000}m`
+  );
+  return blockedUntil;
+}
+
+/** Hanya untuk test: bersihkan seluruh state breaker. */
+export function _resetStrikeStateForTest() {
+  strikeCounts.clear();
+  strikeBlocks.clear();
+  poolFailures.clear();
+  poolBlocks.clear();
+  quotaCache.clear();
+  lastRefreshAt.clear();
+  inflightRefresh.clear();
 }
 
 /**
@@ -242,8 +326,45 @@ async function _doRefresh(connectionId, accessToken, providerSpecificData, now) 
  * Called from chat handler error path.
  * @returns {number|null} resetAt timestamp ms (for resetsAtMs passthrough) or null
  */
+/**
+ * Resolve the quota entry that actually governs `model`.
+ *
+ * Antigravity meters quota per POOL, not per model: every `gemini-*` model
+ * shares one pool, every `claude-*`/`gpt-*` model shares another. A free-tier
+ * account reports only `gemini_weekly` and `claude_gpt_weekly` — there are no
+ * per-model entries at all. An exact `quotas[model]` lookup therefore missed,
+ * so an exhausted pool looked "unknown" and the caller kept probing other
+ * models in the same dead pool.
+ *
+ * Order: exact model → family bucket → any bucket whose name contains the
+ * family token. Returns undefined when nothing matches, preserving the
+ * existing "unknown" behaviour rather than guessing.
+ */
+export function resolveQuotaForModel(quotas, model) {
+  if (!quotas || !model) return undefined;
+  if (quotas[model] !== undefined) return quotas[model];
+
+  const m = String(model).toLowerCase();
+  const family = m.startsWith("gemini") || m.includes("imagen")
+    ? "gemini"
+    : (m.startsWith("claude") || m.startsWith("gpt") ? "claude" : null);
+  if (!family) return undefined;
+
+  for (const [key, value] of Object.entries(quotas)) {
+    const k = key.toLowerCase();
+    if (family === "gemini" && k.includes("gemini")) return value;
+    if (family === "claude" && (k.includes("claude") || k.includes("gpt") || k.includes("3p"))) return value;
+  }
+  return undefined;
+}
+
 export async function handleAntigravityQuotaError(connectionId, status, model, accessToken, providerSpecificData) {
   log.info("AG_QUOTA", `${connectionId.slice(0, 8)} | ${status} on ${model} — refreshing quota`);
+
+  // Deteksi tingkat-pool SEBELUM apa pun: bila model ini sudah menolak banyak
+  // akun berbeda dalam jendela singkat, hentikan pembakaran sisa pool.
+  const poolBlockedUntil = recordPoolFailure(connectionId, model, status);
+  if (poolBlockedUntil) return poolBlockedUntil;
 
   // Throttle applies to error paths too: one quota request per account/30s.
   // The first 409/429 populates cache; concurrent or repeated errors reuse it.

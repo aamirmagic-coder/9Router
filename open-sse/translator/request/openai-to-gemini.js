@@ -20,6 +20,7 @@ import {
 } from "../formats/gemini.js";
 import { deriveSessionId, toNumericSessionId } from "../../utils/sessionManager.js";
 import { ROLE, GEMINI_ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
+import { parseDataUri } from "../concerns/image.js";
 import { isGemini4Model } from "../../providers/capabilities.js";
 
 // Sanitize function names for Gemini API.
@@ -72,7 +73,6 @@ function createToolCallIdUniquifier() {
     },
   };
 }
-
 // Core: Convert OpenAI request to Gemini format (base for all variants)
 function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG_SIGNATURE, sessionId = null) {
   const result = {
@@ -192,7 +192,6 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
             // Emitted id is uniquified; the thought-signature lookup above stays
             // on the ORIGINAL id so a cached signature is still found. #4532
             const emitId = toolCallIdUniquifier.next(tc.id);
-
             const part = {
               functionCall: {
                 id: emitId,
@@ -208,8 +207,7 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
             // tcID2Name is a conversation-wide id->name map, so a later call
             // reusing the id would otherwise rename this turn's response.
             // #4273
-            toolCallIds.push({ origId: tc.id, emitId, name: tc.function?.name });
-          }
+            toolCallIds.push({ origId: tc.id, emitId, name: tc.function?.name });          }
 
           if (parts.length > 0) {
             result.contents.push({ role: GEMINI_ROLE.MODEL, parts });
@@ -235,7 +233,6 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
               } else {
                 resp = "";
               }
-
               // Name comes from THIS call, not from the conversation-wide id->name map,
               // which a later duplicate of the same id would have overwritten.
               let name = callName || tcID2Name[origId];
@@ -248,22 +245,46 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
                 }
               }
 
-              let parsedResp = tryParseJSON(resp);
-              if (parsedResp === null) {
-                parsedResp = { result: resp };
-              } else if (typeof parsedResp !== "object") {
-                parsedResp = { result: parsedResp };
+              // Array berisi image (dari claude-to-openai) harus dipecah:
+              // teks → response.result, image → functionResponse.parts sebagai
+              // inlineData. Gemini menolak base64 yang di-stringify ke result.
+              let parsedResp;
+              const imageParts = [];
+              if (Array.isArray(resp)) {
+                const textBits = [];
+                for (const item of resp) {
+                  if (item?.type === OPENAI_BLOCK.IMAGE_URL && item.image_url?.url) {
+                    const parsed = parseDataUri(item.image_url.url);
+                    if (parsed) {
+                      imageParts.push({
+                        inlineData: { mimeType: parsed.mimeType, data: parsed.base64 }
+                      });
+                    }
+                  } else if (item?.type === OPENAI_BLOCK.TEXT) {
+                    textBits.push(item.text);
+                  }
+                }
+                parsedResp = tryParseJSON(textBits.join("\n"));
+                if (parsedResp === null) parsedResp = { result: textBits.join("\n") };
+                else if (typeof parsedResp !== "object") parsedResp = { result: parsedResp };
+              } else {
+                parsedResp = tryParseJSON(resp);
+                if (parsedResp === null) {
+                  parsedResp = { result: resp };
+                } else if (typeof parsedResp !== "object") {
+                  parsedResp = { result: parsedResp };
+                }
               }
 
-              toolParts.push({
-                functionResponse: {
-                  // Matches the functionCall id emitted above, so a response
-                  // never points at an id the call does not carry. #4532
-                  id: emitId,
-                  name: sanitizeGeminiFunctionName(name),
-                  response: { result: parsedResp }
-                }
-              });
+              const fnResponse = {
+                // Matches the functionCall id emitted above, so a response
+                // never points at an id the call does not carry. #4532
+                id: emitId,
+                name: sanitizeGeminiFunctionName(callName || name),
+                response: { result: parsedResp }
+              };
+              if (imageParts.length > 0) fnResponse.parts = imageParts;
+              toolParts.push({ functionResponse: fnResponse });
             }
             if (toolParts.length > 0) {
               result.contents.push({ role: GEMINI_ROLE.USER, parts: toolParts });
@@ -341,7 +362,10 @@ export function openaiToGeminiCLIRequest(model, body, stream, credentials = null
 
 // Wrap Gemini CLI format in Cloud Code wrapper
 function wrapInCloudCodeEnvelope(model, geminiCLI, credentials = null, isAntigravity = false) {
-  const projectId = credentials?.projectId || generateProjectId();
+  // A fabricated project is not valid for any account and earns 403 #3501 on
+  // the sandbox hosts (measured: generated id and empty string both 403, the
+  // account's real project 200). Never invent one — send what we actually have.
+  const projectId = credentials?.projectId || "";
 
   const envelope = {
     project: projectId,
@@ -358,9 +382,14 @@ function wrapInCloudCodeEnvelope(model, geminiCLI, credentials = null, isAntigra
   };
 
   // Antigravity specific fields.
-  // NOTE: the official Antigravity client omits `requestType` entirely on the
-  // agent (chat) path. Sending `requestType: "agent"` triggers a detail-free
-  // 429 RESOURCE_EXHAUSTED even with quota available.
+  //
+  // CATATAN: klien Antigravity resmi TIDAK mengirim `requestType` di jalur
+  // agent (chat). Mengirim `requestType: "agent"` memicu 429
+  // RESOURCE_EXHAUSTED tanpa details[] meski kuota tersedia — lihat catatan
+  // lengkap di executors/antigravity.js. Bucket image_gen/search tidak
+  // terpengaruh.
+  //
+  // Sumber: upstream decolua/9router 5798b308.
   if (!isAntigravity) {
     // Keep safetySettings for Gemini CLI
     envelope.request.safetySettings = geminiCLI.safetySettings;
@@ -376,16 +405,19 @@ function wrapInCloudCodeEnvelope(model, geminiCLI, credentials = null, isAntigra
 }
 
 // Wrap Claude format in Cloud Code envelope for Antigravity
-function wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials = null, signature = DEFAULT_THINKING_AG_SIGNATURE) {
-  const projectId = credentials?.projectId || generateProjectId();
+export function wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials = null, signature = DEFAULT_THINKING_AG_SIGNATURE) {
+  // See wrapInCloudCodeEnvelope: a fabricated project is a guaranteed 403 on
+  // the sandbox hosts, so never substitute one for a missing credential.
+  const projectId = credentials?.projectId || "";
 
   const envelope = {
     project: projectId,
     model: model,
     userAgent: "antigravity",
     requestId: `agent-${generateUUID()}`,
-    // NOTE: official Antigravity client omits `requestType` on the agent (chat)
-    // path — see the note in wrapInCloudCodeEnvelope() above.
+    // TIDAK ada `requestType` — klien Antigravity resmi menghilangkannya di
+    // jalur agent (chat). Lihat catatan di wrapInCloudCodeEnvelope() dan
+    // executors/antigravity.js. Sumber: upstream decolua/9router 5798b308.
     request: {
       sessionId: toNumericSessionId(credentials?._clientSessionId) || deriveSessionId(credentials?.email || credentials?.connectionId),
       contents: [],
@@ -420,6 +452,17 @@ function wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials = nu
         for (const block of msg.content) {
           if (block.type === CLAUDE_BLOCK.TEXT) {
             parts.push({ text: block.text });
+          } else if (block.type === CLAUDE_BLOCK.IMAGE && block.source?.type === "base64") {
+            // Preserve pasted/attached images for vision-capable models. Without
+            // this branch the image is silently dropped before reaching Google.
+            parts.push({
+              inlineData: {
+                mimeType: block.source.media_type || "image/png",
+                data: block.source.data
+              }
+            });
+          } else if (block.type === CLAUDE_BLOCK.TOOL_USE) {
+            const cachedSig = block.id ? getGeminiThoughtSignatureSync(block.id, credentials?._clientSessionId) : null;
           } else if (block.type === CLAUDE_BLOCK.TOOL_USE) {
             const cachedSig = block.id ? getGeminiThoughtSignatureSync(block.id, credentials?._clientSessionId, model) : null;
             const callSig = cachedSig || (!firstToolUseSeen ? signature : undefined);
@@ -438,20 +481,39 @@ function wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials = nu
             parts.push(part);
           } else if (block.type === CLAUDE_BLOCK.TOOL_RESULT) {
             let content = block.content;
+            const imageParts = [];
             if (Array.isArray(content)) {
-              content = content.map(c => c.type === CLAUDE_BLOCK.TEXT ? c.text : JSON.stringify(c)).join("\n");
+              // Split tool_result content: text goes to response.result, images
+              // go to functionResponse.parts as inlineData (Gemini requires them
+              // there — a base64 blob must never be stringified into the result).
+              const textItems = [];
+              for (const item of content) {
+                if (item.type === CLAUDE_BLOCK.IMAGE && item.source?.type === "base64") {
+                  imageParts.push({
+                    inlineData: {
+                      mimeType: item.source.media_type || "image/png",
+                      data: item.source.data
+                    }
+                  });
+                } else if (item.type === CLAUDE_BLOCK.TEXT) {
+                  textItems.push(item.text);
+                }
+              }
+              content = textItems.join("\n");
             }
             // Resolve the original tool name from the id — Gemini requires it to match the functionCall name
             const resolvedName = toolUseIdToName[block.tool_use_id]
               ? sanitizeGeminiFunctionName(toolUseIdToName[block.tool_use_id])
               : "tool";
-            parts.push({
-              functionResponse: {
-                id: block.tool_use_id,
-                name: resolvedName,
-                response: { result: tryParseJSON(content) || content }
-              }
-            });
+            const functionResponse = {
+              id: block.tool_use_id,
+              name: resolvedName,
+              response: { result: tryParseJSON(content) || content }
+            };
+            if (imageParts.length > 0) {
+              functionResponse.parts = imageParts;
+            }
+            parts.push({ functionResponse });
           }
         }
       } else if (typeof msg.content === "string") {

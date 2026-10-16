@@ -36,7 +36,25 @@ for (const entry of REGISTRY) {
     PROVIDERS[entry.id] = buildTransport(entry.transport, entry.oauth);
     if (entry.transports) PROVIDERS[entry.id].transports = entry.transports;
   }
-  if (entry.models !== undefined) PROVIDER_MODELS[entry.alias || entry.id] = entry.models.map(normalizeModel);
+  if (entry.models !== undefined) {
+    const normalized = entry.models.map(normalizeModel);
+    // Daftarkan juga di setiap `aliases[]`, bukan hanya `alias`.
+    //
+    // Sebelumnya hanya `entry.alias` yang dipakai, sehingga 41 provider yang
+    // mendeklarasikan alias pendek (mis. xmtp, ds, cf, kc) TIDAK bisa
+    // di-resolve lewat alias itu — `getProviderModels("xmtp")` mengembalikan []
+    // dan `isValidModel("xmtp", …)` false, padahal providernya ada dan punya
+    // model. Akibatnya permintaan seperti `xmtp/mimo-v2.6-pro` ditolak sebagai
+    // model tidak dikenal.
+    PROVIDER_MODELS[entry.alias || entry.id] = normalized;
+    if (Array.isArray(entry.aliases)) {
+      for (const a of entry.aliases) {
+        if (typeof a === "string" && a && PROVIDER_MODELS[a] === undefined) {
+          PROVIDER_MODELS[a] = normalized;
+        }
+      }
+    }
+  }
   if (entry.oauth) PROVIDER_OAUTH[entry.id] = entry.oauth;
   // Build PROVIDER_MEDIA from top-level fields (post-migration) + legacy entry.media
   const mediaFields = {};

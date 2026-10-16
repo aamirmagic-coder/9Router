@@ -8,6 +8,7 @@ import claude from "./claude.js";
 import codex from "./codex.js";
 import xai from "./xai.js";
 import grokCli from "./grok-cli.js";
+import metaCode from "./meta-code.js";
 import muse from "./muse.js";
 import geminiCli from "./gemini-cli.js";
 import antigravity from "./antigravity.js";
@@ -28,6 +29,7 @@ import kimchi from "./kimchi.js";
 import trae from "./trae.js";
 import windsurf from "./windsurf.js";
 import zed from "./zed.js";
+import freebuff from "./freebuff.js";
 import glm from "./glm.js";
 import minimaxCode from "./minimax-code.js";
 import minimaxCodeGlobal from "./minimax-code-global.js";
@@ -39,6 +41,7 @@ const PROVIDERS = {
   codex,
   xai,
   "grok-cli": grokCli,
+  "meta-code": metaCode,
   muse,
   "gemini-cli": geminiCli,
   antigravity,
@@ -59,6 +62,7 @@ const PROVIDERS = {
   trae,
   windsurf,
   zed,
+  freebuff,
   glm,
   "minimax-code": minimaxCode,
   "minimax-code-global": minimaxCodeGlobal,

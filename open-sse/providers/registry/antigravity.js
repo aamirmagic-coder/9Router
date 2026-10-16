@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_IDE_BASE_URL, ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_OAUTH_CLIENT } from "../shared.js";
+import { ANTIGRAVITY_IDE_BASE_URL, ANTIGRAVITY_IDE_BASE_URLS, ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_OAUTH_CLIENT } from "../shared.js";
 
 export default {
   id: "antigravity",
@@ -19,20 +19,39 @@ export default {
   category: "oauth",
   serviceKinds: ["llm", "image", "webSearch"],
   transport: {
-    baseUrls: [ANTIGRAVITY_IDE_BASE_URL],
+    // Host inference berurutan: `daily` resmi dulu, lalu pool sandbox saat
+    // `daily` kehabisan kapasitas (503 "No capacity available for model …").
+    // Pool kapasitas Google TERPISAH per host — lihat ANTIGRAVITY_IDE_BASE_URLS.
+    baseUrls: ANTIGRAVITY_IDE_BASE_URLS,
     format: "antigravity",
     headers: {
       "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
     },
     retry: {
       "429": {
-        attempts: 3,
+        // Retry di host yang sama, karena 429 burst Cloud Code pulih dalam
+        // MILIDETIK — terukur 2026-09-20: `quotaResetDelay: 162.322081ms`.
+        // Delay diambil dari error.details[] oleh computeRetryDelay, jadi
+        // tidak ada backoff buta. attempts: 2 memberi ruang ~0,2-0,5 detik,
+        // jauh lebih murah daripada membuang request ke akun lain yang juga
+        // sedang burst (dan lebih cepat daripada rotasi host ~3-4 detik).
+        //
+        // 429 yang benar-benar kehabisan kuota tetap ditangani: computeRetryDelay
+        // mengembalikan `false` (veto) bila resetAt > MAX_RETRY_AFTER_MS,
+        // sehingga chatCore langsung merotasi akun.
+        attempts: 2,
       },
       "500": {
-        attempts: 3,
+        // 0 attempts = JANGAN retry host yang sama; langsung maju ke host
+        // berikutnya di `baseUrls` (lihat AntigravityExecutor.shouldRetry).
+        // Host kapasitas-habis tidak sembuh dalam hitungan detik, jadi retry
+        // di host yang sama hanya membuang waktu sebelum pindah host.
+        attempts: 0,
       },
       "503": {
-        attempts: 3,
+        // Idem untuk 503 "No capacity available for model …": pool kapasitas
+        // Google per-host, bukan per-akun. Rotasi host, bukan retry.
+        attempts: 0,
       },
     },
     usage: {
@@ -45,6 +64,10 @@ export default {
     clientSecret: "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",
   },
   models: [
+    // Upstream v0.5.99/v0.5.104 membuang id `-tiered` dan kembali ke id polos
+    // per-tier (`gemini-3.8-flash-high` dst). Catatan fork sebelumnya
+    // ("`gemini-3.8-flash-high` 404s, hanya `-tiered` yang 200") diukur 10 Sep
+    // 2026; Google menggantinya lagi setelah itu, jadi id upstream dipakai.
     { id: "gemini-4-argon-high", name: "Gemini 4 Argon (High)", upstreamModelId: "gemini-4-argon-high(high)" },
     { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", upstreamModelId: "gemini-3.8-flash-high(high)" },
     { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", upstreamModelId: "gemini-3.8-flash-medium(medium)" },
@@ -56,9 +79,15 @@ export default {
     { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", upstreamModelId: "gemini-3.6-flash-tiered(high)" },
     { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", upstreamModelId: "gemini-3.6-flash-tiered(medium)" },
     { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", upstreamModelId: "gemini-3.6-flash-tiered(low)" },
+    // Upstream v0.5.99 menghapus 3.5/3-flash (model sudah ditarik Google) dan
+    // menggantinya dengan 3.1 pro-high. Entri tanpa upstreamModelId berarti
+    // id-nya dipakai apa adanya.
     { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)", upstreamModelId: "gemini-pro-agent" },
     { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)", upstreamModelId: "gemini-pro-agent" },
     { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", upstreamModelId: "gemini-3.1-pro-low(low)" },
+    // Claude 5.5 — upstream exposes exactly 4 tiers per family (base + low/medium/high).
+    // The `(level)` suffix on upstreamModelId is a 9router thinking override: it is
+    // resolved into the request and stripped again before the Google Cloud Code call.
     { id: "claude-sonnet-5-5-high", name: "Claude Sonnet 5.5 (High)", upstreamModelId: "claude-sonnet-5-5-high(high)" },
     { id: "claude-sonnet-5-5-medium", name: "Claude Sonnet 5.5 (Medium)", upstreamModelId: "claude-sonnet-5-5-medium(medium)" },
     { id: "claude-sonnet-5-5-low", name: "Claude Sonnet 5.5 (Low)", upstreamModelId: "claude-sonnet-5-5-low(low)" },

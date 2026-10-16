@@ -123,6 +123,12 @@ export const MODEL_CAPABILITIES = {
   "claude-sonnet-5-thinking": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   "claude-sonnet-5-agentic": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   "claude-sonnet-5-thinking-agentic": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-opus-4-6-thinking": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-opus-4-6-agentic":  { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-opus-4.6-thinking": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-opus-4-7-thinking": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-opus-4-7-agentic":  { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-opus-4.7-thinking": { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
 
   // Gemini image-gen / OpenAI image / xai image variants
   "gpt-image-1":       { imageOutput: true, tools: false },
@@ -171,8 +177,14 @@ export const MODEL_CAPABILITIES = {
   "kimi-k2.7-code-highspeed": { vision: true, videoInput: true, reasoning: true, thinkingFormat: "kimi", thinkingCanDisable: false, contextWindow: 262144, maxOutput: 65536 },
   // OpenCode Free Muse Spark — multimodal (text+image per models.dev meta/muse-spark)
   // via OpenAI Responses input_image; reasoning supports up to xhigh.
-  "muse-spark-1.2-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
-  "muse-spark-1.3-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
+  // thinkingCanDisable: false — Muse Spark is a reasoning model on Meta's side and
+  // the API rejects the disable attempt: asking for `(none)` used to emit
+  // `reasoning_effort: "none"`, and api.meta.ai answers
+  //   400 reasoning_effort 'none' is not supported ... Supported values:
+  //   [minimal, low, medium, high, xhigh, max]
+  // With the flag set, thinkingUnified clamps "none" to `minimal` instead, which Meta accepts.
+  "muse-spark-1.2-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 131072 },
+  "muse-spark-1.3-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 131072 },
   // OpenCode Free Union Alpha — multimodal (text+vision), 262K context, 131K max output
   "union-alpha": { vision: true, contextWindow: 262144, maxOutput: 131072 },
   // ── OpenCode Free (reasoning: true in models.dev, ids newer than the tables above) ──
@@ -206,6 +218,9 @@ const CODEX_EXTENDED_CAPS = { ...CODEX_GPT_56_DEFAULT_CAPS, contextWindow: 87200
 // the generic pattern rather than merging with it.
 const DEVIN_CLI_GPT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 };
 
+// muse.ai personal agent — text chat only, no function calling anywhere in the
+// stack. Placeholder limits: muse.ai publishes no context-window figures.
+const MUSE_AGENT_CAPABILITIES = { tools: false, vision: false, pdf: false, search: false, reasoning: false, thinkingFormat: null, contextWindow: 100000, maxOutput: 8192 };
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
  */
@@ -243,6 +258,9 @@ export const PROVIDER_CAPABILITIES = {
     "claude-haiku-5-5": { vision: true, reasoning: true, search: true, thinkingFormat: "commandcode", thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 128000 },
   },
   "codex": {
+    // gpt-6.1-sol is a short-context Codex model; without this explicit entry the
+    // gpt-6* window pattern below hands it 1M, which the upstream rejects.
+    "gpt-6.1-sol":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
     "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
     "gpt-6-sol":                 { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
     "gpt-6-luna":                { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
@@ -289,8 +307,7 @@ export const PROVIDER_CAPABILITIES = {
   // reasoning.canDisableThinking flag — see the note in the codebuddy-cn block
   // below; it is NOT the inverse of onlyReasoning.
   "codebuddy-cn": {
-    "glm-5.2":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 131072 },
-    "glm-5.1":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
+    "glm-5.2":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 131072 },    "glm-5.1":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
     "glm-5.0":            { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
     // maxOutput 64000 per both the plugin-baked fallback and the live server
     // table (the old 38000 had no source and truncated output).
@@ -298,8 +315,7 @@ export const PROVIDER_CAPABILITIES = {
     "minimax-m3":         { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 512000, maxOutput: 524288 },
     "kimi-k2.5":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 164000, maxOutput: 32000 },
     "hy3-preview":        { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 192000, maxOutput: 64000 },
-    "deepseek-v4-flash":  { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
-    "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
+    "deepseek-v4-flash":  { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },    "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
     // Per-model values mirror the server's product-config payload (the plugin
     // fetches it from copilot.tencent.com; the `models[]` entries carry
     // maxInputTokens/maxOutputTokens/supportsImages). contextWindow =
@@ -325,8 +341,7 @@ export const PROVIDER_CAPABILITIES = {
     // deepseek-v4.1-flash replaced v4-flash on the server list. The 2026-09-30
     // snapshot raised maxOutput to 393216 (matching v4-pro) and changed the
     // published efforts from low/high/xhigh to low/high/max.
-    "deepseek-v4.1-flash": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 393216 },
-  },
+    "deepseek-v4.1-flash": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 393216 },  },
   // Poolside Laguna — OpenAI-compatible, all reasoning-capable (32K max output).
   "poolside": {
     "laguna-s-2.1":  { reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 32000 },
@@ -342,6 +357,22 @@ export const PROVIDER_CAPABILITIES = {
   "ollama": {
     "deepseek-v4.1-flash:cloud": { vision: true, reasoning: true, thinkingFormat: "deepseek", contextWindow: 1000000, maxOutput: 384000 },
   },
+  // muse.ai personal agent (the feed/goals/ideas one — NOT the Meta `muse`
+  // Model API). It has no function calling: the reference implementation
+  // lists "emulated tool calling" as unstarted and warns the agent may
+  // refuse a tool schema outright, so this is a property of the backend,
+  // not a gap in the bridge. tools:false is what stops the dashboard and
+  // /v1/models from promising an ability the agent does not have.
+  // The limits are placeholders: muse.ai publishes no context figures.
+  // Keyed by model because PROVIDER_CAPABILITIES matches model ids, and
+  // every alias routes to the same agent, so they all carry the same floor.
+  "muse-ai": {
+    "muse-chat": MUSE_AGENT_CAPABILITIES,
+    "gpt-4o": MUSE_AGENT_CAPABILITIES,
+    "gpt-5": MUSE_AGENT_CAPABILITIES,
+    "claude-sonnet-4": MUSE_AGENT_CAPABILITIES,
+    "muse-video": MUSE_AGENT_CAPABILITIES,
+    },
   // MiniMax Code (mcode) credits lane — Anthropic messages on mavis; thinking
   // is adaptive effort via output_config (claude-adaptive). Limits from
   // magpie's minimax plugin static catalog (live probes pending). M2.7 pair
@@ -373,7 +404,6 @@ PROVIDER_CAPABILITIES.dv = PROVIDER_CAPABILITIES["devin-cli"];
 PROVIDER_CAPABILITIES.devin = PROVIDER_CAPABILITIES["devin-cli"];
 // The global mcode site serves the same catalog — share the capability table.
 PROVIDER_CAPABILITIES["minimax-code-global"] = PROVIDER_CAPABILITIES["minimax-code"];
-
 /**
  * Pattern fallback — glob (* = wildcard), matched case-insensitively and
  * anchored (^...$) so a pattern must match the full model id. ORDER MATTERS:
@@ -395,8 +425,15 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*claude*haiku-5*", caps: { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
   { pattern: "*claude*haiku-4*", caps: { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
   { pattern: "*claude*opus-4*", caps: { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
-  { pattern: "*claude*sonnet-4*", caps: { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
-  { pattern: "*claude*haiku*",  caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
+  { pattern: "*claude*sonnet-4*", caps: { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },  { pattern: "*claude*haiku*",  caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
+  // Generasi 4.6+ memakai adaptive thinking, bukan budget. Pola ini adalah
+  // jaring terakhir untuk id yang belum terdaftar eksplisit di MODEL_CAPABILITIES
+  // — mis. varian -thinking baru. Tanpa cabang ini, id seperti
+  // `claude-opus-4-6-thinking` mendapat "claude-budget" dan konteks 200K.
+  { pattern: "*claude*opus*4.6*", caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 } },
+  { pattern: "*claude*opus*4-6*", caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 } },
+  { pattern: "*claude*opus*4.7*", caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 } },
+  { pattern: "*claude*opus*4-7*", caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 } },
   { pattern: "*claude*opus*",   caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
   { pattern: "*claude*sonnet*", caps: { vision: true, reasoning: true, search: true, thinkingFormat: "claude-budget" } },
   { pattern: "*claude*fable*",  caps: { vision: true, pdf: true, reasoning: true, search: true, thinkingFormat: "claude-budget", contextWindow: 1000000, maxOutput: 128000 } },
@@ -407,8 +444,7 @@ export const PATTERN_CAPABILITIES = [
   // ── Gemini (all 2.0+ multimodal + google_search grounding, 1M ctx) ─
   { pattern: "*gemini*image*",  caps: { vision: true, imageOutput: true, contextWindow: 1048576 } },
   // Gemini 4 (Argon): no "minimal" tier (400) and no thinkingBudget — LOW/MEDIUM/HIGH only, cannot disable.
-  { pattern: "*gemini-4*",      caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 } },
-  { pattern: "*gemini-3.8*",    caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 } },
+  { pattern: "*gemini-4*",      caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 } },  { pattern: "*gemini-3.8*",    caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 } },
   { pattern: "*gemini-3.7*",    caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 } },
   { pattern: "*gemini-3*pro*",  caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65535 } },
   { pattern: "*gemini-3*",      caps: { vision: true, audioInput: true, videoInput: true, reasoning: true, search: true, thinkingFormat: "gemini-level", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 } },
@@ -429,6 +465,9 @@ export const PATTERN_CAPABILITIES = [
 
   // ── OpenAI GPT-5.x (vision + thinking + web search) ──────────────
   { pattern: "*gpt-5*image*",   caps: { imageOutput: true } },
+  // ── OpenAI GPT-6.x (vision + thinking + web search) ──────────────
+  { pattern: "*gpt-6*",         caps: { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 } },
+
   { pattern: "*gpt-5*codex*",   caps: { reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
   // gpt-5.4 is where the 1.05M window starts, but the mini and nano tiers stayed
   // at 400k — first match wins, so those two have to be listed ahead of it.
@@ -444,6 +483,12 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*gpt-4*",         caps: { contextWindow: 128000 } },
   { pattern: "*gpt-3.5*",       caps: { contextWindow: 16385, maxOutput: 4096 } },
   { pattern: "*gpt-oss*",       caps: { reasoning: true, thinkingFormat: "openai", contextWindow: 128000 } },
+
+  // ── Cline free tier: Upstage Solar Pro + LongCat (agentic coding models;
+  // windows unverified — 200K/32K conservative, same as laguna:free).
+  // NOTE: placed before the o-series catch-alls — "solar-pro4" contains "o4".
+  { pattern: "*solar-pro*",     caps: { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 32000 } },
+  { pattern: "*longcat*",       caps: { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 32000 } },
 
   // ── OpenAI o-series (reasoning, vision) ──────────────────────────
   { pattern: "*o1-mini*",       caps: { reasoning: true, thinkingFormat: "openai", contextWindow: 128000 } },
@@ -553,7 +598,9 @@ export const PATTERN_CAPABILITIES = [
 
 
   // ── OpenCode Free Muse Spark (multimodal text+image; OpenAI Responses reasoning supports up to xhigh) ─
-  { pattern: "*muse*spark*",    caps: { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 } },
+  // thinkingCanDisable: false — Muse Spark is a reasoning model on Meta's side and
+  // api.meta.ai rejects `reasoning_effort: "none"` with HTTP 400. Clamp instead.
+  { pattern: "*muse*spark*",    caps: { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 131072 } },
   // ── Others ───────────────────────────────────────────────────────
   { pattern: "*hunyuan*",       caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "hy3*",            caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },

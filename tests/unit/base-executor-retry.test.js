@@ -84,6 +84,83 @@ describe("BaseExecutor.execute — network error retry/fallback", () => {
   });
 });
 
+describe("BaseExecutor.execute — connect timeout fail-fast", () => {
+  // A timeout that consumed a LARGE budget means the host is unreachable, not
+  // slow: a healthy upstream answers well inside a big window (antigravity's
+  // 1.2 MB payloads measured 18-23 s against a 120 s budget). Retrying it
+  // would multiply the stall, so execute() must surface it after ONE attempt.
+  //
+  // Uses tiny real timeouts + an injected `noRetryTimeoutMs` so the drift is
+  // exercised without waiting seconds.
+  const TIMEOUT_MS = 30;
+
+  // Queues one hanging call per expected attempt. Must be `mockImplementationOnce`,
+  // not `mockImplementation`: with a persistent implementation, vitest 4 waits on
+  // the promise that settles from inside an AbortSignal listener and trips its
+  // 10 s hook timeout even though the test body already finished. Once-queue
+  // settles identically and runs in ~50 ms.
+  function queueHanging(n) {
+    for (let i = 0; i < n; i++) fetchMock.mockImplementationOnce(hangingFetch());
+  }
+
+  // Hangs until the passed signal aborts, then rejects like undici does.
+  function hangingFetch() {
+    return (url, opts = {}) =>
+      new Promise((_resolve, reject) => {
+        const abort = () => {
+          const err = new Error("fetch connect timeout");
+          err.name = "AbortError";
+          reject(err);
+        };
+        if (opts.signal?.aborted) return abort();
+        opts.signal?.addEventListener("abort", abort, { once: true });
+      });
+  }
+
+  function makeTimeoutExec(noRetryTimeoutMs) {
+    const ex = makeExec({ baseUrl: "https://x/api", retry: { 502: { attempts: 3, delayMs: 0 } } });
+    ex.config.timeoutMs = TIMEOUT_MS;
+    ex.config.noRetryTimeoutMs = noRetryTimeoutMs;
+    return ex;
+  }
+
+  async function runAndCapture(ex, signal) {
+    try {
+      await ex.execute({ model: "m", body: {}, stream: false, credentials: creds, signal });
+      return null;
+    } catch (e) {
+      return e;
+    }
+  }
+
+  it("does NOT retry a connect timeout once the budget is large (>= noRetryTimeoutMs)", async () => {
+    // Window far below the threshold -> "unreachable", fail fast.
+    const ex = makeTimeoutExec(10);
+    queueHanging(1);
+    const thrown = await runAndCapture(ex);
+    expect(thrown?.message).toBe("fetch connect timeout");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still retries a connect timeout when the budget is short (< noRetryTimeoutMs)", async () => {
+    // Window above the threshold -> "slow", keep retrying.
+    const ex = makeTimeoutExec(60000);
+    queueHanging(4);
+    const thrown = await runAndCapture(ex);
+    expect(thrown?.message).toBe("fetch connect timeout");
+    // 1 initial + 3 retries
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("an already-aborted caller signal is never retried or swallowed", async () => {
+    const ex = makeTimeoutExec(10);
+    queueHanging(1);
+    const thrown = await runAndCapture(ex, AbortSignal.abort());
+    expect(thrown?.name).toBe("AbortError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("BaseExecutor.execute — computeRetryDelay hook veto", () => {
   it("only invokes computeRetryDelay when status has retry config", async () => {
     const ex = makeExec({ baseUrl: "https://x/api", retry: { 503: { attempts: 1, delayMs: 0 } } });

@@ -136,6 +136,8 @@ let noBrowser = false;
 let skipUpdate = false;
 let showLog = false;
 let trayMode = false;
+// Set oleh --skip-kill (proses tray hasil spawn menu "background").
+let skipKill = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" || args[i] === "-p") {
@@ -150,6 +152,11 @@ for (let i = 0; i < args.length; i++) {
     showLog = true;
   } else if (args[i] === "--skip-update") {
     skipUpdate = true;
+  } else if (args[i] === "--skip-kill") {
+    // Dipakai oleh proses tray yang di-spawn dari menu "background": induknya
+    // sudah membereskan port dan proses lama, jadi memindai lagi hanya
+    // menciptakan balapan saling-bunuh antar kedua proses.
+    skipKill = true;
   } else if (args[i] === "--tray" || args[i] === "-t") {
     trayMode = true;
     process.env.TRAY_MODE = "1";
@@ -291,12 +298,22 @@ function killAllAppProcesses(appPort) {
           });
           const lines = output.split("\n").slice(1).filter(l => l.trim());
           lines.forEach(line => {
-            // Whitelist: real node process running 9router/cli.js, or next-server.
-            // Avoids killing editors/grep/strace/cursor that just have "9router" in cmdline.
+            // Whitelist: HANYA proses yang jelas milik instalasi 9router ini.
+            //
+            // Dulu ada `|| cmd.includes("next-server")` TANPA syarat lain.
+            // Akibatnya setiap proses Next.js mana pun (proyek lain di mesin
+            // yang sama) ikut di-taskkill /F. 9Router standalone sendiri TIDAK
+            // memakai nama itu — ia menjalankan app/custom-server.js — jadi
+            // cabang tersebut hanya merugikan.
+            //
+            // Sekarang wajib menyebut "9router" DAN salah satu penanda
+            // prosesnya, sehingga editor/grep/proyek lain tidak tersentuh.
             const cmd = line.toLowerCase();
             const isAppProcess =
-              (cmd.includes("node") && cmd.includes("9router") && (cmd.includes("cli.js") || cmd.includes("\\9router") || cmd.includes("/9router")))
-              || cmd.includes("next-server");
+              cmd.includes("9router") &&
+              cmd.includes("node") &&
+              (cmd.includes("cli.js") || cmd.includes("custom-server.js") ||
+               cmd.includes("\\9router") || cmd.includes("/9router"));
             if (isAppProcess) {
               const match = line.match(/^"(\d+)"/);
               if (match && match[1] && match[1] !== process.pid.toString()) {
@@ -317,12 +334,15 @@ function killAllAppProcesses(appPort) {
           const lines = output.split('\n');
 
           lines.forEach(line => {
-            // Whitelist: real node process running 9router/cli.js, or next-server.
-            // Avoids killing grep/strace/editors/cursor that incidentally match "9router".
+            // Whitelist: HANYA proses yang jelas milik instalasi 9router ini.
+            // Sama seperti cabang Windows — cabang `next-server` tanpa syarat
+            // dihapus karena membunuh proyek Next.js lain di mesin yang sama.
             const cmd = line.toLowerCase();
             const isAppProcess =
-              (cmd.includes("node") && cmd.includes("9router") && (cmd.includes("cli.js") || cmd.includes("/9router")))
-              || cmd.includes("next-server");
+              cmd.includes("9router") &&
+              cmd.includes("node") &&
+              (cmd.includes("cli.js") || cmd.includes("custom-server.js") ||
+               cmd.includes("/9router"));
             if (isAppProcess) {
               const parts = line.trim().split(/\s+/);
               const pid = parts[1];
@@ -558,9 +578,21 @@ if (!fs.existsSync(serverPath)) {
 
 // Start server immediately; run update check in parallel (not on the critical path).
 const updatePromise = checkForUpdate();
-killAllAppProcesses(port)
-  .then(() => killProcessOnPort(port))
-  .then(() => startServer(updatePromise));
+// `--skip-kill`: induk (menu "background") sudah membereskan proses lama dan
+// port sebelum spawn kita. Memindai lagi berarti dua proses saling membunuh
+// dalam jendela yang sama — server mati, tray mati, tak ada yang restart.
+if (skipKill) {
+  startServer(updatePromise);
+} else {
+  killAllAppProcesses(port)
+    .then(() => killProcessOnPort(port))
+    .then(() => startServer(updatePromise));
+}
+
+// Logika menu tinggal di modul terpisah supaya bisa diuji tanpa menjalankan
+// CLI: cli.js ini mengeksekusi dirinya di module scope (startServer, bahkan
+// process.exit kalau standalone build tidak ada).
+const { buildInterfaceMenuItems, resolveMenuAction } = require("./src/cli/utils/interfaceMenu");
 
 // Show interface selection menu
 async function showInterfaceMenu(latestVersion) {
@@ -583,28 +615,10 @@ async function showInterfaceMenu(latestVersion) {
 
   const subtitle = `🚀 Server: \x1b[32m${serverUrl}\x1b[0m`;
 
-  const menuItems = [];
-
-  if (latestVersion) {
-    menuItems.push({ label: `Update to v${latestVersion} (current: v${pkg.version})`, icon: "⬆" });
-  }
-
-  menuItems.push(
-    { label: "Web UI (Open in Browser)", icon: "🌐" },
-    { label: "Terminal UI (Interactive CLI)", icon: "💻" },
-    { label: "Hide to Tray (Background)", icon: "🔔" },
-    { label: "Exit", icon: "🚪" }
-  );
-
+  const menuItems = buildInterfaceMenuItems(latestVersion, pkg.version);
   const selected = await selectMenu(`Choose Interface (v${pkg.version})`, menuItems, 0, subtitle);
 
-  const offset = latestVersion ? 1 : 0;
-
-  if (latestVersion && selected === 0) return "update";
-  if (selected === offset) return "web";
-  if (selected === offset + 1) return "terminal";
-  if (selected === offset + 2) return "hide";
-  return "exit";
+  return resolveMenuAction(selected, latestVersion, pkg.version);
 }
 
 const MAX_RESTARTS = 2;
@@ -679,6 +693,10 @@ function startServer(updatePromise) {
 
   // Suppress all errors during shutdown (systray lib throws JSON parse errors)
   let isShuttingDown = false;
+  // Serah terima ke tray sedang berjalan: server memang dimatikan, tapi proses
+  // CLI ini HARUS tetap hidup untuk men-spawn tray. Berbeda dari isShuttingDown,
+  // yang berarti "keluar sekarang".
+  let isHandingOff = false;
   process.on("uncaughtException", (err) => {
     if (isShuttingDown) return;
     console.error("Error:", err.message);
@@ -801,9 +819,31 @@ function startServer(updatePromise) {
           }
 
           // Windows/Linux: spawn detached bgProcess (systray works fine in child)
-          console.log(`\n⏳ Starting background process... (tray icon will appear in ~3s)`);
+          //
+          // URUTAN PENTING — jangan spawn lalu langsung cleanup().
+          //
+          // Proses tray juga menjalankan killAllAppProcesses() di startup-nya,
+          // dan penapisnya cocok dengan "node + 9router + cli.js". Kalau kita
+          // membunuh server sementara tray baru masih memindai, keduanya bisa
+          // saling membunuh dalam jendela yang sama — server mati, tray mati,
+          // tak ada yang restart. Inilah "tiba-tiba berhenti".
+          //
+          // Jadi: matikan server DULU sampai benar-benar hilang, baru spawn tray
+          // dengan --skip-kill supaya ia tidak memindai/membunuh apa pun.
+          console.log(`\n⏳ Switching to background...`);
 
-          const bgProcess = spawn(process.execPath, ["--dns-result-order=ipv4first", __filename, "--tray", "--skip-update", "-p", port.toString()], {
+          // `isHandingOff` HARUS diset sebelum cleanup(): SIGKILL memicu event
+          // "close" secara asinkron, dan tanpa penjagaan itu handler-nya
+          // memanggil process.exit() sebelum tray sempat di-spawn.
+          isHandingOff = true;
+          isShuttingDown = true;
+          cleanup();
+          // Tunggu port benar-benar bebas; spawn sebelum ini membuat tray
+          // memindai proses yang masih sekarat.
+          await killProcessOnPort(port).catch(() => {});
+          await new Promise((r) => setTimeout(r, 500));
+
+          const bgProcess = spawn(process.execPath, ["--dns-result-order=ipv4first", __filename, "--tray", "--skip-update", "--skip-kill", "-p", port.toString()], {
             detached: true,
             stdio: "ignore",
             windowsHide: true,
@@ -811,59 +851,186 @@ function startServer(updatePromise) {
           });
           bgProcess.unref();
 
+          // VERIFIKASI — jangan langsung menganggap tray berhasil.
+          //
+          // Server lama sudah dibunuh di atas; satu-satunya yang menyalakannya
+          // kembali adalah proses tray. Kalau tray gagal (PowerShell NotifyIcon
+          // tidak tersedia, crash saat start, port belum benar-benar bebas),
+          // pengguna ditinggal dengan gateway MATI dan tidak ada yang tahu.
+          // Inilah keluhan "Hide to Tray malah jadi mati".
+          //
+          // Jadi: tunggu sampai server benar-benar hidup. Kalau tidak, pulihkan
+          // di proses ini dan kembali ke menu — jangan keluar.
+          const trayBerhasil = await waitServerReady(port, { timeoutMs: 25000, intervalMs: 400 });
+
+          if (!trayBerhasil) {
+            console.log(`\n⚠️  Tray gagal menyalakan server — memulihkan di terminal ini.`);
+            // cleanup() sudah menandai keduanya; reset supaya server bisa
+            // dijalankan lagi dan cleanup berikutnya tetap bekerja.
+            isHandingOff = false;
+            isCleaningUp = false;
+            isShuttingDown = false;
+            try {
+              server = spawnServer();
+              attachServerEvents();
+            } catch (e) {
+              console.error("Gagal memulihkan server:", e.message);
+            }
+            const pulih = await waitServerReady(port, { timeoutMs: 20000, intervalMs: 400 });
+            if (pulih) {
+              console.log(`✅ Server kembali jalan: http://${displayHost}:${port}`);
+              console.log(`   Tray tidak aktif — pilih "Hide to Tray" lagi untuk mencoba ulang.\n`);
+            } else {
+              console.log(`❌ Server juga gagal dijalankan ulang. Cek log:`);
+              console.log(`   ${path.join(process.env.APPDATA || "", "9router", "logs", "server-restarts.log")}\n`);
+            }
+            // Jangan process.exit — biarkan loop menu hidup.
+            continue;
+          }
+
           console.log(`🔔 9Router is now running in background (PID: ${bgProcess.pid})`);
           console.log(`   Server: http://${displayHost}:${port}`);
           console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
 
-          // cleanup() kills server so bgProcess can claim the port fresh
-          cleanup();
-          process.exit(0);
+          setTimeout(() => process.exit(0), 200);
         } else if (choice === "exit") {
+          // Satu-satunya jalur yang mematikan server: user BENAR-BENAR memilih
+          // "Exit" dari menu. ESC / stdin bukan TTY tidak lagi sampai ke sini.
           isShuttingDown = true;
           console.log("\nExiting...");
           cleanup();
           setTimeout(() => process.exit(0), 100);
+        } else {
+          // "back" — ESC ditekan atau stdin bukan TTY (mis. dijalankan dari
+          // skrip). Server TETAP HIDUP; kalau tidak ada TTY, jangan berputar
+          // tanpa akhir, cukup tunggu di sini.
+          if (!process.stdin.isTTY) {
+            console.log("\n💡 No TTY — server stays running. Press Ctrl+C to stop.");
+            return;
+          }
         }
       }
     } catch (err) {
-      console.error("Error:", err.message);
-      cleanup();
-      process.exit(1);
+      // Jangan bunuh server karena error di MENU. Menu adalah lapisan UI;
+      // gateway harus tetap hidup meski UI-nya bermasalah. Dulu cabang ini
+      // memanggil cleanup() + process.exit(1), sehingga satu error UI sudah
+      // cukup mematikan seluruh layanan.
+      console.error("Menu error:", err.message);
+      if (!process.stdin.isTTY) {
+        console.log("\n💡 Server stays running. Press Ctrl+C to stop.");
+        return;
+      }
+      // Jeda sebentar lalu tampilkan menu lagi. TIDAK memanggil process.exit:
+      // error di lapisan UI tidak boleh mematikan gateway.
+      await new Promise((r) => setTimeout(r, 1000));
     }
   });
 
   function attachServerEvents() {
     server.on("error", (err) => {
       console.error("Failed to start server:", err.message);
+      // Serah terima ke tray: server memang sedang dimatikan, dan proses CLI
+      // ini TIDAK boleh keluar — ia masih harus men-spawn tray di bawah.
+      if (isHandingOff) return;
       if (!isShuttingDown) tryRestart();
       else { cleanup(); process.exit(1); }
     });
 
     server.on("close", (code) => {
-      if (isShuttingDown || code === 0) {
+      // SERAH TERIMA KE TRAY — jangan keluar.
+      //
+      // Ini akar bug "Hide to Tray malah jadi mati". Urutannya:
+      //   isShuttingDown = true; cleanup();        ← SIGKILL server
+      //   await killProcessOnPort(port);           ← melepas kontrol ke event loop
+      //   ...                                       ← event "close" menyala DI SINI
+      //   spawn(... tray ...);                     ← tidak pernah tercapai
+      //
+      // Handler ini dulu melihat isShuttingDown === true lalu memanggil
+      // process.exit(), sehingga CLI mati sebelum sempat men-spawn tray:
+      // server sudah dibunuh, tray tidak pernah lahir → gateway mati total.
+      //
+      // Penjagaan ini harus TERPISAH dari isShuttingDown, karena pada jalur
+      // hide kita memang mematikan server tapi TIDAK ingin CLI ikut berhenti.
+      if (isHandingOff) return;
+
+      if (isShuttingDown) {
+        // Benar-benar diminta berhenti (SIGINT/SIGTERM/tray quit/menu Exit).
         process.exit(code || 0);
         return;
       }
+      // code === 0 TANPA isShuttingDown berarti server berhenti sendiri —
+      // mis. event loop habis atau proses induk terputus. Dulu cabang ini
+      // langsung process.exit(0) sehingga gateway mati diam-diam tanpa jejak.
+      // Sekarang diperlakukan sama seperti crash: dicatat lalu di-restart.
       tryRestart(code);
     });
   }
 
+  /**
+   * Matikan MITM di state yang SUNGGUHAN dipakai.
+   *
+   * Sebelumnya fungsi ini menulis ke `db.json`, padahal sejak migrasi SQLite
+   * state hidup di `db/data.sqlite` — jadi "disable MITM" tidak pernah
+   * tersimpan dan penyebab crash yang sama terulang di setiap siklus.
+   * SQLite juga tidak boleh ditulis dengan fs.writeFileSync mentah (akan
+   * merusak WAL), jadi kita pakai driver aplikasinya.
+   */
+  async function disableMitmInDb() {
+    try {
+      const { execFileSync } = require("child_process");
+      const script = `
+        const { DatabaseSync } = require("node:sqlite");
+        const path = require("path");
+        const dbPath = path.join(process.env.APPDATA || path.join(require("os").homedir(), "AppData", "Roaming"), "9router", "db", "data.sqlite");
+        const db = new DatabaseSync(dbPath);
+        const row = db.prepare("SELECT data FROM settings WHERE id = 1").get();
+        if (!row) { db.close(); process.exit(0); }
+        const s = JSON.parse(row.data);
+        if (s.mitmEnabled === true) {
+          s.mitmEnabled = false;
+          db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(JSON.stringify(s));
+          console.log("MITM disabled");
+        }
+        db.close();
+      `;
+      execFileSync(RUNTIME, ["-e", script], { stdio: "ignore", timeout: 5000, windowsHide: true });
+    } catch { /* best effort — jangan sampai memperburuk keadaan */ }
+  }
+
+  /**
+   * Catat setiap kejadian server berhenti ke berkas, supaya kejadian berikutnya
+   * bisa didiagnosis. Tanpa ini, "tiba-tiba berhenti" tidak meninggalkan bukti
+   * apa pun — crash log lama hanya ada di memori dan hilang bersama proses.
+   */
+  function logCrash(code, aliveMs) {
+    try {
+      const dir = path.join(getAppDataDir(), "logs");
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, "server-restarts.log");
+      const stamp = new Date().toISOString();
+      const head = `[${stamp}] exit code=${code ?? "unknown"} alive=${Math.round(aliveMs / 1000)}s pid=${server.pid ?? "?"}`;
+      const body = crashLog.length ? "\n" + crashLog.map((l) => "    " + l).join("\n") : "";
+      fs.appendFileSync(file, head + body + "\n");
+    } catch { /* best effort */ }
+  }
+
   function tryRestart(code) {
     const aliveMs = Date.now() - serverStartTime;
+    logCrash(code, aliveMs);
     // Reset counter if last run was stable
     if (aliveMs >= RESTART_RESET_MS) restartCount = 0;
 
     if (restartCount >= MAX_RESTARTS) {
-      console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times. Disabling MIT and restarting...`);
-      try {
-        const dbPath = path.join(os.homedir(), process.platform === "win32" ? path.join("AppData", "Roaming", "9router", "db.json") : path.join(".9router", "db.json"));
-        if (fs.existsSync(dbPath)) {
-          const db = JSON.parse(fs.readFileSync(dbPath, "utf-8"));
-          if (db.settings) db.settings.mitmEnabled = false;
-          fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-        }
-      } catch { /* best effort */ }
+      console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times in a row. Disabling MITM and restarting...`);
+      // Hanya MITM yang perlu dibersihkan — proses privileged itu bisa
+      // tertinggal dan bentrok port. JANGAN panggil cleanup(): ia juga
+      // mematikan tray, sehingga ikon tray hilang setiap kali server crash.
+      disableMitmInDb();
+      try { killProxyByPidFile(); } catch { /* */ }
+      // Reset penuh: sesudah ini kita memperlakukan proses baru sebagai awal
+      // yang segar, bukan lanjutan dari rentetan crash sebelumnya.
       restartCount = 0;
+      serverStartTime = Date.now();
       server = spawnServer();
       attachServerEvents();
       return;
@@ -879,6 +1046,7 @@ function startServer(updatePromise) {
     }
 
     setTimeout(() => {
+      serverStartTime = Date.now();
       server = spawnServer();
       attachServerEvents();
     }, delay);

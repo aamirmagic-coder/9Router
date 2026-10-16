@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card, Button } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { PageShell } from "@/shared/motion/PageShell";
 import dynamic from "next/dynamic";
 
 const Editor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -213,21 +214,24 @@ export default function TranslatorPage() {
   return (
     <div className="p-8 space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-bold text-text-main">Translator Debug</h1>
-          <p className="text-sm text-text-muted mt-1">Replay request flow — matches log files</p>
-        </div>
-        {meta && (
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            <MetaBadge label="src" value={meta.sourceFormat} color="blue" />
-            <span className="material-symbols-outlined text-text-muted text-[14px]">arrow_forward</span>
-            <MetaBadge label="dst" value={meta.targetFormat} color="orange" />
-            <MetaBadge label="provider" value={meta.provider} color="green" />
-            <MetaBadge label="model" value={meta.model} color="purple" />
-          </div>
-        )}
-      </div>
+      <PageShell
+        className="mb-2"
+        title="Translator Debug"
+        subtitle="Replay request flow — matches log files"
+        titleClassName="text-2xl font-bold text-text-main"
+        subtitleClassName="text-sm text-text-muted mt-1"
+        actions={
+          meta ? (
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <MetaBadge label="src" value={meta.sourceFormat} color="blue" />
+              <span className="material-symbols-outlined text-text-muted text-[14px]">arrow_forward</span>
+              <MetaBadge label="dst" value={meta.targetFormat} color="orange" />
+              <MetaBadge label="provider" value={meta.provider} color="green" />
+              <MetaBadge label="model" value={meta.model} color="purple" />
+            </div>
+          ) : null
+        }
+      />
 
       {STEPS.map((step) => {
         const action = getAction(step.id);

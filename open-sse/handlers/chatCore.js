@@ -19,6 +19,24 @@ import { buildRequestDetail, extractRequestConfig } from "./chatCore/requestDeta
 import { handleForcedSSEToJson } from "./chatCore/sseToJsonHandler.js";
 import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
 import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/streamingHandler.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
+
+/**
+ * Is this 403 an entitlement refusal (Google #3501 / SUBSCRIPTION_REQUIRED)?
+ *
+ * Read from a CLONE so the original body is still available to
+ * parseUpstreamError() further down. The caller uses this to skip the token
+ * refresh: an entitlement refusal arrives with a valid token, so refreshing
+ * cannot change the outcome and only adds latency before the identical retry.
+ */
+async function isEntitlementRefusal(response) {
+  try {
+    const text = await response.clone().text();
+    return /SUBSCRIPTION_REQUIRED|valid license of this product|#\s*3501\b|request-license/i.test(text);
+  } catch {
+    return false;
+  }
+}
 import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.js";
 import { dedupeTools } from "../utils/toolDeduper.js";
 import { takeRenamedToolNames } from "../utils/opencodeFingerprint.js";
@@ -328,7 +346,15 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (passthrough && clientTool === "claude") anchorClaudeCache(translatedBody);
 
   const executor = getExecutor(provider);
-  trackPendingRequest(model, provider, connectionId, true);
+  // Live panel seed: startedAt for elapsed time + prompt-size estimate for the
+  // input column. The real upstream usage replaces both once chunks arrive
+  // (reportPendingProgress) — the estimate only fills the pre-TTFT gap.
+  let estimatedInputTokens = 0;
+  try {
+    const bodyStr = JSON.stringify(translatedBody || body || {});
+    estimatedInputTokens = Math.max(1, Math.ceil(bodyStr.length / 4));
+  } catch { /* fail-open: estimate stays 0, panel reads "—" */ }
+  trackPendingRequest(model, provider, connectionId, true, false, { startedAt: Date.now(), estimatedInputTokens });
   appendRequestLog({ model, provider, connectionId, status: "PENDING" }).catch(() => { });
 
   const msgCount = translatedBody.messages?.length || translatedBody.input?.length || translatedBody.contents?.length || translatedBody.request?.contents?.length || 0;
@@ -428,13 +454,64 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
     const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
     if (log?.errorLine) {
-      log.errorLine(reqTag, "✗", `ERROR 502 · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${errMsg}${error.stack ? `\n    ${error.stack}` : ""}`);
+      log.errorLine(reqTag, "✗", `ERROR ${error?.status || HTTP_STATUS.BAD_GATEWAY} · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${errMsg}${error.stack ? `\n    ${error.stack}` : ""}`);
     }
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
+    // Carry the executor's own status (429/409 quota gates) when it threw one;
+    // fall back to 502 for generic throws.
+    return createErrorResult(error?.status || HTTP_STATUS.BAD_GATEWAY, errMsg, error?.resetsAtMs || undefined);
   }
 
   // Handle 401/403 - try token refresh (skip for noAuth providers)
-  if (!executor.noAuth && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
+  //
+  // NOT for an entitlement refusal. Google answers 403 SUBSCRIPTION_REQUIRED
+  // (#3501) with a perfectly valid token — refreshing it cannot help, yet the
+  // retry below re-sends the whole request and collects the same 403. On a
+  // tool-heavy Antigravity call that is ~1s of refresh plus another 13-15s of
+  // processing per account, for a guaranteed-identical outcome. Detect it from
+  // the body we already have and skip straight past.
+  const entitlementRefusal = providerResponse.status === HTTP_STATUS.FORBIDDEN
+    && await isEntitlementRefusal(providerResponse);
+  if (entitlementRefusal && log?.line) {
+    log.line(reqTag, "⛔", `${provider}/${model} entitlement refusal (403) — token refresh skipped (token is valid)`);
+  }
+
+  // Entitlement refusal is a HOST-level gate, not an account fault: the sandbox
+  // hosts refuse a project they do not recognise while `daily` accepts the same
+  // request. Rotating accounts on the same host therefore repeats an identical
+  // refusal at ~13-15s each, across all 60 accounts. Rotating the HOST with the
+  // SAME account costs one attempt and can actually succeed.
+  if (entitlementRefusal && typeof executor.getHostForEntitlementRetry === "function") {
+    const altHost = executor.getHostForEntitlementRetry(providerUrl);
+    if (altHost) {
+      try {
+        const urls = executor.getBaseUrls?.() || [];
+        const altIndex = urls.indexOf(altHost);
+        // The body must go through the executor's transformRequest first — the
+        // executor is what applies the Cloud Code envelope, thinking config and
+        // tool schema cleaning. Sending translatedBody raw would produce a
+        // different (and invalid) request.
+        const altBody = executor.transformRequest(model, translatedBody, stream, credentials);
+        const altUrl = executor.buildUrl(model, stream, altIndex >= 0 ? altIndex : 0, credentials);
+        if (log?.line) log.line(reqTag, "↻", `${provider}/${model} retrying on ${new URL(altUrl).host} (account unchanged)`);
+        const altResult = await proxyAwareFetch(altUrl, {
+          method: "POST",
+          headers: executor.buildHeaders(credentials, stream, credentials?._lastSessionId),
+          body: JSON.stringify(altBody),
+          signal: streamController.signal,
+        }, proxyOptions);
+        if (altResult.ok) {
+          providerResponse = altResult;
+          providerUrl = altUrl;
+        } else if (log?.line) {
+          log.line(reqTag, "✗", `${provider}/${model} alternate host also refused (${altResult.status})`);
+        }
+      } catch (e) {
+        log?.warn?.("RETRY", `${provider} alternate-host retry failed: ${e.message}`);
+      }
+    }
+  }
+
+  if (!entitlementRefusal && !executor.noAuth && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
     try {
       // Mutate credentials after each successful refresh: rotating refresh_token
       // providers (xAI/grok-cli) issue a new RT on every refresh; without this,

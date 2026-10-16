@@ -28,18 +28,33 @@ export const DEFAULT_ERROR_MESSAGES = {
   504: "Gateway timeout"
 };
 
-// Exponential backoff config for rate limits
+// Exponential backoff config for rate limits (burst cooldown)
+// Capped at 30s so multi-account pools never get completely starved for minutes.
 export const BACKOFF_CONFIG = {
   base: 2000,
-  max: 5 * 60 * 1000,
-  maxLevel: 15
+  max: 30 * 1000,
+  maxLevel: 5
 };
 
 // Default cooldown for transient/unknown errors
 export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
 
-// Hard cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h)
-export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
+// Cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h).
+//
+// Raised from 30 min. Google's Cloud Code 429 body carries an exact reset
+// moment — `quotaResetTimeStamp` — and a weekly free-tier quota commonly resets
+// DAYS out ("Resets in 149h50m20s"). Truncating that to 30 min made the router
+// re-probe a dead account every half hour for the rest of the week: every probe
+// is a full upstream round trip (~16s) plus a fallback hop.
+//
+// 7 days is chosen to cover a weekly quota window with slack; anything longer
+// is treated as a malformed value rather than a real reset.
+export const MAX_RATE_LIMIT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Antigravity lock ceiling. Kept separate because its reset is genuinely long
+// (weekly pool) and the 429 is per MODEL — locking one model leaves the
+// account's other pools usable, so a long lock costs far less than re-probing.
+export const MAX_ANTIGRAVITY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Cooldown durations (ms)
 const COOLDOWN = {

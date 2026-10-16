@@ -18,7 +18,15 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  // Close the handle before removing: on Windows the sqlite file stays locked
+  // while the driver holds it open, so rmSync throws EPERM and the suite is
+  // reported as a failed file even when every assertion passed.
+  try {
+    db?.closeDatabase?.();
+  } catch {}
+  try {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  } catch {}
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
 });

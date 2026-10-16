@@ -17,6 +17,7 @@ import {
   refreshTraeToken,
   refreshZedToken,
   refreshWindsurfToken,
+  refreshMetaCodeToken,
   refreshMiniMaxCodeToken,
   refreshNousToken,
   classifyOAuthRefreshError,
@@ -39,6 +40,7 @@ export {
   refreshTraeToken,
   refreshZedToken,
   refreshWindsurfToken,
+  refreshMetaCodeToken,
   refreshMiniMaxCodeToken,
   refreshNousToken,
   classifyOAuthRefreshError,
@@ -148,6 +150,8 @@ const REFRESH_HANDLERS = {
   // Grok CLI shares xAI OAuth client + token endpoint (device-code tokens refresh the same way)
   "grok-cli": (c, log) => refreshXaiToken(c.refreshToken, log),
   gcli: (c, log) => refreshXaiToken(c.refreshToken, log),
+  // Meta Code: refreshToken holds the `dca:` device token; re-mint the subscription key
+  "meta-code": (c, log) => refreshMetaCodeToken(c.refreshToken, log),
   "codebuddy-cn": (c, log) => refreshCodebuddyToken(c.refreshToken, log),
   "codebuddy-intl": (c, log) => refreshCodebuddyIntlToken(c.refreshToken, log),
   trae: (c, log) => refreshTraeToken(c.refreshToken, c, log),

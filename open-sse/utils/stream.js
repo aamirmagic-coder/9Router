@@ -1,6 +1,10 @@
 import { translateResponse, initState } from "../translator/index.js";
 import { FORMATS } from "../translator/formats.js";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
+// Namespace import (bukan named) supaya mock `@/lib/usageDb.js` di unit test
+// yang tidak mendaftarkan `reportPendingProgress` tetap jalan — pemanggilannya
+// di bawah memakai `?.` sehingga modul mock lama bukan error melainkan no-op.
+import * as usageDb from "@/lib/usageDb.js";
 import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, logUsage, addBufferToUsage, filterUsageForFormat, COLORS } from "./usageTracking.js";
 import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE } from "./streamHelpers.js";
 import { getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent, formatIncompleteOpenAIResponsesStreamFailure } from "./responsesStreamHelpers.js";
@@ -26,6 +30,11 @@ const STREAM_MODE = {
 // that saw finish_reason without usage must not hold the client's terminal event
 // forever when the upstream stalls with no usage trailer and no [DONE].
 const PENDING_COMPLETION_FLUSH_MS = 3000;
+
+// Matches the OpenAI SSE sentinel anywhere in a chunk tail. A passthrough
+// stream forwards upstream bytes verbatim, so the terminator the upstream
+// already sent must be recognised before we add one of our own.
+const DONE_LINE_RE = /data:\s*\[DONE\]/;
 
 /**
  * Create unified SSE transform stream
@@ -225,6 +234,8 @@ export function createSSEStream(options = {}) {
               if (extracted) {
                 usage = mergeUsage(usage, extracted);
               }
+              // Live panel: token progres per chunk (throttle 1 dtk di repo).
+              try { usageDb.reportPendingProgress?.(model, provider, connectionId, { outputChars: totalContentLength, usage }); } catch {}
 
               responsesTerminal = isOpenAIResponsesTerminalEvent(currentOpenAIResponsesEvent, parsed);
 
@@ -259,6 +270,11 @@ export function createSSEStream(options = {}) {
               output = line + "\n";
             }
           }
+
+          // An upstream terminator forwarded here is the client's [DONE]. Record
+          // it so flush does not append a second one: the line is consumed and
+          // dropped from `buffer`, so the flush-time check cannot see it.
+          if (DONE_LINE_RE.test(output)) streamDoneSent = true;
 
           reqLogger?.appendConvertedChunk?.(output);
           controller.enqueue(sharedEncoder.encode(output));
@@ -354,6 +370,8 @@ export function createSSEStream(options = {}) {
         // Extract usage
         const extracted = extractUsage(parsed);
         if (extracted) state.usage = mergeUsage(state.usage, extracted); // Keep original usage for logging
+        // Live panel: token progres per chunk (throttle 1 dtk di repo).
+        try { usageDb.reportPendingProgress?.(model, provider, connectionId, { outputChars: totalContentLength, usage: state.usage }); } catch {}
 
         // Responses same-format passthrough: re-emit with original event framing
         if (keepsOpenAIResponsesFormat && openAIResponsesEventName) {
@@ -437,6 +455,14 @@ export function createSSEStream(options = {}) {
             }
             reqLogger?.appendConvertedChunk?.(output);
             controller.enqueue(sharedEncoder.encode(output));
+
+            // The forwarded tail may already end with the sentinel. The upstream
+            // (e.g. the muse-ai bridge, and any OpenAI-compatible server) closes
+            // its stream with `data: [DONE]`, and passthrough forwards it
+            // verbatim — so emitting another one below would terminate the
+            // stream twice. Clients that log it show a duplicate; strict parsers
+            // may reject it. Track it instead of assuming the sentinel is ours.
+            if (DONE_LINE_RE.test(output.slice(-24))) streamDoneSent = true;
           }
 
           // IMPORTANT: In passthrough mode we still must terminate the SSE stream.
@@ -450,6 +476,9 @@ export function createSSEStream(options = {}) {
             reqLogger?.appendConvertedChunk?.(doneOutput);
             controller.enqueue(sharedEncoder.encode(doneOutput));
           }
+          // Mark it sent even when the branch above skipped it for a Gemini-family
+          // client, so no later flush appends a second terminator.
+          streamDoneSent = true;
 
           finalizeStream();
           return;

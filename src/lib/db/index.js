@@ -1,6 +1,7 @@
 // Public API barrel — all DB functions
 import { getAdapter } from "./driver.js";
 import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
+import { invalidateSettingsCache } from "./repos/settingsRepo.js";
 import { keyAccessFromColumns, keyAccessToColumns, validateKeyAccessInput } from "@/shared/utils/keyAccess.js";
 import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
@@ -59,7 +60,7 @@ export {
 
 // Usage
 export {
-  statsEmitter, trackPendingRequest, getActiveRequests,
+  statsEmitter, trackPendingRequest, reportPendingProgress, getActiveRequests,
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
 } from "./repos/usageRepo.js";
@@ -68,6 +69,10 @@ export {
 export {
   saveRequestDetail, getRequestDetails, getRequestDetailById, getDistinctProviders,
 } from "./repos/requestDetailsRepo.js";
+export {
+  exportUsageData,
+  importUsageData,
+} from "./repos/usageRepo.js";
 
 // Export/import full DB
 export async function exportDb() {
@@ -172,6 +177,10 @@ export async function importDb(payload) {
       db.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [provider, stringifyJson(models || {})]);
     }
   });
+
+  // importDb writes the settings row with direct SQL, bypassing updateSettings.
+  // Drop the read cache so the imported settings are visible immediately.
+  invalidateSettingsCache();
 
   return await exportDb();
 }

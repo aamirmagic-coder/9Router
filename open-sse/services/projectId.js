@@ -242,10 +242,10 @@ async function onboardUser(accessToken, tierID, externalSignal, endpoints, provi
                 throw new Error("onboardUser done but no project_id in response");
             }
 
-            // Server not done yet – wait and retry with jitter
-            const jitter = Math.floor(Math.random() * 5000);
+            // Server not done yet – wait and retry with jitter (anti Google anti-abuse)
+            const doneJitter = Math.floor(Math.random() * 5000);
             console.log(`[ProjectId] Onboard attempt ${attempt}/${MAX_ATTEMPTS}: not done yet, waiting...`);
-            await new Promise(resolve => setTimeout(resolve, BASE_RETRY_DELAY_MS + jitter));
+            await new Promise(resolve => setTimeout(resolve, BASE_RETRY_DELAY_MS + doneJitter));
 
         } catch (error) {
             clearTimeout(timeoutId);
@@ -258,7 +258,8 @@ async function onboardUser(accessToken, tierID, externalSignal, endpoints, provi
                 console.warn(`[ProjectId] onboardUser failed after ${MAX_ATTEMPTS} attempts: ${error.message}`);
                 return null;
             }
-            // Wait with jitter before retrying
+            // Continue to next attempt instead of throwing (which would skip remaining retries)
+            // Wait with jitter before retrying (anti Google anti-abuse)
             const jitter = Math.floor(Math.random() * 5000);
             console.warn(`[ProjectId] onboardUser attempt ${attempt} failed: ${error.message}, retrying...`);
             await new Promise(resolve => setTimeout(resolve, BASE_RETRY_DELAY_MS + jitter));

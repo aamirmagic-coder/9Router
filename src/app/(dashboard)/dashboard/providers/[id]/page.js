@@ -18,6 +18,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
+import AntigravityHostCard from "./AntigravityHostCard";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
@@ -1517,6 +1518,9 @@ export default function ProviderDetailPage() {
           </div>
         </Card>
       )}
+
+      {/* Antigravity host selection — daily-only by default, sandbox optional */}
+      {providerId === "antigravity" && <AntigravityHostCard />}
 
       {/* Connections */}
       {isFreeNoAuth ? (

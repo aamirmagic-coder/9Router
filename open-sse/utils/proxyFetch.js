@@ -99,6 +99,9 @@ async function tryGotScrapingFetch(url, options) {
 
 // DNS cache — use Map to avoid prototype pollution via malformed hostnames
 const DNS_CACHE = new Map();
+// MITM_BYPASS_HOSTS: Hostnames that should bypass local DNS hijack / MITM redirect
+// Note: Google Cloud Code APIs (cloudcode-pa / daily-cloudcode-pa) use direct keep-alive
+// undici dispatcher instead of manual raw sockets to ensure high throughput & connection reuse.
 const TLS_CERT_ERRORS = new Set([
   "SELF_SIGNED_CERT_IN_CHAIN",
   "DEPTH_ZERO_SELF_SIGNED_CERT",
@@ -114,8 +117,6 @@ function isTlsCertError(err) {
   return TLS_CERT_ERRORS.has(code);
 }
 const MITM_BYPASS_HOSTS = [
-  "cloudcode-pa.googleapis.com",
-  "daily-cloudcode-pa.googleapis.com",
   "api.individual.githubcopilot.com",
   "q.us-east-1.amazonaws.com",
   "codewhisperer.us-east-1.amazonaws.com",
@@ -125,6 +126,32 @@ const GOOGLE_DNS_SERVERS = ["8.8.8.8", "8.8.4.4"];
 const HTTPS_PORT = 443;
 const HTTP_SUCCESS_MIN = 200;
 const HTTP_SUCCESS_MAX = 300;
+
+// ─── HTTP KEEP-ALIVE AGENT FOR ALL HOSTS (Optimization #2, #9, #13) ──────────
+let _keepAliveAgent = null;
+
+async function getKeepAliveAgent() {
+  if (_keepAliveAgent) return _keepAliveAgent;
+
+  try {
+    // Use undici Agent (dispatcher) — the correct keep-alive pool for Node fetch.
+    // Node's native fetch ignores `https.Agent` (that's the old http/https request
+    // API); undici dispatcher is what fetch actually honors. This makes every
+    // upstream (tokenharbor.ai, api.kilo.ai, ...) reuse the TLS connection,
+    // cutting ~1-2s of TCP+TLS handshake per request.
+    const { Agent } = await import("undici");
+    _keepAliveAgent = new Agent({
+      keepAliveTimeout: 60000,
+      connections: 50,
+      pipelining: 1,
+      connectTimeout: 30000,
+    });
+  } catch (e) {
+    // Silently ignore - fallback to regular fetch
+  }
+
+  return _keepAliveAgent;
+}
 
 function normalizeString(value) {
   if (value === undefined || value === null) return "";
@@ -282,6 +309,10 @@ async function createBypassRequest(parsedUrl, realIP, options) {
 
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
+    socket.setTimeout(8000);
+    socket.on("timeout", () => {
+      socket.destroy(new Error(`connect ETIMEDOUT ${realIP}:${HTTPS_PORT} (timeout 8s)`));
+    });
 
     socket.connect(HTTPS_PORT, realIP, () => {
       const reqOptions = {
@@ -329,6 +360,21 @@ async function createBypassRequest(parsedUrl, realIP, options) {
   });
 }
 
+/**
+ * Ubah header apa pun menjadi objek biasa.
+ *
+ * `{...new Headers({a:1})}` menghasilkan `{}` — instance Headers menyimpan
+ * entri di internal, bukan sebagai properti enumerable. Akibatnya semua header
+ * (termasuk Authorization) hilang saat disebar. Objek biasa, array pasangan,
+ * dan instance Headers semuanya ditangani di sini.
+ */
+function normalizeHeadersToObject(headers) {
+  if (!headers) return {};
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  if (typeof headers.entries === "function") return Object.fromEntries(headers.entries());
+  return { ...headers };
+}
+
 export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
   const targetUrl = typeof url === "string" ? url : url.toString();
 
@@ -374,6 +420,10 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
     }
   }
 
+  // Use keep-alive dispatcher for connection reuse (Optimization #2, #13).
+  // Applies to ALL hosts — non-Google providers (tokenharbor.ai, api.kilo.ai, ...)
+  // reuse the TLS connection instead of a fresh TCP+TLS handshake per request.
+  // Only used when no proxy is configured (proxy needs its own dispatcher).
   if (proxyUrl) {
     try {
       return await fetchWithTlsFallback(url, options, proxyUrl);
@@ -403,6 +453,23 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
     || !!normalizeString(proxyOptions?.url ?? proxyOptions?.connectionProxyUrl);
   if (proxyOptions?.strictProxy === true && proxyIntended) {
     throw new Error("[ProxyFetch] Proxy required but none resolved (strictProxy=true)");
+  }
+
+  // Fork: keep-alive undici dispatcher for direct (non-proxied) connections.
+  // Upstream dropped it in favour of fetchWithTlsFallback, but the fork measured
+  // a throughput win on Google Cloud Code hosts, so it runs first and falls
+  // through silently when unavailable.
+  try {
+    const dispatcher = await getKeepAliveAgent();
+    if (dispatcher) {
+      const response = await originalFetch(url, {
+        ...options,
+        dispatcher,
+      });
+      return response;
+    }
+  } catch {
+    // Silently fall through to regular fetch
   }
 
   // got-scraping disabled — use native fetch directly

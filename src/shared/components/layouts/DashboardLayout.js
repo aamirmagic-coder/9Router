@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useNotificationStore } from "@/store/notificationStore";
 import Sidebar from "../Sidebar";
+import { PageTransition } from "@/shared/motion/PageTransition";
 import Header from "../Header";
 
 function getToastStyle(type) {
@@ -37,23 +38,10 @@ export default function DashboardLayout({ children }) {
   const notifications = useNotificationStore((state) => state.notifications);
   const removeNotification = useNotificationStore((state) => state.removeNotification);
 
-  // Preload heavy usage charts in background when browser is idle
-  useEffect(() => {
-    const preload = () => {
-      import("@/shared/components/UsageStats").catch(() => {});
-      import("@/app/(dashboard)/dashboard/usage/components/UsageChart").catch(() => {});
-      import("@/app/(dashboard)/dashboard/usage/components/ProviderBarChart").catch(() => {});
-      import("@/app/(dashboard)/dashboard/usage/components/TopModelsChart").catch(() => {});
-    };
-    if (typeof window !== "undefined") {
-      if ("requestIdleCallback" in window) {
-        const id = window.requestIdleCallback(preload, { timeout: 4000 });
-        return () => window.cancelIdleCallback(id);
-      }
-      const timer = setTimeout(preload, 2500);
-      return () => clearTimeout(timer);
-    }
-  }, []);
+  // Fork: blok preload "heavy usage charts" upstream dibuang. Halaman Usage di
+  // sini memakai Tumpukan Berlapis (components/stack), sementara UsageStats +
+  // UsageChart lama sengaja dihapus di rilis 0.5.117 — preload-nya hanya akan
+  // membuat webpack mengejar modul yang tidak ada.
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg">
@@ -113,9 +101,12 @@ export default function DashboardLayout({ children }) {
         {/* Faint grid background */}
         <div className="landing-grid absolute inset-0 pointer-events-none -z-10" aria-hidden="true" />
         <Header key={pathname} onMenuClick={() => setSidebarOpen(true)} />
-        <div className={`flex-1 overflow-y-auto custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}>
-          <div className={`${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : "max-w-7xl mx-auto"}`}>{children}</div>
-        </div>
+        {/* Transisi + smooth scroll: SATU tempat untuk seluruh 24 halaman.
+            Lihat PageTransition.js — termasuk catatan tentang Lenis dan apa
+            yang diverifikasi sebelum ia boleh tinggal. */}
+        <PageTransition>
+          <div className={`${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : "max-w-7xl mx-auto"}`}>{children}</div>
+        </PageTransition>
       </main>
     </div>
   );

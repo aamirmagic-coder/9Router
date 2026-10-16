@@ -2,6 +2,7 @@
 
 import { Card, Badge } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { Reveal, Stagger, HoverLift } from "@/shared/motion/primitives";
 import {
   SKILLS,
   SKILLS_REPO_URL,
@@ -28,7 +29,7 @@ function CopyButton({ value, label = "Copy link" }) {
 function SkillRow({ skill }) {
   const url = getSkillRawUrl(skill.id);
   return (
-    <div
+    <HoverLift
       className={`flex items-start gap-3 p-4 rounded-[14px] border shadow-[var(--shadow-soft)] transition-colors ${
         skill.isEntry
           ? "border-brand-500/40 bg-brand-500/5"
@@ -68,27 +69,30 @@ function SkillRow({ skill }) {
       </div>
 
       <CopyButton value={url} />
-    </div>
+    </HoverLift>
   );
 }
 
 export default function SkillsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <Card padding="md">
-        <div className="text-xs text-text-muted mb-2">Paste this to your AI:</div>
-        <div className="px-3 py-2 rounded bg-surface-2 font-mono text-[12px] text-text-main">
-          Read this skill and use it: {getSkillRawUrl("9router")}
-        </div>
-      </Card>
+      <Reveal>
+        <Card padding="md">
+          <div className="text-xs text-text-muted mb-2">Paste this to your AI:</div>
+          <div className="px-3 py-2 rounded bg-surface-2 font-mono text-[12px] text-text-main">
+            Read this skill and use it: {getSkillRawUrl("9router")}
+          </div>
+        </Card>
+      </Reveal>
 
-      <div className="space-y-2">
+      <Stagger className="space-y-2">
         {SKILLS.map((skill) => (
           <SkillRow key={skill.id} skill={skill} />
         ))}
-      </div>
+      </Stagger>
 
-      <Card padding="md">
+      <Reveal delay={0.06}>
+        <Card padding="md">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-sm font-semibold text-text-main">More on GitHub</h2>
@@ -106,7 +110,8 @@ export default function SkillsPage() {
             View on GitHub
           </a>
         </div>
-      </Card>
+        </Card>
+      </Reveal>
     </div>
   );
 }

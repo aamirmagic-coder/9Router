@@ -29,6 +29,7 @@ import WindsurfExecutor from "./windsurf.js";
 import { DefaultExecutor } from "./default.js";
 import { MinimaxCodeExecutor } from "./minimax-code.js";
 import { DevinCliExecutor } from "./devin-cli.js";
+import { FreebuffExecutor } from "./freebuff.js";
 
 const executors = {
   antigravity: new AntigravityExecutor(),
@@ -67,6 +68,11 @@ const executors = {
   "minimax-code": new MinimaxCodeExecutor("minimax-code"),
   "minimax-code-global": new MinimaxCodeExecutor("minimax-code-global"),
   "devin-cli": new DevinCliExecutor(),
+  // Freebuff punya 3 gate server-side (sesi, agent-run, system marker) yang
+  // TIDAK bisa dilewati DefaultExecutor — tanpa executor ini chat ditolak
+  // dengan 400 "No runId found in request body".
+  freebuff: new FreebuffExecutor(),
+  fb: new FreebuffExecutor(), // Alias, sesuai uiAlias registry
   bedrock: new BedrockExecutor(),
   br: new BedrockExecutor(), // Alias for bedrock
   // Second Bedrock entry for xAI's Grok, which speaks OpenAI Chat Completions rather than the
@@ -119,3 +125,4 @@ export { default as TraeExecutor } from "./trae.js";
 export { default as ZedExecutor } from "./zed.js";
 export { default as WindsurfExecutor } from "./windsurf.js";
 export { DevinCliExecutor } from "./devin-cli.js";
+export { FreebuffExecutor } from "./freebuff.js";

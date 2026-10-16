@@ -66,10 +66,39 @@ const DEFAULT_SETTINGS = {
   providerOverrides: {},
 };
 
-async function readRaw() {
+// Short-TTL cache for the raw settings row.
+//
+// getSettings() sits on the chat hot path: a single request with N account
+// fallbacks reads it ~1 + 1 + 2N times (auth.js reads it per selection attempt).
+// The row itself changes only when the operator edits it, so re-reading +
+// JSON-parsing it on every call was pure overhead.
+//
+// Correctness: updateSettings() invalidates synchronously, so any write through
+// the repo API is visible on the very next read. The TTL only bounds staleness
+// for the two other writers that bypass the repo (importDb, legacy migrate) —
+// importDb also invalidates explicitly; migrate runs on a fresh DB before the
+// server accepts traffic. Module-level (not global) on purpose: an HMR reload
+// dropping the cache is harmless.
+const RAW_CACHE_TTL_MS = 5000;
+let rawCache = { value: null, expiresAt: 0 };
+
+async function readRawDirect() {
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM settings WHERE id = 1`);
   return row ? parseJson(row.data, {}) : {};
+}
+
+async function readRaw() {
+  const now = Date.now();
+  if (rawCache.value && rawCache.expiresAt > now) return rawCache.value;
+  const value = await readRawDirect();
+  rawCache = { value, expiresAt: now + RAW_CACHE_TTL_MS };
+  return value;
+}
+
+// Called by writers that bypass updateSettings (importDb). Safe to call anytime.
+export function invalidateSettingsCache() {
+  rawCache = { value: null, expiresAt: 0 };
 }
 
 // Merge raw settings with defaults; backward-compat for missing keys
@@ -119,6 +148,8 @@ export async function updateSettings(updates) {
       [stringifyJson(next)],
     );
   });
+  // Fresh write must be visible immediately to the next getSettings().
+  invalidateSettingsCache();
   return mergeWithDefaults(next);
 }
 
@@ -138,5 +169,6 @@ export async function getCloudUrl() {
 }
 
 export async function exportSettings() {
-  return await readRaw();
+  // Backups must be point-in-time accurate, so bypass the read cache.
+  return await readRawDirect();
 }

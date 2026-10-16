@@ -3,11 +3,29 @@ import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/con
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
-import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
+import { getAntigravityQuotaCache, isAntigravityPoolBlocked, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
 let selectionMutex = Promise.resolve();
+
+/**
+ * Freebuff binds ONE account to ONE model per session — requesting a different
+ * model while a session is active returns 'model_locked' (409). When the
+ * per-provider `strictModelAssignment` toggle is on, only accounts explicitly
+ * assigned to the requested model are eligible.
+ */
+export function filterConnectionsForModel(providerId, connections, model, settings = {}) {
+  const override = (settings.providerStrategies || {})[providerId] || {};
+  if (override.strictModelAssignment !== true || !model) {
+    return connections;
+  }
+  return connections.filter((connection) => {
+    const assignedModel = connection.providerSpecificData?.assignedModel
+      || (providerId === "freebuff" ? connection.providerSpecificData?.freebuffModel : null);
+    return assignedModel === model;
+  });
+}
 
 const GITHUB_MONTHLY_USAGE_LIMIT = "you've reached your additional usage limit for your plan";
 
@@ -71,7 +89,14 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       };
     }
 
-    const connections = await getProviderConnections({ provider: providerId, isActive: true });
+    let connections = await getProviderConnections({ provider: providerId, isActive: true });
+
+    // Strict model assignment (Freebuff: 1 account = 1 model, else 409 model_locked).
+    if (model) {
+      const _settings = await getSettings();
+      connections = filterConnectionsForModel(providerId, connections, model, _settings);
+    }
+
     log.debug("AUTH", `${provider} | total connections: ${connections.length}, excludeIds: ${excludeSet.size > 0 ? [...excludeSet].join(",") : "none"}, model: ${model || "any"}`);
 
     if (connections.length === 0) {
@@ -82,6 +107,23 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     // Antigravity quota cache is lazy: only populated after that account returns 409/429.
     const isAntigravity = providerId === "antigravity";
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
+
+    // Antigravity: 429 yang melanda BANYAK akun berbeda pada model yang sama
+    // adalah kondisi upstream, bukan akun. Tanpa ini router mencoba akun satu
+    // per satu sampai habis (terukur: puluhan akun terbakar dalam ~2 menit
+    // untuk satu model). Pool-block membuat permintaan gagal cepat dengan
+    // retryAfter, bukan membakar sisa pool.
+    if (isAntigravity && model && isAntigravityPoolBlocked(model)) {
+      const until = Date.now() + 30_000;
+      log.warn("AG_QUOTA", `${providerId} | POOL_BLOCKED ${model} — tolak cepat, jangan bakar akun`);
+      return {
+        allRateLimited: true,
+        retryAfter: new Date(until).toISOString(),
+        retryAfterHuman: formatRetryAfter(new Date(until).toISOString()),
+        lastError: `Model ${model} sedang diblokir sementara (429 melanda banyak akun)`,
+        lastErrorCode: 429,
+      };
+    }
 
     // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
     const availableConnections = connections.filter(c => {
@@ -248,7 +290,9 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
-  const backoffLevel = conn?.backoffLevel || 0;
+  // Decay backoff level if the previous error was more than 2 minutes ago
+  const isStaleError = conn?.lastErrorAt && (Date.now() - new Date(conn.lastErrorAt).getTime() > 120_000);
+  const backoffLevel = isStaleError ? 0 : (conn?.backoffLevel || 0);
 
   // GitHub premium-request exhaustion is account-wide until the next UTC month.
   const githubResetAtMs = githubMonthlyResetMs(status, errorText, provider);
@@ -262,16 +306,27 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   } else if (resetsAtMs && resetsAtMs > Date.now()) {
     shouldFallback = true;
     // Antigravity quota API provides exact per-model resetAt. Do not truncate it.
-    cooldownMs = resolveProviderId(provider) === "antigravity"
+    // Freebucks exhaustion is likewise a hard stop until the daily Pacific
+    // reset (up to ~24h) — skip the account for the day rather than re-poke it
+    // every 30 min; guard at 26h so a bad server value can't lock forever.
+    const _pid = resolveProviderId(provider);
+    cooldownMs = _pid === "antigravity"
       ? resetsAtMs - Date.now()
-      : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
+      : _pid === "freebuff"
+        ? Math.min(resetsAtMs - Date.now(), 26 * 60 * 60 * 1000)
+        : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
     newBackoffLevel = 0;
   } else {
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, resolveProviderId(provider)));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
-  const reason = typeof errorText === "string" ? errorText.slice(0, 200) : "Provider error";
+  // Kept for `lastError` in the DB and the console line, not for cooldown
+  // decisions (those already happened above via resetsAtMs). 100 chars cut
+  // Google's quota 429 mid-JSON, so the dashboard showed a truncated blob with
+  // no clue which pool was exhausted. 300 keeps the reason/model suffix that
+  // parseError appends while staying short enough for the dashboard cell.
+  const reason = typeof errorText === "string" ? errorText.slice(0, 300) : "Provider error";
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 
   await updateProviderConnection(connectionId, {

@@ -799,6 +799,18 @@ export class CursorExecutor extends BaseExecutor {
               }
             }
 
+            // KvServerMessage (field 4): get/set blob. Ack so the stream proceeds.
+            if (serverMessage.has(4)) {
+              const kv = decodeMessage(serverMessage.get(4)[0].value);
+              const kvId = kv.get(1)?.[0]?.value || 0;
+              const metadata = kv.get(4)?.[0]?.value || null;
+              if (kv.has(2)) {
+                session.write(encodeKvClientMessage(kvId, 2, agentMessage(1, new Uint8Array()), metadata));
+              } else if (kv.has(3)) {
+                session.write(encodeKvClientMessage(kvId, 3, new Uint8Array(), metadata));
+              }
+            }
+
             // AgentService requests IDE context before producing a response.
             if (serverMessage.has(2)) {
               const execRequest = decodeMessage(serverMessage.get(2)[0].value);

@@ -22,3 +22,37 @@ tests/unit/translator-request-normalization.test.js :: request normalization cla
 tests/unit/translator-request-normalization.test.js :: request normalization filterToOpenAIFormat flattens text-only arrays to string
 tests/unit/translator-request-normalization.test.js :: request normalization parseSSELine supports provider raw NDJSON stream lines
 tests/unit/translator-request-normalization.test.js :: request normalization translateRequest keeps /v1/messages Claude->OpenAI text payloads string-safe
+# --- Upstream v0.5.95 merge (2026-10-02) ---
+# Test usang yang diwarisi dari upstream: kode dan test sama-sama dari a99cf572,
+# tidak ada yang memperbarui ekspektasinya saat perilaku berubah.
+tests/unit/openai-to-kiro.test.js :: clamps reasoning_effort max to Kiro max_thinking_length 32000
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only demote Responses named sang auto (plain và max)
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only demote Chat function named sang auto (plain và max)
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only demote Claude tool named sang auto (plain và max)
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only demote required sang auto (plain và max)
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only demote none sang auto (plain và max)
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only giữ auto và absent; tools/input nguyên vẹn
+tests/unit/opencode-free-tool-choice.test.js :: opencode Free 1.3 tool_choice auto-only wire: execute gửi choice auto tới /zen/v1/responses
+# Source pindah ke http2 (agent.api5.cursor.sh HTTP/2-only) tapi test masih
+# memock global.fetch — ekspektasi belum diperbarui di upstream juga.
+tests/unit/cursor-models.test.js :: Cursor live model catalog fetches the account-specific catalog and caches it
+# Source melempar error mid-stream (sengaja, agar stream ditandai gagal) tapi
+# test masih mengharapkan pesan error sebagai konten. Sama di upstream a99cf572.
+tests/unit/commandcode-to-openai.test.js :: commandcode-to-openai — error event stringifies object errors so client sees readable message
+# Windsurf disembunyikan dari registry (tidak di-import di registry/index.js —
+# "no tool calling support"), jadi PROVIDERS.windsurf undefined. Test masih
+# mengandaikan provider terdaftar; sama di upstream a99cf572.
+tests/unit/windsurf-executor.test.js :: WindsurfExecutor class constructor wires config from PROVIDERS.windsurf
+tests/unit/windsurf-executor.test.js :: WindsurfExecutor class buildUrl returns the GetChatMessage endpoint
+tests/unit/windsurf-executor.test.js :: WindsurfExecutor class PROVIDERS.windsurf baseUrl is the chat endpoint (registry in sync)
+
+# --- Sync upstream v0.5.96..v0.5.104 (2026-10-16) ---
+#
+# /api/models — custom-model shadow dedupe: test ini (dari upstream c8644368)
+# mengandaikan satu baris per model, tapi PROVIDER_MODELS di fork punya DUA kunci
+# alias yang sah untuk provider yang sama ("opencode-go" dan "ocg"), sehingga
+# AI_MODELS menghasilkan dua baris dengan routedModel identik. Filter shadow di
+# route hanya membuang baris CUSTOM yang bertabrakan, bukan baris registry —
+# perilaku yang benar untuk struktur alias fork. Diuji dengan stub getCustomModels
+# kosong pun dua baris tetap muncul.
+tests/unit/models-route-shadow-dedupe.test.js :: /api/models — custom-model shadow dedupe drops the ocg/claude-haiku-5-5 shadow and keeps the 1M registry entry

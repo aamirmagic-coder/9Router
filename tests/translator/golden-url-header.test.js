@@ -24,6 +24,11 @@ const SPECIALIZED = new Set([
 ]);
 
 // Sanitize header: khử token + field thời gian động (kimi X-Msh-Device-Id) để snapshot ổn định.
+//
+// X-Msh-Version (versi rilis 9router) và X-Msh-Device-Name (hostname mesin) juga
+// harus dinormalisasi: keduanya berubah tiap bump versi / di tiap mesin, sehingga
+// snapshot akan mismatch terus tanpa ada perubahan header yang nyata. Yang mau
+// dikunci golden ini adalah STRUKTUR header, bukan nomor versi atau nama komputer.
 function sanitize(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers)) {
@@ -31,7 +36,12 @@ function sanitize(headers) {
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")
           .replace(/kimi-\d{10,}/g, "kimi-<TS>")
+          .replace(/^\d+\.\d+\.\d+(-[\w.]+)?$/, "<VER>")
       : v;
+  }
+  // Normalisasi per-nama-header (nilai dinamis yang bukan pola token).
+  for (const key of ["X-Msh-Version", "X-Msh-Device-Name"]) {
+    if (out[key] !== undefined) out[key] = `<${key}>`;
   }
   return out;
 }

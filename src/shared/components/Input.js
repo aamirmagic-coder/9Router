@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { cn } from "@/shared/utils/cn";
 
 export default function Input({
@@ -15,12 +16,21 @@ export default function Input({
   required = false,
   className,
   inputClassName,
+  id,
   ...props
 }) {
+  // Label tanpa htmlFor tidak terasosiasi dengan kotaknya: mengklik label tidak
+  // memfokus input, dan pembaca layar tidak menyebut namanya saat kotak itu
+  // difokus. `useId` dipakai kalau pemanggil tidak memberi id, sehingga setiap
+  // Input selalu punya pasangan label-input yang benar.
+  const generatedId = useId();
+  const inputId = id || generatedId;
+  const errorId = error ? `${inputId}-error` : undefined;
+
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
-        <label className="text-sm font-medium text-text-main">
+        <label htmlFor={inputId} className="text-sm font-medium text-text-main">
           {label}
           {required && <span className="text-red-500 ml-1">*</span>}
         </label>
@@ -32,11 +42,14 @@ export default function Input({
           </div>
         )}
         <input
+          id={inputId}
           type={type}
           placeholder={placeholder}
           value={value}
           onChange={onChange}
           disabled={disabled}
+          aria-invalid={error ? "true" : undefined}
+          aria-describedby={errorId}
           className={cn(
             "w-full py-2.5 px-3 text-sm text-text-main bg-surface-2 rounded-[10px]",
             "border border-transparent placeholder-text-muted/70",
@@ -52,8 +65,8 @@ export default function Input({
         />
       </div>
       {error && (
-        <p className="text-xs text-red-500 flex items-center gap-1">
-          <span className="material-symbols-outlined text-[14px]">error</span>
+        <p id={errorId} className="text-xs text-red-500 flex items-center gap-1">
+          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
           {error}
         </p>
       )}

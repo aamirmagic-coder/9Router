@@ -20,8 +20,9 @@ import {
   formatProviderCredentials as _formatProviderCredentials,
   getAllAccessTokens as _getAllAccessTokens,
   refreshKiroToken as _refreshKiroToken,
+  getRefreshLeadMs as _getRefreshLeadMs,
+  isUnrecoverableRefreshError,
   refreshNousToken as _refreshNousToken,
-  getRefreshLeadMs as _getRefreshLeadMs
 } from "open-sse/services/tokenRefresh.js";
 import {
   refreshProviderCredentials as _refreshProviderCredentials,
@@ -267,6 +268,38 @@ export async function checkAndRefreshToken(provider, credentials, options = {}) 
     });
 
     const newCreds = await _refreshProviderCredentials(provider, creds, log);
+
+    // Permanent refresh failure (invalid_grant / refresh_token_reused / codex
+    // unrecoverable): the refresh token can never work again, so leave the
+    // account active and the background scheduler re-selects it every tick
+    // forever — its expiresAt never advances, so it is always "due" — spamming
+    // the provider and the log. Disable it so rotation stops considering it.
+    // Transient failures return null and fall through untouched (retry next tick).
+    if (isUnrecoverableRefreshError(newCreds)) {
+      const reason = newCreds.code || newCreds.error || "invalid_grant";
+      log.warn("TOKEN_REFRESH", `Permanent refresh failure for ${provider} — disabling connection`, {
+        connectionId: creds.connectionId,
+        reason,
+      });
+      if (creds.connectionId) {
+        try {
+          await updateProviderConnection(creds.connectionId, {
+            isActive: false,
+            testStatus: "unavailable",
+            lastError: `Refresh token rejected permanently (${reason}) — re-auth required`,
+            lastErrorAt: new Date().toISOString(),
+            errorCode: 401,
+          });
+        } catch (err) {
+          log.error("TOKEN_REFRESH", "Failed to disable connection after permanent refresh failure", {
+            connectionId: creds.connectionId,
+            error: err?.message ?? err,
+          });
+        }
+      }
+      return creds;
+    }
+
     if (newCreds?.accessToken || newCreds?.apiKey || newCreds?.copilotToken) {
       const mergedCreds = {
         ...newCreds,

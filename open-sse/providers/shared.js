@@ -94,6 +94,115 @@ export const ANTHROPIC_COMPAT_BASE = "https://api.anthropic.com/v1";
 // intentionally matching the IDE client, not the server host.
 export const ANTIGRAVITY_IDE_VERSION = "2.22.0";
 export const ANTIGRAVITY_IDE_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
+
+/**
+ * Antigravity inference hosts, in fallback order.
+ *
+ * Google menjalankan beberapa pool kapasitas yang TERPISAH per host. Saat
+ * `daily` kehabisan kapasitas untuk model tertentu (503 "No capacity
+ * available for model …"), pool sandbox masih penuh — diukur live
+ * 2026-09-13 dengan 40 akun:
+ *
+ *   daily-cloudcode-pa.googleapis.com              →  5% sukses (503)
+ *   autopush-cloudcode-pa.sandbox.googleapis.com   → 100% sukses
+ *   staging-cloudcode-pa.sandbox.googleapis.com    → 100% sukses
+ *
+ * Karena itu `daily` tetap ditaruh pertama (host resmi IDE, dipakai selama
+ * sehat) dan sandbox jadi cadangan saat 503. Ketiga host melayani task yang
+ * sama dan menerima body/header identik.
+ *
+ * PENTING: `preprod-cloudcode-pa.sandbox` mengembalikan 403 untuk model ini
+ * dan `cloudcode-pa.googleapis.com` (prod) mengembalikan 429 — keduanya
+ * SENGAJA tidak didaftarkan.
+ */
+export const ANTIGRAVITY_IDE_FALLBACK_BASE_URLS = [
+  "https://autopush-cloudcode-pa.sandbox.googleapis.com",
+  "https://staging-cloudcode-pa.sandbox.googleapis.com",
+];
+
+/** Semua host inference Antigravity, urut prioritas. */
+export const ANTIGRAVITY_IDE_BASE_URLS = [
+  ANTIGRAVITY_IDE_BASE_URL,
+  ...ANTIGRAVITY_IDE_FALLBACK_BASE_URLS,
+];
+
+/**
+ * Host presets, dipilih dari dashboard (Providers → Antigravity → Host).
+ *
+ * Default `all-hosts` = daily dulu, sandbox sebagai CADANGAN kapasitas.
+ *
+ * Kenapa bukan daily-only: 9Router upstream dan CLIProxyAPI memang memakai
+ * daily saja, tapi keduanya juga tidak punya rotasi host sama sekali — saat
+ * daily kehabisan kapasitas mereka langsung berganti AKUN. Diukur 2026-09-20,
+ * pendekatan itu merugikan di pool ini: gemini-3.8-flash hanya 2/8 sukses di
+ * daily sementara KEDUA sandbox 8/8. Tanpa cadangan, enam dari delapan akun
+ * gagal pada model yang sebenarnya tersedia.
+ *
+ * Sandbox tetap punya risiko sendiri: ia menolak request yang membawa project
+ * bukan milik akun tersebut dengan 403 SUBSCRIPTION_REQUIRED (#3501). Karena
+ * itu urutannya daily DULU — sandbox hanya dicoba setelah daily benar-benar
+ * menolak, bukan sebagai host utama.
+ *
+ * `daily-only` tetap tersedia untuk siapa pun yang lebih memilih menghindari
+ * sandbox sepenuhnya dan menerima risiko kehabisan kapasitas.
+ */
+export const ANTIGRAVITY_HOST_PRESETS = {
+  "daily-only": {
+    label: "Daily only",
+    hint: "Host resmi IDE saja. Paling sedikit risiko 403, tapi tidak ada cadangan saat daily kehabisan kapasitas.",
+    urls: [ANTIGRAVITY_IDE_BASE_URL],
+  },
+  "daily-autopush": {
+    label: "Daily + Autopush",
+    hint: "Daily dulu, satu pool sandbox sebagai cadangan kapasitas.",
+    urls: [ANTIGRAVITY_IDE_BASE_URL, "https://autopush-cloudcode-pa.sandbox.googleapis.com"],
+  },
+  "all-hosts": {
+    label: "Semua host (default)",
+    hint: "Daily dulu, lalu dua pool sandbox. Kapasitas maksimum — diukur 2026-09-20, gemini hanya 2/8 sukses di daily sementara sandbox 8/8.",
+    urls: [
+      ANTIGRAVITY_IDE_BASE_URL,
+      "https://autopush-cloudcode-pa.sandbox.googleapis.com",
+      "https://staging-cloudcode-pa.sandbox.googleapis.com",
+    ],
+  },
+};
+
+/** Resolve a preset key (or an explicit URL list) to the host list to use. */
+export function resolveAntigravityHosts(mode) {
+  if (Array.isArray(mode) && mode.length) return mode;
+  const preset = ANTIGRAVITY_HOST_PRESETS[mode];
+  return preset ? preset.urls : ANTIGRAVITY_HOST_PRESETS["all-hosts"].urls;
+}
+
+/**
+ * Runtime host selection.
+ *
+ * `open-sse/` must stay standalone (it is usable without the Next.js app), so
+ * the executor cannot read the dashboard settings itself. The app pushes the
+ * chosen mode in here instead, and the executor reads it at request time.
+ *
+ * Module state, so it survives across requests in the same process. Default is
+ * `all-hosts` — see ANTIGRAVITY_HOST_PRESETS for why daily-first-with-sandbox-
+ * fallback beats daily-only in this pool.
+ */
+let _antigravityHostMode = "all-hosts";
+
+/** Called by the app when settings load or change. */
+export function setAntigravityHostMode(mode) {
+  if (mode === undefined || mode === null) return;
+  _antigravityHostMode = mode;
+}
+
+export function getAntigravityHostMode() {
+  return _antigravityHostMode;
+}
+
+/** The host list the executor should use right now. */
+export function getActiveAntigravityHosts() {
+  return resolveAntigravityHosts(_antigravityHostMode);
+}
+
 export const ANTIGRAVITY_IDE_USER_AGENT = `antigravity/ide/${ANTIGRAVITY_IDE_VERSION} darwin/arm64`;
 
 // Antigravity OAuth client credentials (public CLI client — duplicated in usage.js + src/lib/oauth)
@@ -106,4 +215,12 @@ export const ANTIGRAVITY_OAUTH_CLIENT = {
 export const GOOGLE_OAUTH_CLIENT = {
   clientId: "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
   clientSecret: "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"
+};
+
+// Meta Code (Muse Spark) device-code OAuth client — public client_id of the `muse` CLI
+// launcher (no secret; device grant, PKCE-less). Same class of public CLI client as
+// GOOGLE_OAUTH_CLIENT above: not a secret, and widely mirrored by other gateways
+// (CLIProxyAPI, pi, opencodex). Env var overrides it for forks that ship their own.
+export const META_CODE_OAUTH_CLIENT = {
+  clientId: process.env.META_CODE_OAUTH_CLIENT_ID?.trim() || "1031625952748946",
 };

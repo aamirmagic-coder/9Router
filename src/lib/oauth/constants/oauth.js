@@ -2,7 +2,11 @@
  * OAuth Configuration Constants — static data lives in registry, re-exported here for consumers.
  */
 import { platform, arch } from "os";
-import { ANTIGRAVITY_OAUTH_CLIENT, GOOGLE_OAUTH_CLIENT } from "open-sse/providers/shared.js";
+import {
+  ANTIGRAVITY_OAUTH_CLIENT,
+  GOOGLE_OAUTH_CLIENT,
+  META_CODE_OAUTH_CLIENT,
+} from "open-sse/providers/shared.js";
 import { PROVIDER_OAUTH, PROVIDERS as REGISTRY_PROVIDERS } from "open-sse/providers/index.js";
 
 /**
@@ -127,6 +131,17 @@ export const KIMCHI_CONFIG = { ...PROVIDER_OAUTH["kimchi"] };
 // Endpoint: cli-chat-proxy.grok.com — same client_id as xai, different flow + scopes
 export const GROK_CLI_CONFIG = { ...PROVIDER_OAUTH["grok-cli"] };
 
+// Meta Code (Muse Spark) OAuth Configuration (Device Code Flow, mirrors the muse CLI)
+// Endpoints from the registry; clientId comes from the shared public-CLI-client
+// constant (env-overridable) so it works out of the box without extra setup.
+export const META_CODE_CONFIG = {
+  ...PROVIDER_OAUTH["meta-code"],
+  ...META_CODE_OAUTH_CLIENT,
+};
+
+// Freebuff / Codebuff — fingerprint device-flow (NOT OAuth2). Login host must
+// stay freebuff.com: the server echoes the request host into loginUrl.
+export const FREEBUFF_CONFIG = { ...PROVIDER_OAUTH["freebuff"] };
 // Muse — subscription device code flow to auth.meta.com, no refresh
 // (Meta rejects refresh_token grants; the minted Model API key never expires).
 export const MUSE_CONFIG = { ...PROVIDER_OAUTH["muse"] };
@@ -261,6 +276,7 @@ export const PROVIDERS = {
   CODEBUDDY_INTL: "codebuddy-intl",
   KIMCHI: "kimchi",
   GROK_CLI: "grok-cli",
+  META_CODE: "meta-code",
   TRAE: "trae",
   WINDSURF: "windsurf",
   GLM: "glm",

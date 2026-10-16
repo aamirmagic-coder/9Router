@@ -20,10 +20,12 @@ import { getOpenCodeZenUsage } from "./usage/opencode-zen.js";
 import { getGroqUsage } from "./usage/groq.js";
 import { getZedUsage } from "./usage/zed.js";
 import { getXiaomiMimoUsage } from "./usage/xiaomi-mimo.js";
+import { getFreebuffUsage } from "./usage/freebuff.js";
+import { getMetaCodeUsage } from "./usage/meta-code.js";
+import { getCommandCodeUsage } from "./usage/commandcode.js";
 import { getCursorUsage } from "./usage/cursor.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
-import { getCommandCodeUsage } from "./usage/commandcode.js";
 import {
   getIflowUsage,
   getOllamaUsage,
@@ -62,13 +64,16 @@ const USAGE_HANDLERS = {
   "grok-cli": (c) => getGrokCliUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   kimi: (c) => getKimiUsage(c.accessToken, c.apiKey, c.proxyOptions, c.providerSpecificData),
   "opencode-go": (c) => getOpenCodeGoUsage(c.apiKey, c.proxyOptions),
-  "opencode-zen": (c) => getOpenCodeZenUsage(c.apiKey, c.proxyOptions),
   deepseek: (c) => getDeepseekUsage(c.apiKey, c.proxyOptions),
   groq: (c) => getGroqUsage(c.apiKey, c.proxyOptions),
-  zed: (c) => getZedUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  "opencode-zen": (c) => getOpenCodeZenUsage(c.apiKey, c.proxyOptions),
   "xiaomi-mimo": (c) => getXiaomiMimoUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
-  commandcode: (c) => getCommandCodeUsage(c.apiKey, c.proxyOptions),
   cursor: (c) => getCursorUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  freebuff: (c) => getFreebuffUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  zed: (c) => getZedUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  // refreshToken = Meta `dca:` token; the mint call that returns quota rejects plain keys.
+  "meta-code": (c) => getMetaCodeUsage(c.refreshToken, c.proxyOptions, { force: c.force }),
+  commandcode: (c) => getCommandCodeUsage(c.apiKey, c.proxyOptions),
 };
 
 // Qoder intl/CN share one usage path: PATs must be exchanged to a job token
@@ -80,7 +85,8 @@ async function getQoderUsageFor(c) {
 }
 
 export async function getUsageForProvider(connection, proxyOptions = null, options = {}) {
-  const { provider, accessToken, apiKey, providerSpecificData, projectId } = connection;
+  const { provider, accessToken, refreshToken, apiKey, providerSpecificData, projectId } =
+    connection;
   const providerDataWithProjectId = {
     ...(providerSpecificData || {}),
     ...(projectId ? { projectId } : {}),
@@ -91,6 +97,7 @@ export async function getUsageForProvider(connection, proxyOptions = null, optio
   return await handler({
     provider,
     accessToken,
+    refreshToken,
     apiKey,
     providerSpecificData,
     providerDataWithProjectId,

@@ -13,6 +13,33 @@ const proxyClientMaxBodySize = process.env.NINEROUTER_PROXY_CLIENT_MAX_BODY_SIZE
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   output: "standalone",
+
+  /**
+   * Halaman dashboard TIDAK boleh di-cache lama.
+   *
+   * Halaman-halaman ini adalah client component, dan tanpa arahan eksplisit
+   * Next.js memperlakukannya sebagai statis: `/dashboard/usage` terukur
+   * mengirim `Cache-Control: s-maxage=31536000` (1 TAHUN) dengan
+   * `x-nextjs-cache: HIT`.
+   *
+   * Akibatnya HTML basi terus disajikan, dan HTML itu menunjuk ke nama chunk
+   * JS versi LAMA. Browser lalu memuat bundle lama meski chunk baru sudah ada
+   * di server — sehingga perbaikan (mis. fix pergantian period di Usage)
+   * tidak pernah sampai ke pengguna sampai mereka hard-reload.
+   *
+   * `no-store` pada dokumen HTML; chunk ber-hash di bawah /_next/static tetap
+   * boleh di-cache selamanya karena namanya berubah saat isinya berubah.
+   */
+  async headers() {
+    return [
+      {
+        source: "/dashboard/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, must-revalidate" },
+        ],
+      },
+    ];
+  },
   // `open` must stay external. It derives its own directory from `import.meta.url`, and
   // webpack replaces that with the absolute path of the BUILD machine as a string literal.
   // A release built on macOS therefore ships `file:///Users/.../open/index.js`, which
@@ -41,7 +68,11 @@ const nextConfig = {
     // Cache fetch responses across HMR refreshes for faster dev reloads.
     serverComponentsHmrCache: true,
     // Tree-shake heavy barrel imports to cut compile + bundle size
-    optimizePackageImports: ["@xyflow/react", "@dnd-kit/core", "@dnd-kit/sortable", "material-symbols", "marked"],
+    // @xyflow/react dihapus 26 Sep 2026: satu-satunya pemakainya adalah
+    // ProviderTopology, yang ikut dihapus bersama komponen Usage lama.
+    // Membiarkannya di sini bukan error, tapi ia menyuruh bundler
+    // mengoptimalkan paket yang tidak pernah diimpor.
+    optimizePackageImports: ["@dnd-kit/core", "@dnd-kit/sortable", "material-symbols", "marked"],
   },
   webpack: (config, { isServer }) => {
     // Ignore fs/path modules in browser bundle

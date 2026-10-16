@@ -1,0 +1,15 @@
+{
+  "host": "127.0.0.1",
+  "port": 18611,
+  "api_key": "sk-muse-local",
+  "poll_interval": 1.2,
+  "first_token_timeout": 90,
+  "idle_timeout": 45,
+  "max_wait": 300,
+  "accounts": [
+    {
+      "label": "primary",
+      "cookies_file": "cookies.txt"
+    }
+  ]
+}

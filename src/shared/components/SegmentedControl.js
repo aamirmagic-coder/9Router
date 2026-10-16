@@ -26,7 +26,13 @@ export default function SegmentedControl({
       {options.map((option) => (
         <button
           key={option.value}
+          type="button"
           onClick={() => onChange(option.value)}
+          // `aria-pressed` menyatakan tombol mana yang aktif. Tanpa itu keadaan
+          // terpilih hanya tersampaikan lewat warna (`bg-surface`), yang tidak
+          // terbaca pembaca layar — dan di halaman Usage, "tab mana yang
+          // terbuka" adalah satu-satunya penanda konteks isi di bawahnya.
+          aria-pressed={value === option.value}
           className={cn(
             "shrink-0 px-4 rounded-[8px] font-medium transition-all",
             sizes[size],
@@ -36,7 +42,9 @@ export default function SegmentedControl({
           )}
         >
           {option.icon && (
-            <span className="material-symbols-outlined text-[16px] mr-1.5">
+            // Ikon hias: teks tombol sudah menyebut namanya. Tanpa ini pembaca
+            // layar membaca ligature-nya sebagai kata ("grid_view Overview").
+            <span className="material-symbols-outlined text-[16px] mr-1.5" aria-hidden="true">
               {option.icon}
             </span>
           )}

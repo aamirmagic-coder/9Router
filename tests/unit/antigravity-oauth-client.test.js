@@ -38,7 +38,11 @@ describe("antigravity oauth client (deduped)", () => {
     const { dirname, join } = await import("node:path");
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, "../../src/lib/oauth/constants/oauth.js"), "utf8");
-    expect(src).toContain('import { ANTIGRAVITY_OAUTH_CLIENT, GOOGLE_OAUTH_CLIENT } from "open-sse/providers/shared.js"');
+    // Both clients must come from the shared module. The fork also imports
+    // META_CODE_OAUTH_CLIENT there, which wraps the list over several lines, so
+    // match the names and the module path instead of one exact line.
+    expect(src).toMatch(/import\s*\{[^}]*\bANTIGRAVITY_OAUTH_CLIENT\b[^}]*\}\s*from\s*"open-sse\/providers\/shared\.js"/s);
+    expect(src).toMatch(/import\s*\{[^}]*\bGOOGLE_OAUTH_CLIENT\b[^}]*\}\s*from\s*"open-sse\/providers\/shared\.js"/s);
     expect(src).toContain("...ANTIGRAVITY_OAUTH_CLIENT");
     expect(src).toContain("...GOOGLE_OAUTH_CLIENT");
     // authorizeUrl now lives in registry; oauth.js derives via PROVIDER_OAUTH spread

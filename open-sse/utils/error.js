@@ -1,4 +1,5 @@
 import { ERROR_TYPES, DEFAULT_ERROR_MESSAGES } from "../config/errorConfig.js";
+import { extractGoogleQuotaReset } from "./googleQuota.js";
 
 /**
  * Build OpenAI-compatible error response body
@@ -76,9 +77,20 @@ export async function parseUpstreamError(response, executor = null) {
   }
 
   let message = "";
+  let resetsAtMs;
   try {
     const json = JSON.parse(bodyText);
     message = json.error?.message || json.message || json.error || bodyText;
+    // Google-backed providers report the reset moment inside error.details[].
+    // Previously only `.message` was kept, so that number never reached the
+    // cooldown rules and a multi-day quota was retried every few seconds.
+    // Executors may still override this via parseError() above; this is the
+    // shared fallback so no provider silently loses the signal.
+    if (!resetsAtMs) {
+      try {
+        resetsAtMs = extractGoogleQuotaReset(json).resetsAtMs || undefined;
+      } catch { /* not a Google-shaped body */ }
+    }
   } catch {
     message = bodyText;
   }
@@ -86,7 +98,7 @@ export async function parseUpstreamError(response, executor = null) {
   const messageStr = typeof message === "string" ? message : JSON.stringify(message);
   const finalMessage = messageStr || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
 
-  return { statusCode: response.status, message: finalMessage };
+  return { statusCode: response.status, message: finalMessage, resetsAtMs };
 }
 
 /**

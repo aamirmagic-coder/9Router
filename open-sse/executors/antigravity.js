@@ -1,13 +1,16 @@
 import crypto from "crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
+import { getActiveAntigravityHosts } from "../providers/shared.js";
 import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
+import { GEMINI_ROLE } from "../translator/schema/roles.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
+import { extractGoogleQuotaReset } from "../utils/googleQuota.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -113,6 +116,47 @@ function buildIdeRequestId({ body, request, credentials, model, requestType }) {
 export class AntigravityExecutor extends BaseExecutor {
   constructor() {
     super("antigravity", PROVIDERS.antigravity);
+    // Optimization #10 (revised): headers timeout for large agent payloads.
+    // Measured real TTFB on 1.2 MB / 117-tool / thinking-high requests:
+    // 18-23 s (Google must ingest the prompt before it emits SSE headers).
+    // The old 15 s cap aborted every big Claude Code turn, and because
+    // 502 retries 4× with 3 s backoff that produced a ~69 s stall
+    // (15×4 + 3×3) before falling through to the next account.
+    // Dead accounts do NOT need this budget: they answer 401 in <1 s, so the
+    // 401 circuit breaker still rotates them instantly. Only slow-but-alive
+    // upstreams consume the window. Override: ANTIGRAVITY_CONNECT_TIMEOUT_MS.
+    const envTimeout = parseInt(process.env.ANTIGRAVITY_CONNECT_TIMEOUT_MS || "", 10);
+    this.config.timeoutMs = Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 120000;
+    // NOTE: there is deliberately NO `this.projectId` cache. This executor is a
+    // singleton shared by every account, so a cached project leaks across
+    // accounts and earns 403 #3501 on the sandbox hosts (see transformRequest).
+    // The project is resolved per request from credentials.projectId.
+    // Optimization #5: Schema cache to avoid re-processing tools on every request
+    this.schemaCache = new Map();
+
+    // Warmup connections at startup
+    if (typeof window === 'undefined' && global.process?.version) {
+      setTimeout(async () => {
+        try {
+          const httpsModule = await import("https");
+          const agent = new httpsModule.Agent({ keepAlive: true });
+
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(), 2000);
+
+          await fetch("https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent?alt=sse", {
+            method: "POST",
+            signal: controller.signal,
+            agent,
+            body: JSON.stringify({ test: true })
+          }).catch(() => {});
+
+          console.log("[Antigravity] Connection pool warmed up successfully");
+        } catch (e) {
+          // Ignore warmup failures - not critical
+        }
+      }, 2000);
+    }
   }
 
   // Parse Antigravity quota error to extract precise resetsAtMs from ErrorInfo/RetryInfo
@@ -159,6 +203,65 @@ export class AntigravityExecutor extends BaseExecutor {
     return `${baseUrl}/v1internal:${action}`;
   }
 
+  /**
+   * Rotasi host saat pool kapasitas host ini habis.
+   *
+   * BaseExecutor.shouldRetry hanya memutar URL pada 429, padahal Antigravity
+   * menjawab 503 {"error":{"message":"No capacity available for model …"}}
+   * ketika pool kapasitas MODEL di host tersebut kelelahan — bukan quota akun.
+   * Google menjalankan pool terpisah per host, jadi host berikutnya di
+   * ANTIGRAVITY_IDE_BASE_URLS sering masih penuh.
+   *
+   * Terukur live 2026-09-13 (40 akun, claude-opus-4-6-thinking):
+   *   daily → 5% sukses    autopush-sandbox → 100%    staging-sandbox → 100%
+   *
+   * Baseline 429 tetap dipertahankan supaya perilaku lama tidak berubah.
+   * Hanya status transien di ANTIGRAVITY_TRANSIENT_STATUSES (500/502/503/504)
+   * yang ikut memicu rotasi host.
+   *
+   * 403 juga TIDAK memicu rotasi di sini — dan itu disengaja untuk 403 auth
+   * biasa (token mati: mencoba host lain hanya membuang waktu, chatCore akan
+   * me-refresh token). Tapi 403 entitlement (#3501) berbeda: host sandbox
+   * MENOLAK berdasarkan kepemilikan project, jadi host lain bisa saja menerima
+   * request yang sama. Itu ditangani terpisah di chatCore lewat
+   * shouldRotateHostOnEntitlement(), bukan di sini, supaya tidak mengubah
+   * perilaku 403 auth yang sudah benar.
+   */
+  shouldRetry(status, urlIndex) {
+    if (super.shouldRetry(status, urlIndex)) return true;
+    if (urlIndex + 1 >= this.getFallbackCount()) return false;
+    return ANTIGRAVITY_TRANSIENT_STATUSES.has(status);
+  }
+
+  /**
+   * Rotasi host saat entitlement 403 (#3501) — dipakai chatCore, bukan loop
+   * retry internal executor.
+   *
+   * Alasannya: pada 403 entitlement, AKUN sehat dan token valid; yang menolak
+   * adalah HOST sandbox (gate kepemilikan project). Menggilir 60 akun di host
+   * yang sama hanya mengulang penolakan yang sama (~13-15s masing-masing),
+   * sementara `daily` menerima request yang sama tanpa masalah. Jadi satu
+   * percobaan ulang ke host berikutnya jauh lebih murah daripada satu akun
+   * berikutnya.
+   */
+  getHostForEntitlementRetry(currentUrl) {
+    const urls = this.getBaseUrls();
+    // currentUrl is the FULL url the executor built
+    // (https://host/v1internal:streamGenerateContent?alt=sse), so a plain
+    // indexOf against the bare base list never matches and this silently
+    // returned urls[0] — which is why every retry went to daily instead of the
+    // next host. Match on the ORIGIN instead.
+    let idx = -1;
+    try {
+      const origin = new URL(currentUrl).origin;
+      idx = urls.findIndex((u) => {
+        try { return new URL(u).origin === origin; } catch { return false; }
+      });
+    } catch { /* not a URL — fall through */ }
+    if (idx === -1) return urls[0] || null;
+    return idx + 1 < urls.length ? urls[idx + 1] : null;
+  }
+
   // sessionId comes from transformRequest output; base.execute runs transformRequest before
   // buildHeaders, so we read it from instance state cached there (fallback: explicit arg).
   buildHeaders(credentials, stream = true, sessionId = null) {
@@ -169,8 +272,54 @@ export class AntigravityExecutor extends BaseExecutor {
     };
   }
 
+  /**
+   * Host list comes from the dashboard-selected preset, not the static
+   * registry value. Default is `daily-only` — see ANTIGRAVITY_HOST_PRESETS.
+   * Reading it per call (rather than at construction) means changing the
+   * dropdown takes effect without a restart.
+   */
+  getBaseUrls() {
+    try {
+      const active = getActiveAntigravityHosts();
+      if (Array.isArray(active) && active.length) return active;
+    } catch { /* fall through to the static list */ }
+    return super.getBaseUrls();
+  }
+
   transformRequest(model, body, stream, credentials) {
-    const projectId = credentials?.projectId || this.generateProjectId();
+    // The project MUST come from the account serving THIS request.
+    //
+    // This used to cache the first project it ever saw on `this.projectId` and
+    // reuse it forever. Because the executor is a module-level singleton
+    // (executors/index.js), that cache is shared by every account: once one
+    // account's project was stored, every later request sent THAT project, no
+    // matter which account it belonged to.
+    //
+    // That is fatal on the sandbox hosts. Google gates the sandbox on project
+    // ownership: a request whose `project` is not the one loadCodeAssist returns
+    // for that account is refused with 403 SUBSCRIPTION_REQUIRED (#3501, "You do
+    // not have a valid license of this product"). Measured live 2026-09-20 —
+    // own project 21/21 -> 200, foreign project 28/28 -> 403 on autopush and
+    // staging; daily accepts either. Since daily is tried first and rotates on
+    // capacity errors, the foreign project only surfaced after a rotation, which
+    // is why it looked like a host or account fault.
+    //
+    // Per-request resolution costs nothing: credentials.projectId is already
+    // resolved upstream (projectId.js caches it per connection).
+    //
+    // The random generateProjectId() fallback was itself a 403 source and is
+    // gone. Measured on autopush: a generated id ("bright-wave-ngqrb") and an
+    // empty string BOTH returned 403 #3501, while the account's real project
+    // returned 200. A fabricated project is not valid for ANY account, so
+    // sending one can only ever earn a refusal — it never turns a failing
+    // request into a working one. Omitting the field fails the same way but
+    // says so honestly instead of inventing an identity.
+    //
+    // A credential with no project is therefore a broken credential, not a
+    // request to patch up here. Callers resolve the project before dispatch
+    // (chat.js -> getProjectIdForConnection); when that fails the request is
+    // allowed to fail rather than sent under a fabricated identity.
+    const projectId = credentials?.projectId || "";
 
     // OpenAI clients may include stream_options even for non-streaming calls.
     // Google generateContent rejects that combination before processing the request.
@@ -230,16 +379,31 @@ export class AntigravityExecutor extends BaseExecutor {
     // Fix contents for Claude models via Antigravity
     const rawContents = (body.request?.contents || []).map(c => {
       let role = c.role;
-      // functionResponse must be role "user" for Claude models
-      if (c.parts?.some(p => p.functionResponse)) {
-        role = "user";
-      }
-      // Strip thought-only parts, keep thoughtSignature on functionCall parts (Gemini 3+ requires it)
+
+      // Fast-path optimization (Fix #4): Skip if already clean
+      if (!c.parts || c.parts.length === 0) return c;
+
+      // Check if ANY modification needed before processing
+      const needsModification = c.parts.some(p => {
+        if (p.thought && !p.functionCall) return true;
+        if (p.thoughtSignature && !p.functionCall && !p.text) return true;
+        return false;
+      });
+
+      if (!needsModification) return c; // ← EARLY RETURN if already clean
+
+      // Only process if modifications are actually needed
       const parts = c.parts?.filter(p => {
         if (p.thought && !p.functionCall) return false;
         if (p.thoughtSignature && !p.functionCall && !p.text) return false;
         return true;
       });
+
+      // functionResponse must be role "user" for Claude models
+      if (c.parts?.some(p => p.functionResponse)) {
+        role = "user";
+      }
+
       // Gemini 3+ rejects functionCall parts without thoughtSignature. Clients (Claude Code, IDE)
       // don't persist thoughtSignature in their history, so backfill from cache or default signature.
       // In parallel function calls, only the first call needs a signature; siblings stay unsigned.
@@ -261,11 +425,15 @@ export class AntigravityExecutor extends BaseExecutor {
         return p;
       });
 
-      return {
-        ...c,
-        role,
-        parts: modifiedParts || parts || [],
-      };
+      // Fork: hindari object churn — hanya bikin objek baru kalau ada yang berubah.
+      const partsChanged = parts?.length !== c.parts?.length || modifiedParts?.some((p, idx) => p !== c.parts[idx]);
+      if (role !== c.role || partsChanged) {
+        return {
+          ...c, role,
+          parts: modifiedParts || parts || [],
+        };
+      }
+      return c;
     });
     const contents = normalizeGeminiContents(rawContents, model);
 
@@ -279,15 +447,33 @@ export class AntigravityExecutor extends BaseExecutor {
       for (const group of tools) {
         for (const fn of group.functionDeclarations || []) {
           const name = sanitizeFunctionName(fn.name);
+
+          // Check schema cache first (Optimization #5 - Schema Cache Optimization)
+          if (this.schemaCache.has(name)) {
+            if (!seenToolNames.has(name)) {
+              allDeclarations.push(this.schemaCache.get(name));
+              seenToolNames.add(name);
+            }
+            continue;
+          }
+
           if (seenToolNames.has(name)) continue;
           seenToolNames.add(name);
-          allDeclarations.push({
+
+          const cleanedParams = fn.parameters
+            ? cleanJSONSchemaForAntigravity(structuredClone(fn.parameters))
+            : { type: "object", properties: { reason: { type: "string", description: "Brief explanation" } }, required: ["reason"] };
+
+          const declaration = {
             ...fn,
             name,
-            parameters: fn.parameters
-              ? cleanJSONSchemaForAntigravity(structuredClone(fn.parameters))
-              : { type: "object", properties: { reason: { type: "string", description: "Brief explanation" } }, required: ["reason"] }
-          });
+            parameters: cleanedParams
+          };
+
+          // Cache the cleaned schema for next use
+          this.schemaCache.set(name, declaration);
+
+          allDeclarations.push(declaration);
         }
       }
       tools = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
@@ -313,6 +499,16 @@ export class AntigravityExecutor extends BaseExecutor {
       generationConfig.maxOutputTokens = MAX_ANTIGRAVITY_OUTPUT_TOKENS;
     }
 
+    // Google rejects a request whose last content is a model turn:
+    // "Requests ending with a model turn are not supported." A client ends on an
+    // assistant message whenever its previous response was interrupted (Esc /
+    // stop), so append a user nudge and let the model continue instead of
+    // failing. Verified live: identical payloads differ only in this tail —
+    // model-last → 400, user-last → 200.
+    if (contents?.at(-1)?.role === GEMINI_ROLE.MODEL) {
+      contents.push({ role: GEMINI_ROLE.USER, parts: [{ text: "Continue." }] });
+    }
+
     const transformedRequest = {
       ...requestWithoutTools,
       generationConfig,
@@ -328,12 +524,18 @@ export class AntigravityExecutor extends BaseExecutor {
 
     this._lastSessionId = transformedRequest.sessionId; // cached for buildHeaders (base.execute order)
 
-    // Official Antigravity client omits `requestType` entirely on the agent
-    // (chat) path. Sending `requestType: "agent"` here (or leaking it through
-    // from an upstream envelope via the ...body spread below) makes Google
-    // bucket the request and return a detail-free 429 RESOURCE_EXHAUSTED even
-    // with quota available. `image_gen` and
-    // `search` buckets are unaffected and keep their own requestType.
+    // Klien Antigravity resmi TIDAK mengirim `requestType` sama sekali di jalur
+    // agent (chat). Mengirim `requestType: "agent"` — atau membiarkannya bocor
+    // lewat spread `...body` dari envelope — membuat Google memasukkan request
+    // ke bucket terpisah dan membalas 429 RESOURCE_EXHAUSTED TANPA details[],
+    // meski kuota tersedia. Inilah 429 generik yang selama ini sulit dilacak:
+    // tidak ada RetryInfo/quotaResetDelay karena penolakannya di tingkat
+    // routing, bukan kuota.
+    //
+    // Bucket `image_gen` dan `search` tidak terpengaruh dan tetap memakai
+    // requestType-nya sendiri.
+    //
+    // Sumber: upstream decolua/9router 5798b308.
     delete body.requestType;
 
     return {
@@ -378,11 +580,11 @@ export class AntigravityExecutor extends BaseExecutor {
     }
   }
 
-  generateProjectId() {
-    const adj = ["useful", "bright", "swift", "calm", "bold"][Math.floor(Math.random() * 5)];
-    const noun = ["fuze", "wave", "spark", "flow", "core"][Math.floor(Math.random() * 5)];
-    return `${adj}-${noun}-${crypto.randomUUID().slice(0, 5)}`;
-  }
+  // NOTE: generateProjectId() was removed on purpose. It fabricated ids like
+  // "bright-wave-ngqrb" which are not valid for any account and returned 403
+  // #3501 on the sandbox hosts — it could only ever turn a failing request into
+  // a differently-failing one. The project now comes from the credential, or
+  // the request is refused upstream with a clear error.
 
   generateSessionId() {
     return crypto.randomUUID() + Date.now().toString();
@@ -424,13 +626,26 @@ export class AntigravityExecutor extends BaseExecutor {
   parseRetryFromErrorMessage(errorMessage) {
     if (!errorMessage || typeof errorMessage !== "string") return null;
 
-    const match = errorMessage.match(/reset after (\d+h)?(\d+m)?(\d+s)?/i);
+    // Antigravity membalas DUA bentuk pesan yang berbeda:
+    //   kuota mingguan : "Resets in 149h50m20s"
+    //   rate limit     : "Resets in 0s."      ← perhatikan "Resets" (ada 's')
+    //
+    // Pola lama hanya cocok dengan "reset after ...", sehingga bentuk
+    // "Resets in 0s." TIDAK pernah terbaca. Akibatnya 429 burst jatuh ke
+    // backoff eksponensial 2 detik padahal upstream sudah memberi tahu reset
+    // dalam milidetik (RetryInfo.retryDelay). Terukur 2026-09-20: burst 12
+    // request pada satu akun menghasilkan 9x 429 dengan
+    // "quotaResetDelay": "162.322081ms" — akun sehat, hanya perlu ~0,2 detik.
+    const match = errorMessage.match(/resets?\s+(?:in|after)\s+((?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?)/i);
     if (!match) return null;
 
+    const parts = match[1].match(/(\d+)h|(\d+)m|(\d+(?:\.\d+)?)s/gi) || [];
     let totalMs = 0;
-    if (match[1]) totalMs += parseInt(match[1]) * 3600 * 1000; // hours
-    if (match[2]) totalMs += parseInt(match[2]) * 60 * 1000; // minutes
-    if (match[3]) totalMs += parseInt(match[3]) * 1000; // seconds
+    for (const part of parts) {
+      if (/h$/i.test(part)) totalMs += parseInt(part) * 3600 * 1000;
+      else if (/m$/i.test(part)) totalMs += parseInt(part) * 60 * 1000;
+      else if (/s$/i.test(part)) totalMs += parseFloat(part) * 1000;
+    }
 
     return totalMs > 0 ? totalMs : null;
   }
@@ -442,6 +657,79 @@ export class AntigravityExecutor extends BaseExecutor {
       errorJson?.error,
       bodyText,
     ].filter(Boolean).map(v => typeof v === "string" ? v : JSON.stringify(v)).join("\n");
+  }
+
+  /**
+   * Delay retry PERSIS dari error.details[] Cloud Code.
+   *
+   * Pesan manusia membulatkan ke detik — "Resets in 0s." untuk limit yang
+   * sebenarnya pulih dalam 162ms. Field terstruktur menyimpan angka aslinya:
+   *
+   *   RetryInfo.retryDelay        : "0.162322081s"
+   *   ErrorInfo.metadata.quotaResetDelay : "162.322081ms"
+   *
+   * Terukur 2026-09-20 (burst 12x, satu akun, model claude-opus-4-6-thinking):
+   * 9x 429 dengan delay ~162ms. Tanpa pembacaan ini, 429 jatuh ke backoff
+   * eksponensial 2 detik — 12x lebih lama dari yang dibutuhkan upstream.
+   */
+  parseRetryFromDetails(errorJson) {
+    const details = errorJson?.error?.details;
+    if (!Array.isArray(details)) return null;
+
+    const toMs = (raw) => {
+      if (typeof raw !== "string") return null;
+      const ms = raw.endsWith("ms")
+        ? Number.parseFloat(raw)
+        : raw.endsWith("s") ? Number.parseFloat(raw) * 1000 : NaN;
+      return Number.isFinite(ms) && ms > 0 ? Math.ceil(ms) : null;
+    };
+
+    // RetryInfo.retryDelay adalah field kanonik google.rpc untuk waktu retry —
+    // diprioritaskan di atas metadata.quotaResetDelay apa pun urutannya.
+    for (const d of details) {
+      const ms = toMs(d?.retryDelay);
+      if (ms !== null) return ms;
+    }
+    for (const d of details) {
+      const ms = toMs(d?.metadata?.quotaResetDelay);
+      if (ms !== null) return ms;
+    }
+    return null;
+  }
+
+  /**
+   * Provider-specific error parsing, called by parseUpstreamError().
+   *
+   * A quota 429 from Cloud Code carries the exact reset moment in
+   * error.details[] — `quotaResetTimeStamp`, `quotaResetDelay`, or
+   * `RetryInfo.retryDelay`. Without this override `resetsAtMs` stayed null and
+   * markAccountUnavailable() fell back to the generic exponential backoff
+   * (2s → 30s), so an account whose quota returns in ~6 days was re-probed
+   * every few seconds for days. Measured on one install: 233 antigravity 429s
+   * over 22h at ~16s each ≈ 70 minutes of dead wall-clock.
+   *
+   * The reset is per model, so callers lock only that model — the account's
+   * other pools (Claude models, other Gemini tiers) stay usable.
+   */
+  parseError(response, bodyText) {
+    if (response?.status !== HTTP_STATUS.RATE_LIMITED || !bodyText) {
+      return super.parseError(response, bodyText);
+    }
+    try {
+      const json = JSON.parse(bodyText);
+      const { resetsAtMs, model, reason } = extractGoogleQuotaReset(json);
+      if (!resetsAtMs) return super.parseError(response, bodyText);
+
+      const base = json?.error?.message || bodyText;
+      const detail = [reason, model].filter(Boolean).join(" ");
+      return {
+        status: response.status,
+        message: detail ? `${base} [${detail}]` : base,
+        resetsAtMs,
+      };
+    } catch {
+      return super.parseError(response, bodyText);
+    }
   }
 
   isTransientAntigravityError(status, message) {
@@ -467,10 +755,24 @@ export class AntigravityExecutor extends BaseExecutor {
 
     const errorMessage = this.extractErrorMessage(errorJson, bodyText);
 
-    if (!retryMs) {
-      retryMs = this.parseRetryFromErrorMessage(errorMessage);
-    }
+    // Field terstruktur lebih akurat daripada pesan manusia (yang membulatkan
+    // ke detik dan menampilkan "Resets in 0s." untuk limit sub-detik).
+    if (!retryMs) retryMs = this.parseRetryFromDetails(errorJson);
+    if (!retryMs) retryMs = this.parseRetryFromErrorMessage(errorMessage);
     if (retryMs) return retryMs <= MAX_RETRY_AFTER_MS ? retryMs : false;
+
+    // 429 TANPA info delay → JANGAN retry in-place; biarkan rotasi host/akun.
+    //
+    // Terukur 2026-09-20 pada payload besar (image + 123 tool, ~7 detik per
+    // percobaan): 429 generik `"Resource has been exhausted (e.g. check
+    // quota)."` — TANPA error.details[] — membuat computeRetryDelay jatuh ke
+    // backoff buta. Dengan attempts:2 di tiga host itu menjadi 9 percobaan
+    // = 48-64 detik sebelum menyerah, padahal sebelumnya ~12 detik.
+    //
+    // Prinsipnya: retry in-place hanya bila upstream menyebut KAPAN harus
+    // retry (RetryInfo.retryDelay / quotaResetDelay / Retry-After). Tanpa itu,
+    // menunggu 2s+4s di host yang sama hanya menunda rotasi yang lebih murah.
+    if (response.status === HTTP_STATUS.RATE_LIMITED) return false;
 
     if (!this.isTransientAntigravityError(response.status, errorMessage)) return false;
 

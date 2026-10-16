@@ -1,0 +1,11 @@
+# muse-bridge runtime deps.
+#
+# curl_cffi is the load-bearing one: it is the only piece here that can
+# present a Chrome TLS fingerprint, and the muse.ai edge refuses anything
+# else. Do not swap it for requests/httpx — the handshake will complete and
+# the connection will still be cut right after.
+curl_cffi>=0.16.3
+noiseprotocol>=0.3.1
+protobuf>=4.25
+fastapi>=0.115
+uvicorn>=0.30

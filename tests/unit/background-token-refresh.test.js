@@ -129,9 +129,11 @@ describe("runBackgroundTokenRefreshTick", () => {
       "../../src/sse/services/backgroundTokenRefresh.js"
     );
 
-    await expect(
-      runBackgroundTokenRefreshTick({ loadConnections, refreshConnection })
-    ).resolves.toBeUndefined();
+    // The tick awaits a real setTimeout between accounts (anti-burst delay).
+    // Under fake timers that timer never fires on its own, so drive it.
+    const tick = runBackgroundTokenRefreshTick({ loadConnections, refreshConnection });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(tick).resolves.toBeUndefined();
 
     expect(loadConnections).toHaveBeenCalledTimes(1);
     expect(refreshConnection).toHaveBeenCalledTimes(1);

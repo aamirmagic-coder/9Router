@@ -167,10 +167,20 @@ function toLevel(cfg) {
 }
 
 function normalizeOpenAILevel(level, supportedLevels) {
-  if (level !== "max" && level !== "ultra") return level;
+  // Exact support wins first: a level the model declares must never be
+  // downgraded. This guard has to come before the "high" catch-all below —
+  // that branch used to absorb a declared "xhigh" and silently turn it into
+  // "high", which lost the ceiling for models (Muse Spark) whose top level
+  // really is "xhigh".
   if (supportedLevels?.includes(level)) return level;
-  if (level === "ultra" && supportedLevels?.includes("max")) return "max";
-  return "xhigh";
+  if (level === "max" || level === "ultra") {
+    if (level === "ultra" && supportedLevels?.includes("max")) return "max";
+    if (supportedLevels?.includes("xhigh")) return "xhigh";
+    if (supportedLevels?.includes("high")) return "high";
+    return level;
+  }
+  if (supportedLevels?.includes("high") && level === "minimal") return "high";
+  return level;
 }
 
 function toGeminiThinkingLevel(cfg) {

@@ -319,6 +319,34 @@ describe("DB SQLite layer — public API parity", () => {
     expect(global._pendingRequests.byModel["gpt-4 (openai)"]).toBeUndefined();
   });
 
+  it("usage: live rows carry model/provider/elapsed + token progress", async () => {
+    sqliteDb.trackPendingRequest("gpt-live", "openai", "c-live", true, false, { startedAt: Date.now() - 1500, estimatedInputTokens: 123 });
+    sqliteDb.reportPendingProgress("gpt-live", "openai", "c-live", { outputChars: 400, usage: {} });
+    const live = await sqliteDb.getActiveRequests();
+    const row = live.activeRequests.find((r) => r.model === "gpt-live");
+    expect(row).toBeDefined();
+    expect(row.provider).toBe("openai");
+    expect(row.inputTokens).toBe(123);
+    expect(row.inputEstimated).toBe(true);
+    expect(row.outputTokens).toBe(100); // 400 chars / 4
+    expect(Date.parse(row.startedAt)).toBeLessThanOrEqual(Date.now());
+    expect(row.elapsedMs).toBeGreaterThanOrEqual(0);
+    sqliteDb.trackPendingRequest("gpt-live", "openai", "c-live", false);
+    const after = await sqliteDb.getActiveRequests();
+    expect(after.activeRequests.find((r) => r.model === "gpt-live")).toBeUndefined();
+  });
+
+  it("usage: live progress prefers real upstream tokens over estimate", async () => {
+    sqliteDb.trackPendingRequest("gpt-real", "openai", "c-real", true, false, { startedAt: Date.now(), estimatedInputTokens: 50 });
+    sqliteDb.reportPendingProgress("gpt-real", "openai", "c-real", { outputChars: 800, usage: { prompt_tokens: 77, completion_tokens: 33 } });
+    const live = await sqliteDb.getActiveRequests();
+    const row = live.activeRequests.find((r) => r.model === "gpt-real");
+    expect(row.inputTokens).toBe(77);
+    expect(row.inputEstimated).toBe(false);
+    expect(row.outputTokens).toBe(33);
+    sqliteDb.trackPendingRequest("gpt-real", "openai", "c-real", false);
+  });
+
   it("requestDetails: save → query with paging", async () => {
     // Enable observability first
     await sqliteDb.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });

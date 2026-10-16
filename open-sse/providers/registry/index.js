@@ -133,11 +133,19 @@ import p130 from "./bai.js";
 import p131 from "./tinyfish.js";
 import p132 from "./v1m.js";
 import p133 from "./muse.js";
-import p134 from "./minimax-code.js";
-import p135 from "./minimax-code-global.js";
-import p136 from "./bedrock.js";
-import p137 from "./bedrock-xai.js";
-import p138 from "./nous.js";
+// Fork: muse.ai personal agent via the local Python bridge. Separate id from
+// `muse` (Meta Model API) so the two never resolve to each other.
+import pMuseAi from "./muse-ai.js";
+// Fork: freebuff & meta-code tetap ada; p124/p125 di upstream dipakai
+// tokenharbor, jadi keduanya diberi nama eksplisit.
+import pFreebuff from "./freebuff.js";
+import pMetaCode from "./meta-code.js";
+// Upstream v0.5.99: provider baru (MiniMax Code, Bedrock, Nous).
+import pMinimaxCode from "./minimax-code.js";
+import pMinimaxCodeGlobal from "./minimax-code-global.js";
+import pBedrock from "./bedrock.js";
+import pBedrockXai from "./bedrock-xai.js";
+import pNous from "./nous.js";
 export default [
   p0,
   p1,
@@ -271,9 +279,12 @@ export default [
   p131,
   p132,
   p133,
-  p134,
-  p135,
-  p136,
-  p137,
-  p138,
+  pMuseAi,
+  pFreebuff,
+  pMetaCode,
+  pMinimaxCode,
+  pMinimaxCodeGlobal,
+  pBedrock,
+  pBedrockXai,
+  pNous,
 ];

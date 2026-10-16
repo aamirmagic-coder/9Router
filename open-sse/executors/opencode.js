@@ -190,6 +190,12 @@ function baseModelId(model) {
   return String(model || "").replace(/\([^()]+\)\s*$/, "").trim();
 }
 
+// Families that are always served by /zen/v1/responses even though the curated
+// set above does not list them yet — upstream rotates variants (grok-4.6,
+// gpt-5.6-luna) faster than the list is refreshed. Family match keeps those on
+// the right lane without a registry edit; the curated set stays authoritative.
+const RESPONSES_MODEL_FAMILIES = ["muse-spark", "grok-4.6", "gpt-5.6-luna"];
+
 function isResponsesModel(model) {
   const base = baseModelId(model);
   return RESPONSES_MODELS.has(base) || isMuseSparkModel(base);

@@ -27,7 +27,7 @@ export const CACHE_TTL = {
 export const MEMORY_CONFIG = {
   sessionTtlMs: 2 * 60 * 60 * 1000,
   sessionCleanupIntervalMs: 30 * 60 * 1000,
-  dnsCacheTtlMs: 5 * 60 * 1000,
+  dnsCacheTtlMs: 60 * 60 * 1000, // Optimization #7: Increase from 5min to 1 hour
   proxyDispatchersMaxSize: 20,
 };
 
@@ -57,6 +57,29 @@ export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_M
 
 // Fetch connect timeout: abort if upstream doesn't return response headers within this duration
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);
+
+// Above this budget a connect timeout is treated as "upstream unreachable"
+// rather than "upstream slow", so BaseExecutor fails fast instead of retrying.
+// A retry only pays off when the window is short enough that a healthy
+// upstream could plausibly have been cut off; with a large window (antigravity
+// uses 120 s) a timeout at the full budget means no route to the host, and
+// retrying just multiplies the stall. Env: NO_RETRY_TIMEOUT_MS.
+// Hanya berlaku untuk provider tanpa `noRetryTimeoutMs` sendiri.
+//
+// Default 60 detik membuat nilai ini SAMA PERSIS dengan FETCH_CONNECT_TIMEOUT_MS
+// di atas, sehingga perbandingan `timeoutMs >= noRetryTimeoutMs` di
+// executors/base.js selalu benar dan jalur fail-fast "upstream tidak terjangkau"
+// menyala untuk SEMUA provider — termasuk yang sebenarnya cuma lambat, yang
+// jadi tidak pernah diulang padahal seharusnya boleh.
+//
+// 90 detik memberi jarak yang jelas: timeout standar kini selalu di bawahnya,
+// sementara provider yang memang menyetel timeout besar (mis. antigravity
+// 120 detik) tetap melewatinya dan tetap fail-fast seperti yang dirancang.
+// Provider yang ingin fail-fast sendiri menyetel `noRetryTimeoutMs` di
+// transport-nya, dan nilai itu menang (lihat bai dan meta-code).
+//
+// Env: NO_RETRY_TIMEOUT_MS.
+export const NO_RETRY_TIMEOUT_MS = envMs("NO_RETRY_TIMEOUT_MS", 90 * 1000);
 
 // Gemini native TTS fetch timeout: abort if Google does not return response headers in time.
 export const GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS = envMs("GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS", 45 * 1000);

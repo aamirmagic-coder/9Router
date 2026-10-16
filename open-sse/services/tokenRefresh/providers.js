@@ -1,6 +1,7 @@
 import { PROVIDERS, PROVIDER_OAUTH } from "../../config/providers.js";
 import { OAUTH_ENDPOINTS, GITHUB_COPILOT, buildKimiHeaders } from "../../config/appConstants.js";
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
+import { mintMetaCodeKey } from "../metaCode.js";
 import { dedupRefresh } from "./dedup.js";
 import { buildExternalIdpRefreshParams } from "../../../src/lib/oauth/kiroExternalIdp.js";
 
@@ -220,6 +221,9 @@ export async function refreshGoogleToken(refreshToken, clientId, clientSecret, l
     if (!response.ok) {
       const errorText = await response.text();
       log?.error?.("TOKEN_REFRESH", "Failed to refresh Google token", { status: response.status, error: errorText });
+      if (errorText.includes("invalid_grant") || errorText.includes("deleted") || errorText.includes("disabled")) {
+        return { error: "invalid_grant", message: errorText };
+      }
       return null;
     }
 
@@ -685,6 +689,31 @@ export async function refreshTraeToken(refreshToken, credentials, log) {
       return null;
     }
   }, log);
+}
+
+// Meta Code: re-mint the subscription key from the stored `dca:` device-code token.
+// The dca token never rotates and the minted key never expires, so refresh only fires
+// from the reactive 401/403 path; 401/403 on the mint itself means the dca is dead.
+export async function refreshMetaCodeToken(dcaToken, log) {
+  if (!dcaToken) return null;
+  return dedupRefresh(
+    "meta-code",
+    dcaToken,
+    async () => {
+      try {
+        const data = await mintMetaCodeKey(dcaToken);
+        return { accessToken: data.api_key, refreshToken: dcaToken };
+      } catch (error) {
+        if (error?.status === 401 || error?.status === 403) {
+          log?.warn?.("TOKEN_REFRESH", `Meta Code re-mint rejected (${error.status})`);
+          return { error: "invalid_grant" };
+        }
+        log?.warn?.("TOKEN_REFRESH", `Meta Code re-mint failed: ${error?.message || error}`);
+        return null;
+      }
+    },
+    log,
+  );
 }
 
 // Zed access_token is long-lived; auth flow returns no refresh_token.

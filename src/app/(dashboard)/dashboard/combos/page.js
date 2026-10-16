@@ -8,7 +8,10 @@ import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifi
 import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import { PageShell } from "@/shared/motion/PageShell";
+import { HoverLift } from "@/shared/motion/primitives";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -363,51 +366,51 @@ export default function CombosPage() {
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm text-text-muted mt-1">
-            Group models under one name, then pick a strategy per combo:
-          </p>
-          <ul className="text-sm text-text-muted mt-2 flex flex-col gap-1">
-            <li><span className="font-medium text-text-main">Fallback</span> — tries models in order (next on failure)</li>
-            <li><span className="font-medium text-text-main">Round Robin</span> — rotates models across requests to spread load</li>
-            <li><span className="font-medium text-text-main">Fusion</span> — queries all models in parallel, then a judge synthesizes one answer. Best quality, but costs the most: every request bills all panel models + the judge (N+1 calls)</li>
-          </ul>
-          <p className="hidden text-xs text-text-muted mt-3 max-w-2xl">
-            <span className="font-medium text-text-main">Cursor / Claude Default</span> create combos named exactly like those clients&apos; model IDs (e.g. <code className="font-mono">composer-2.5</code>, <code className="font-mono">opus</code>), seeded with the matching <code className="font-mono">cu/…</code> or <code className="font-mono">cc/…</code> route so traffic can hit 9router without the prefix.
-            {" "}Note: Cursor IDE itself often blocks built-in Composer / Grok from Override OpenAI Base URL (&quot;model does not support custom API&quot;); add them via Cursor&apos;s <span className="font-medium text-text-main">Add Custom Model</span> using the combo name, or pick a model Cursor allows through the custom endpoint.
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-stretch">
-          <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto whitespace-nowrap">
-            Create Combo
-          </Button>
-          <div className="hidden">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="edit_note"
-              loading={presetLoading === "cursor"}
-              disabled={!!presetLoading}
-              onClick={() => handleGeneratePresets("cursor")}
-              className="w-full whitespace-nowrap"
-            >
-              Cursor Default
+      <PageShell
+        subtitleClassName="text-sm text-text-muted mt-1"
+        subtitle="Group models under one name, then pick a strategy per combo:"
+        actions={
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-stretch">
+            <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto whitespace-nowrap">
+              Create Combo
             </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="smart_toy"
-              loading={presetLoading === "claude"}
-              disabled={!!presetLoading}
-              onClick={() => handleGeneratePresets("claude")}
-              className="w-full whitespace-nowrap"
-            >
-              Claude Default
-            </Button>
+            <div className="hidden">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="edit_note"
+                loading={presetLoading === "cursor"}
+                disabled={!!presetLoading}
+                onClick={() => handleGeneratePresets("cursor")}
+                className="w-full whitespace-nowrap"
+              >
+                Cursor Default
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="smart_toy"
+                loading={presetLoading === "claude"}
+                disabled={!!presetLoading}
+                onClick={() => handleGeneratePresets("claude")}
+                className="w-full whitespace-nowrap"
+              >
+                Claude Default
+              </Button>
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      >
+        <ul className="text-sm text-text-muted mt-2 flex flex-col gap-1">
+          <li><span className="font-medium text-text-main">Fallback</span> — tries models in order (next on failure)</li>
+          <li><span className="font-medium text-text-main">Round Robin</span> — rotates models across requests to spread load</li>
+          <li><span className="font-medium text-text-main">Fusion</span> — queries all models in parallel, then a judge synthesizes one answer. Best quality, but costs the most: every request bills all panel models + the judge (N+1 calls)</li>
+        </ul>
+        <p className="hidden text-xs text-text-muted mt-3 max-w-2xl">
+          <span className="font-medium text-text-main">Cursor / Claude Default</span> create combos named exactly like those clients&apos; model IDs (e.g. <code className="font-mono">composer-2.5</code>, <code className="font-mono">opus</code>), seeded with the matching <code className="font-mono">cu/…</code> or <code className="font-mono">cc/…</code> route so traffic can hit 9router without the prefix.
+          {" "}Note: Cursor IDE itself often blocks built-in Composer / Grok from Override OpenAI Base URL (&quot;model does not support custom API&quot;); add them via Cursor&apos;s <span className="font-medium text-text-main">Add Custom Model</span> using the combo name, or pick a model Cursor allows through the custom endpoint.
+        </p>
+      </PageShell>
 
       {/* Combos List */}
       {combos.length === 0 ? (
@@ -424,6 +427,7 @@ export default function CombosPage() {
           </div>
         </Card>
       ) : (
+        <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3">
           {/* Selection toolbar */}
           <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-black/5 bg-black/[0.015] px-3 py-2 dark:border-white/5 dark:bg-white/[0.02] sm:flex-row sm:items-center sm:justify-between">
@@ -488,8 +492,8 @@ export default function CombosPage() {
             {(() => {
               const comboByName = Object.fromEntries(combos.map((c) => [c.name, c.models]));
               return combos.map((combo) => (
+                <HoverLift key={combo.id}>
                 <ComboCard
-                  key={combo.id}
                   combo={combo}
                   getCaps={getCaps}
                   comboByName={comboByName}
@@ -503,9 +507,11 @@ export default function CombosPage() {
                   selected={selectedIds.includes(combo.id)}
                   onToggleSelect={() => toggleSelect(combo.id)}
                 />
+                </HoverLift>
               ));
             })()}
           </div>
+        </div>
         </div>
       )}
 

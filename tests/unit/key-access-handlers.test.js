@@ -23,6 +23,10 @@ vi.mock("@/lib/localDb", () => ({
   getProviderConnections: async () => [],
   getProviderConnectionById: async () => null,
   getCustomModels: async () => [],
+  // The upstream /v1/models routes read this key metadata; the fixture keys carry
+  // only the fork's `access` field, so the upstream allowedModels filter is a
+  // no-op here and the fork's access gate (keyAccess.js) stays authoritative.
+  getApiKeyMetadata: async (key) => fx.keys[key] || null,
 }));
 vi.mock("@/lib/disabledModelsDb", () => ({ getDisabledModels: async () => ({}) }));
 vi.mock("@/lib/db/repos/combosRepo.js", () => ({ getCombos: async () => fx.combos }));
@@ -37,6 +41,9 @@ vi.mock("@/sse/services/auth.js", () => ({
     return a?.startsWith("Bearer ") ? a.slice(7) : request.headers.get("x-api-key");
   },
   isValidApiKey: async () => true,
+  // Upstream's handler now calls this before the fork access gate; return null so
+  // the fork gate (real keyAccess.js, driven by fx.keys access) owns the 403s.
+  getApiKeyPolicyError: async () => null,
 }));
 vi.mock("@/sse/services/tokenRefresh.js", () => ({
   checkAndRefreshToken: async (_p, c) => c,

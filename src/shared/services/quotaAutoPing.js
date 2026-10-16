@@ -11,6 +11,7 @@ import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { refreshAndUpdateCredentials } from "@/app/api/usage/[connectionId]/route.js";
 import { QUOTA_AUTOPING_CONFIG } from "@/shared/constants/config";
 import { getDuePingSlot, normalizePingSchedule } from "@/shared/services/quotaPingSchedule";
+import { isQuotaGuardPaused } from "@/shared/services/quotaGuard.js";
 
 const C = QUOTA_AUTOPING_CONFIG;
 const CLAUDE_PING_URL = "https://api.anthropic.com/v1/messages?beta=true";
@@ -295,6 +296,7 @@ export async function runQuotaAutoPingTick(deps = createDefaultDeps(), state = g
       // reactive ping left off.
       const targets = conns.filter((conn) => (
         conn.authType === "oauth"
+        && !isQuotaGuardPaused(conn)
         && (enabledMap[conn.id] === true || normalizePingSchedule(scheduleMap[conn.id]) !== null)
       ));
       for (const conn of targets) {

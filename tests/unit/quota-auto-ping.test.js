@@ -351,6 +351,17 @@ describe("quota auto-ping", () => {
     expect(deps.getExecutor).not.toHaveBeenCalled();
   });
 
+  it("does not spend quota on an account paused by its quota guard", async () => {
+    deps.getSettings.mockResolvedValue({ claudeAutoPing: { connections: { "claude-1": true } } });
+    deps.getProviderConnections.mockImplementation(async ({ provider }) => (
+      provider === "claude" ? [{ id: "claude-1", provider: "claude", authType: "oauth", accessToken: "token",
+        quotaGuard: { enabled: true }, quotaGuardState: { paused: true } }] : []
+    ));
+    getClaudeUsage.mockResolvedValue({ quotas: { "session (5h)": { resetAt: "2026-01-01T11:59:00.000Z" } } });
+    await runQuotaAutoPingTick(deps, state);
+    expect(deps.proxyAwareFetch).not.toHaveBeenCalled();
+  });
+
   it("keeps Claude session quota key behavior", async () => {
     deps.getSettings.mockResolvedValue({ claudeAutoPing: { connections: { "claude-1": true } } });
     deps.getProviderConnections.mockImplementation(async ({ provider }) => (

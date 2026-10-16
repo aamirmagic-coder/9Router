@@ -895,7 +895,8 @@ export default function ProviderDetailPage() {
         body: JSON.stringify({ isActive }),
       });
       if (res.ok) {
-        setConnections(prev => prev.map(c => c.id === id ? { ...c, isActive } : c));
+        const data = await res.json();
+        setConnections(prev => prev.map(c => c.id === id ? data.connection : c));
       }
     } catch (error) {
       console.log("Error updating connection status:", error);
@@ -1048,6 +1049,7 @@ export default function ProviderDetailPage() {
                 onMoveUp={() => handleSwapPriority(index, index - 1)}
                 onMoveDown={() => handleSwapPriority(index, index + 1)}
                 onToggleActive={(isActive) => handleUpdateConnectionStatus(conn.id, isActive)}
+                onQuotaGuardUpdate={(updated) => setConnections(prev => prev.map(c => c.id === conn.id ? updated : c))}
                 autoPing={AUTO_PING_SETTINGS_KEYS[providerId] && conn.authType === "oauth" ? {
                   isActive: autoPing.connections[conn.id] === true || autoPing.schedules?.[conn.id]?.enabled === true,
                   reactiveOn: autoPing.connections[conn.id] === true,

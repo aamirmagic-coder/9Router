@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/localDb";
 import { backfillCodexEmails } from "@/lib/oauth/providers";
 import { USAGE_APIKEY_PROVIDERS, USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import { isQuotaGuardPaused } from "@/shared/services/quotaGuard.js";
 
 const SAFE_FIELDS = [
   "id", "provider", "authType", "name", "email", "displayName",
   "priority", "globalPriority", "isActive", "defaultModel",
   "testStatus", "lastError", "lastErrorAt", "errorCode",
   "expiresAt", "lastUsedAt", "consecutiveUseCount",
-  "createdAt", "updatedAt",
+  "createdAt", "updatedAt", "quotaGuard", "quotaGuardState",
 ];
 
 const SAFE_PSD_FIELDS = [
@@ -94,8 +95,9 @@ export async function GET(request) {
     ));
 
     const accountFilteredConnections = providerFilteredConnections.filter((conn) => {
-      if (accountStatus === "active") return conn.isActive ?? true;
-      if (accountStatus === "inactive") return !(conn.isActive ?? true);
+      const active = (conn.isActive ?? true) && !isQuotaGuardPaused(conn);
+      if (accountStatus === "active") return active;
+      if (accountStatus === "inactive") return !active;
       return true;
     });
 

@@ -6,6 +6,8 @@ import {
   deleteProviderConnection,
 } from "@/models";
 import { toProviderConnectionResponse, usesAwsCredentialForm } from "@/lib/providerConnectionResponse";
+import { normalizeQuotaGuard } from "@/shared/services/quotaGuard.js";
+import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -111,6 +113,13 @@ export async function PUT(request, { params }) {
     }
 
     const updateData = {};
+    if (body.quotaGuard !== undefined) {
+      try { updateData.quotaGuard = normalizeQuotaGuard(body.quotaGuard); }
+      catch (error) { return NextResponse.json({ error: error.message }, { status: 400 }); }
+      if (updateData.quotaGuard.enabled && !USAGE_SUPPORTED_PROVIDERS.includes(existing.provider)) {
+        return NextResponse.json({ error: "Quota monitoring unavailable for this provider" }, { status: 400 });
+      }
+    }
     if (name !== undefined) updateData.name = name;
     if (priority !== undefined) updateData.priority = priority;
     if (globalPriority !== undefined) updateData.globalPriority = globalPriority;

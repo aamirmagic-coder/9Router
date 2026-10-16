@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { isQuotaGuardPaused, resumeQuotaGuard } from "@/shared/services/quotaGuard.js";
 
 const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
@@ -269,9 +270,34 @@ export async function updateProviderConnection(id, data) {
     const existing = rowToConn(row);
     const normalized = resetHealthStateOnActivation(existing, data);
     const merged = { ...existing, ...normalized, updatedAt: new Date().toISOString() };
+    if (data.quotaGuard !== undefined) {
+      // Changing configuration discards an old override. Preserve a pause until
+      // the monitor confirms recovery; disabling the guard removes its pause.
+      merged.quotaGuardState = { ...existing.quotaGuardState, override: false,
+        paused: data.quotaGuard.enabled === true && existing.quotaGuardState?.paused === true };
+    }
+    if (data.isActive === true && isQuotaGuardPaused(existing)) {
+      merged.quotaGuardState = resumeQuotaGuard(existing.quotaGuardState);
+    }
     upsert(db, merged);
     if (data.priority !== undefined) reorderInTx(db, existing.provider);
     result = merged;
+  });
+  return result;
+}
+
+// Compare only guard-owned fields: a concurrent OAuth refresh must survive,
+// while a manual toggle/settings change must win over an in-flight quota read.
+export async function updateProviderQuotaGuardState(snapshot, state) {
+  const db = await getAdapter();
+  let result = null;
+  db.transaction(() => {
+    const current = rowToConn(db.get(`SELECT * FROM providerConnections WHERE id = ?`, [snapshot.id]));
+    if (!current || current.isActive !== snapshot.isActive
+      || JSON.stringify(current.quotaGuard) !== JSON.stringify(snapshot.quotaGuard)
+      || JSON.stringify(current.quotaGuardState) !== JSON.stringify(snapshot.quotaGuardState)) return;
+    result = { ...current, quotaGuardState: state, updatedAt: new Date().toISOString() };
+    upsert(db, result);
   });
   return result;
 }

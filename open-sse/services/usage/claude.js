@@ -51,7 +51,7 @@ export async function getClaudeUsage(accessToken, proxyOptions = null, options =
       return result;
     }
     // Soft failure (429/error): prefer the last good read over a transient error
-    if (stale) return stale;
+    if (stale) return { ...stale, stale: true };
     return result;
   })();
 

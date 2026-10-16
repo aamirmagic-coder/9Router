@@ -6,8 +6,10 @@ import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/c
 import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
+import QuotaGuardButton from "@/shared/components/QuotaGuardButton";
+import { isQuotaGuardPaused } from "@/shared/services/quotaGuard.js";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null, onQuotaGuardUpdate }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -211,7 +213,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
           )}
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
             <Badge variant={getStatusVariant()} size="sm" dot>
-              {connection.isActive === false ? "disabled" : (effectiveStatus || "Unknown")}
+              {connection.isActive === false ? "disabled" : isQuotaGuardPaused(connection) ? "auto-paused" : (effectiveStatus || "Unknown")}
             </Badge>
             <Badge variant="default" size="sm">
               {authLabel}
@@ -298,6 +300,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               )}
             </div>
           )}
+          <QuotaGuardButton connection={connection} onUpdated={onQuotaGuardUpdate} />
           {autoPing && (
             <Tooltip text={autoPingTooltip}>
               <button
@@ -320,7 +323,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
         </div>
         <Toggle
           size="sm"
-          checked={connection.isActive ?? true}
+          checked={(connection.isActive ?? true) && !isQuotaGuardPaused(connection)}
           onChange={onToggleActive}
           title={(connection.isActive ?? true) ? "Disable connection" : "Enable connection"}
         />

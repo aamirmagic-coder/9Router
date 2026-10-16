@@ -5,6 +5,7 @@ import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
+import { isQuotaGuardPaused, QUOTA_GUARD_INTERVAL_MS } from "@/shared/services/quotaGuard.js";
 
 // Mutex to prevent race conditions during account selection
 let selectionMutex = Promise.resolve();
@@ -85,6 +86,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 
     // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
     const availableConnections = connections.filter(c => {
+      if (isQuotaGuardPaused(c)) return false;
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
       const enabled = c.providerSpecificData?.enabledModels;
@@ -113,6 +115,11 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     });
 
     if (availableConnections.length === 0) {
+      if (connections.some(isQuotaGuardPaused)) {
+        const retryAfter = new Date(Date.now() + QUOTA_GUARD_INTERVAL_MS).toISOString();
+        return { allRateLimited: true, allQuotaPaused: true, retryAfter,
+          retryAfterHuman: formatRetryAfter(retryAfter), lastError: "Accounts paused by quota guard", lastErrorCode: 503 };
+      }
       // Find earliest persistent lock or lazy Antigravity quota-cache reset for retry timing.
       const lockedConns = connections.filter(c => isModelLockActive(c, model));
       const expiries = lockedConns.map(c => getEarliestModelLockUntil(c)).filter(Boolean);

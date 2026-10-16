@@ -5,6 +5,8 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
 import Toggle from "@/shared/components/Toggle";
+import QuotaGuardButton from "@/shared/components/QuotaGuardButton";
+import { isQuotaGuardPaused } from "@/shared/services/quotaGuard.js";
 import Tooltip from "@/shared/components/Tooltip";
 import {
   parseQuotaData,
@@ -1122,7 +1124,7 @@ export default function ProviderLimits() {
           const error = errors[conn.id];
 
           // Use table layout for all providers
-          const isInactive = conn.isActive === false;
+          const isInactive = conn.isActive === false || isQuotaGuardPaused(conn);
           const isCodex = conn.provider === "codex";
           const claudeReset = conn.provider === "claude" ? quota?.raw?.resetCredits : null;
           const resetLabel = isCodex ? "Codex reset credit" : "Claude limit reset";
@@ -1288,6 +1290,7 @@ export default function ProviderLimits() {
                         </Tooltip>
                       );
                     })()}
+                    <QuotaGuardButton connection={conn} compact onUpdated={() => fetchConnections(page)} />
                     <Tooltip text="Refresh quota">
                       <button
                         type="button"
@@ -1344,7 +1347,7 @@ export default function ProviderLimits() {
                     >
                       <Toggle
                         size="sm"
-                        checked={conn.isActive ?? true}
+                        checked={(conn.isActive ?? true) && !isQuotaGuardPaused(conn)}
                         disabled={rowBusy}
                         onChange={(nextActive) =>
                           handleToggleConnectionActive(conn.id, nextActive)

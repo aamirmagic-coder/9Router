@@ -1,3 +1,8 @@
+# Unreleased
+
+## Features
+- **Quota**: per-account quota guards with configurable remaining-allowance thresholds, unattended checks, automatic recovery, and manual resume; shared controls in Connections and Quota Tracker.
+
 # v0.5.104 (2026-10-15)
 
 ## Features

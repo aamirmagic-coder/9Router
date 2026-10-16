@@ -647,6 +647,39 @@ Response:
 
 ## Troubleshooting
 
+### Automatic per-account quota guards
+
+Open **Quota guard** (shield icon) beside an account's controls in
+**Providers → Connections** or **Quota Tracker**. Both buttons edit the same
+settings. Enable the guard and choose the remaining allowance to reserve
+(default 50%; accepted range 0% to less than 100%).
+
+- Routing pauses at or below that account's threshold and resumes when every
+  monitored quota rises above it. Server checks run at startup and every
+  60 seconds, including auto-paused accounts, with no open dashboard required.
+- **Check usage now** requests an updated reading. **Resume now**, or the existing
+  account toggle, overrides an automatic pause until allowance recovers or the
+  provider confirms its next reset. Provider rate limits still apply.
+- Manually disabled accounts stay disabled. Disabling the guard clears only its
+  automatic pause. Auto-ping skips accounts paused by the guard.
+- The guard uses existing provider usage readers, OAuth refresh/retry, and
+  connection proxy settings. Providers without numeric quota data cannot be
+  monitored. Unlimited quotas are ignored. Codex and Claude use shared session
+  and weekly windows, excluding separate review/model budgets; other providers
+  use all finite windows returned by their reader, including hidden quota rows.
+- Missing, stale, or failed readings cannot confirm recovery. A reset timestamp
+  passing alone never re-enables an account. For providers without reset
+  timestamps, a manual override ends when allowance recovers above the threshold.
+
+The server must remain running. Provider caching/reporting delays and requests
+already in flight mean this is not a hard spending cap. Usage checks make no
+generation requests and consume no paid reset credits.
+
+Settings and monitor state persist in the existing connection JSON; no database
+migration or new dependency is required. Late quota reads cannot overwrite a
+manual action or refreshed credentials. Regression checks: from `tests/`, run
+`npx vitest run unit/quota-guard unit/quota-auto-ping.test.js`.
+
 **Issue: Quota shows 0% but requests failing**
 
 **Solution:**

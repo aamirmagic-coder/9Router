@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CodexExecutor } from "../../open-sse/executors/codex.js";
+import { translateRequest } from "../../open-sse/translator/index.js";
+import { FORMATS } from "../../open-sse/translator/formats.js";
 
 function streamFromText(text) {
   const encoder = new TextEncoder();
@@ -97,5 +99,41 @@ describe("Codex reasoning normalization", () => {
 
     expect(body.model).toBe("gpt-5.6-terra");
     expect(body.reasoning.effort).toBe("ultra");
+  });
+});
+
+describe("service_tier through the Anthropic (/v1/messages) pivot", () => {
+  const claudeBody = (extra = {}) => ({
+    model: "cx/gpt-6.1-sol",
+    max_tokens: 1000,
+    stream: true,
+    messages: [{ role: "user", content: "hi" }],
+    ...extra,
+  });
+
+  it("keeps priority end-to-end Anthropic → OpenAI → Responses → Codex executor", () => {
+    const translated = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI_RESPONSES, "gpt-6.1-sol", claudeBody({ service_tier: "priority" }), true, null, "codex");
+    const body = new CodexExecutor().transformRequest("gpt-6.1-sol", translated, true, {});
+    expect(body.service_tier).toBe("priority");
+  });
+
+  it("keeps an explicit valid tier on the Anthropic → OpenAI leg", () => {
+    const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, "gpt-6.1-sol", claudeBody({ service_tier: "flex" }), true, null, "codex");
+    expect(out.service_tier).toBe("flex");
+  });
+
+  it("maps the Anthropic-only standard_only tier to default", () => {
+    const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, "gpt-6.1-sol", claudeBody({ service_tier: "standard_only" }), true, null, "codex");
+    expect(out.service_tier).toBe("default");
+  });
+
+  it("drops an unknown tier on the Anthropic → OpenAI leg", () => {
+    const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, "gpt-6.1-sol", claudeBody({ service_tier: "bogus" }), true, null, "codex");
+    expect(out.service_tier).toBeUndefined();
+  });
+
+  it("injects nothing when the client sent no tier", () => {
+    const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI_RESPONSES, "gpt-6.1-sol", claudeBody(), true, null, "codex");
+    expect(out.service_tier).toBeUndefined();
   });
 });

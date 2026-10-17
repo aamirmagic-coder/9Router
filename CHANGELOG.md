@@ -1,3 +1,8 @@
+# Unreleased
+
+## Features
+- **High availability**: opt-in writable peers with a durable causal configuration journal, conservative permission reconciliation, administrator conflict resolution, node-local OAuth sessions and bindings, authenticated TLS peer forwarding, and a supervised client gateway with conservative failover. See [HA setup and recovery](docs/HA.md).
+
 # v0.5.104 (2026-10-15)
 
 ## Features

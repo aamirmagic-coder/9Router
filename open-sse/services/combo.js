@@ -3,6 +3,7 @@
  */
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
+import { NO_REPLAY_HEADER } from '../config/ha.js';
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
@@ -343,6 +344,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
     try {
       const result = await handleSingleModel(body, modelStr);
+      if (result.headers?.get(NO_REPLAY_HEADER) === '1') return result;
       
       // Success (2xx) - return response unless empty/zero-content on a non-final seat
       if (result.ok) {

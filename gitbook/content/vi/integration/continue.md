@@ -245,5 +245,3 @@ Cấu hình context Continue gửi đến model:
 
 - [Cấu hình Cursor](cursor.md) cho tích hợp IDE nâng cao
 - [Setup Roo](roo.md) cho trợ lý AI
-- [Khám phá CLI usage](../cli/basic-usage.md)
-- [Tìm hiểu về chọn model](../models/overview.md)

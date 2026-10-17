@@ -159,6 +159,5 @@ cp -r ~/.9router.backup ~/.9router
 
 ## 🔗 Bước tiếp theo
 
-- [Kết nối Providers](/providers/subscription.md)
-- [Tạo Combos](/features/combos.md)
-- [Tích hợp với CLI Tools](/integration/cursor.md)
+- [Tạo Combos](../features/combos.md)
+- [Tích hợp với CLI Tools](../integration/cursor.md)

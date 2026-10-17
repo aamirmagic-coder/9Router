@@ -465,7 +465,7 @@ nano ~/.bashrc  # o ~/.zshrc
 
 ## Próximos pasos
 
-- [Guía para empezar](../getting-started.md) - Conecta proveedores y comienza a codificar
+- [Guía para empezar](../getting-started/quick-start.md) - Conecta proveedores y comienza a codificar
 - [Características](../features/) - Explora seguimiento de cuota, combos, despliegue
 - [Solución de problemas](../troubleshooting.md) - Resuelve problemas comunes
 

@@ -411,6 +411,4 @@ Error: Rate limit exceeded
 
 - [Cấu hình Cursor](cursor.md) cho tích hợp IDE
 - [Setup Continue](continue.md) cho VSCode
-- [Khám phá CLI usage](../cli/basic-usage.md)
-- [Tìm hiểu về chọn model](../models/overview.md)
 - [API Reference](../api/reference.md)

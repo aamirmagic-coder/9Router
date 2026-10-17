@@ -465,7 +465,7 @@ nano ~/.bashrc  # または ~/.zshrc
 
 ## 次のステップ
 
-- [スタートガイド](../getting-started.md) - プロバイダーを接続してコーディング開始
+- [スタートガイド](../getting-started/quick-start.md) - プロバイダーを接続してコーディング開始
 - [機能](../features/) - クォータトラッキング、コンボ、デプロイを確認
 - [トラブルシューティング](../troubleshooting.md) - 一般的な問題の修正
 

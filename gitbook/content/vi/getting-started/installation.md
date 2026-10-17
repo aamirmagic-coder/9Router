@@ -465,7 +465,7 @@ nano ~/.bashrc  # or ~/.zshrc
 
 ## Bước tiếp theo
 
-- [Hướng dẫn Bắt đầu](../getting-started.md) - Kết nối provider và bắt đầu code
+- [Hướng dẫn Bắt đầu](../getting-started/quick-start.md) - Kết nối provider và bắt đầu code
 - [Tính năng](../features/) - Khám phá quota tracking, combos, deployment
 - [Troubleshooting](../troubleshooting.md) - Sửa các vấn đề thường gặp
 

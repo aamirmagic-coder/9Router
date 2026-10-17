@@ -469,7 +469,7 @@ nano ~/.bashrc  # or ~/.zshrc
 
 ## Next Steps
 
-- [Getting Started Guide](../getting-started.md) - Connect providers and start coding
+- [Getting Started Guide](../getting-started/quick-start.md) - Connect providers and start coding
 - [Features](../features/) - Explore quota tracking, combos, deployment
 - [Troubleshooting](../troubleshooting.md) - Fix common issues
 

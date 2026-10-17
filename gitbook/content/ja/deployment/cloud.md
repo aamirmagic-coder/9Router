@@ -468,6 +468,5 @@ chmod 755 /var/lib/9router
 
 ## 🔗 次のステップ
 
-- [プロバイダーを接続](/providers/subscription.md)
-- [コンボをセットアップ](/features/combos.md)
-- [ツールと統合](/integration/cursor.md)
+- [コンボをセットアップ](../features/combos.md)
+- [ツールと統合](../integration/cursor.md)

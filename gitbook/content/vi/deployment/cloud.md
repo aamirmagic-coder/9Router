@@ -468,6 +468,5 @@ chmod 755 /var/lib/9router
 
 ## 🔗 Bước tiếp theo
 
-- [Kết nối Providers](/providers/subscription.md)
-- [Setup Combos](/features/combos.md)
-- [Tích hợp với Tools](/integration/cursor.md)
+- [Setup Combos](../features/combos.md)
+- [Tích hợp với Tools](../integration/cursor.md)

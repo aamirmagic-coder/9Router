@@ -1576,3 +1576,14 @@ tasks:
   status: complete
   created_at: '2026-10-14T18:24:01.388689+00:00'
   completed_at: '2026-10-14T18:24:08.271653+00:00'
+- id: DOC-9ROUTER-001
+  title: Fix all 55 broken gitbook internal links across 5 languages
+  criteria:
+  - "Class A: 15 refs to missing getting-started.md \u2192 getting-started/quick-start.md;\
+    \ Class B: 15 dead CLI/models integration links \u2192 drop/fix; Class C: 10 root-absolute\
+    \ deployment links \u2192 relative; plus index.md anchor fixes, quick-start.md\
+    \ relative path fixes, other-tools.md api reference fix. Zero dead links remaining\
+    \ after fix."
+  status: complete
+  created_at: '2026-10-17T14:18:57.383202+00:00'
+  completed_at: '2026-10-17T14:19:03.653528+00:00'

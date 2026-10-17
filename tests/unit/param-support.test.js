@@ -21,7 +21,7 @@ describe("stripUnsupportedParams", () => {
     expect(body.messages[0].content).toBe("hello world");
   });
 
-  it.each(["gpt-5.4", "gpt-5.4-mini", "gpt-5.9", "gpt-5.10", "gpt-6.0", "gpt-6.1-sol", "gpt-6.10"])("drops unsupported GitHub params for %s", (model) => {
+  it.each(["gpt-5.4", "gpt-5.4-mini", "gpt-5.9", "gpt-5.10", "gpt-6", "gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-6.0", "gpt-6.1-sol", "gpt-6.10"])("drops unsupported GitHub params for %s", (model) => {
     const body = { temperature: 0.7, top_p: 1 };
 
     stripUnsupportedParams("github", model, body);
@@ -29,7 +29,7 @@ describe("stripUnsupportedParams", () => {
     expect(body).toEqual({ top_p: 1 });
   });
 
-  it.each(["gpt-4.1", "gpt-5", "gpt-5.0", "gpt-5.3-codex", "gpt-7.0", "gpt-5.4invalid"])("preserves temperature outside the GitHub version range for %s", (model) => {
+  it.each(["gpt-4.1", "gpt-5", "gpt-5.0", "gpt-5.3-codex", "gpt-7.0", "gpt-5.4invalid", "gpt-60-luna", "gpt-6invalid", "gpt-6.1invalid"])("preserves temperature outside the GitHub version range for %s", (model) => {
     const body = { temperature: 0.7 };
     stripUnsupportedParams("github", model, body);
     expect(body).toEqual({ temperature: 0.7 });

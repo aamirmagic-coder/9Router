@@ -1,6 +1,6 @@
 const { err, log } = require("../logger");
 const { IS_DEV } = require("../config");
-const { fetchRouter, pipeTransformedEventStream } = require("./base");
+const { fetchRouter, pipeSSE, pipeTransformedEventStream } = require("./base");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -679,6 +679,68 @@ function emitFinish(state) {
   return frames.length > 0 ? frames : null;
 }
 
+// ─── Kiro 1.x+ Responses API intercept ───────────────────────────────────────
+/**
+ * Handle Kiro IDE's POST /v1/responses (OpenAI Responses API format) by:
+ *   1. Replacing the model field with the alias-mapped model
+ *   2. Forwarding the request to 9router /v1/responses
+ *   3. Piping the SSE response back to Kiro IDE as-is
+ *
+ * No format conversion is needed: Kiro sends OpenAI Responses API format and
+ * expects the same format back, and 9router's /v1/responses endpoint speaks
+ * exactly that protocol.
+ *
+ * @param {http.IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {Buffer} bodyBuffer
+ * @param {string} mappedModel
+ */
+async function interceptResponsesApi(req, res, bodyBuffer, mappedModel) {
+  const reqId = Math.random().toString(36).slice(2, 8);
+  const t0 = Date.now();
+  dbg(`[${reqId}] ── interceptResponsesApi START model=${mappedModel} bodyBytes=${bodyBuffer?.length ?? 0}`);
+
+  try {
+    let body;
+    try {
+      body = JSON.parse(bodyBuffer.toString());
+    } catch (parseErr) {
+      dbg(`[${reqId}] JSON.parse FAILED: ${parseErr.message}`);
+      throw parseErr;
+    }
+
+    // Replace model with the alias-mapped model
+    const originalModel = body.model;
+    body.model = mappedModel;
+    dbg(`[${reqId}] Responses API: originalModel=${originalModel} → mappedModel=${mappedModel}`);
+
+    // Forward to 9router /v1/responses
+    dbg(`[${reqId}] → fetchRouter POST /v1/responses (stream=true)`);
+    const routerRes = await fetchRouter(body, "/v1/responses", req.headers);
+    const routerCt = routerRes.headers.get("content-type") || "";
+    dbg(`[${reqId}] ← router status=${routerRes.status} content-type="${routerCt}"`);
+
+    if (routerRes.status < 200 || routerRes.status >= 300) {
+      let preview = "";
+      try { preview = (await routerRes.clone().text()).slice(0, 500); } catch {}
+      dbg(`[${reqId}] ⚠ router error status=${routerRes.status} bodyPreview=${JSON.stringify(preview)}`);
+    }
+
+    // Pipe SSE response directly — no format conversion needed
+    await pipeSSE(routerRes, res);
+    dbg(`[${reqId}] ✓ Responses API stream complete in ${Date.now() - t0}ms`);
+  } catch (error) {
+    err(`[Kiro MITM Responses] Request processing failed: ${error.message}`);
+    dbg(`[${reqId}] ✗ FAILED: ${error.message}\nheadersSent=${res.headersSent}`);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+    }
+    if (!res.writableEnded) {
+      res.end(JSON.stringify({ error: { message: error.message, type: "mitm_error", handler: "kiro-responses" } }));
+    }
+  }
+}
+
 // ─── MITM intercept entry point ───────────────────────────────────────────────
 /**
  * Intercept Kiro IDE CodeWhisperer request and convert to EventStream response:
@@ -687,6 +749,12 @@ function emitFinish(state) {
  *   3. Forward to 9router /v1/chat/completions (OpenAI SSE)
  *   4. Convert OpenAI SSE response → AWS EventStream binary frames
  *   5. Stream EventStream frames back to Kiro IDE
+ *
+ * For Kiro 1.x+ Responses API requests (POST /v1/responses):
+ *   1. Parse OpenAI Responses API body
+ *   2. Remap model field via alias table
+ *   3. Forward to 9router /v1/responses directly
+ *   4. Pipe response SSE back to Kiro as-is (no format conversion needed)
  * 
  * @param {http.IncomingMessage} req - HTTP request from Kiro IDE
  * @param {http.ServerResponse} res - HTTP response to Kiro IDE  
@@ -694,6 +762,15 @@ function emitFinish(state) {
  * @param {string} mappedModel - Model name after MITM alias mapping
  */
 async function intercept(req, res, bodyBuffer, mappedModel) {
+  // ── Kiro 1.x+ Responses API path (POST /v1/responses) ────────────────────
+  // This is OpenAI Responses API format. No CodeWhisperer → EventStream
+  // conversion needed — forward directly to 9router /v1/responses and pipe
+  // the SSE response back to Kiro IDE unchanged.
+  if ((req.url || "") === "/v1/responses") {
+    return interceptResponsesApi(req, res, bodyBuffer, mappedModel);
+  }
+
+  // ── Legacy CodeWhisperer / GenerateAssistantResponse path ─────────────────
   let fp = null;
   let inFlightMarked = false;
   const reqId = Math.random().toString(36).slice(2, 8); // correlate log lines for one turn

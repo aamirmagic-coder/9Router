@@ -24,12 +24,35 @@ function kiroDbgEnabled() {
   const v = (process.env.MITM_KIRO_DEBUG || "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "on" || v === "yes";
 }
+
+// File-based route debug log — written alongside kiro-debug.log so routing
+// decisions are visible even when the MITM stdout is inaccessible (packaged runs,
+// background service). Enabled only when MITM_KIRO_DEBUG is truthy.
+const ROUTE_DEBUG_LOG = path.join(__dirname, "../../data/logs/mitm/route-debug.log");
+function routeDbgFile(msg) {
+  if (!kiroDbgEnabled()) return;
+  const line = `${new Date().toISOString()} ${msg}`;
+  try {
+    fs.mkdirSync(path.dirname(ROUTE_DEBUG_LOG), { recursive: true });
+    fs.appendFileSync(ROUTE_DEBUG_LOG, `${line}\n`);
+  } catch { /* ignore write errors */ }
+}
+
 function routeDbg(msg) {
-  if (kiroDbgEnabled()) log(`[route] ${msg}`);
+  if (!kiroDbgEnabled()) return;
+  log(`[route] ${msg}`);
+  routeDbgFile(`[route] ${msg}`);
 }
 
 // Clear stale dump files on every MITM start (prevents unbounded disk usage)
 clearDumpDir();
+// Reset route-debug.log on every start so it only reflects the current session.
+if (kiroDbgEnabled()) {
+  try {
+    fs.mkdirSync(path.dirname(ROUTE_DEBUG_LOG), { recursive: true });
+    fs.writeFileSync(ROUTE_DEBUG_LOG, `=== MITM route-debug started ${new Date().toISOString()} ===\n`);
+  } catch { /* ignore */ }
+}
 const INTERNAL_REQUEST_HEADER = { name: "x-request-source", value: "local" };
 
 // Host rewrite for upstream forward: PROD cloudcode-pa is rate-limited (429),
@@ -143,6 +166,9 @@ function getMappedModel(tool, model) {
     for (const { match, alias } of patterns) {
       if (match.test(lookup) && aliases[alias]) return aliases[alias];
     }
+    // Wildcard catch-all: if alias table has a "*" entry, use it for any unmatched model.
+    // Lets users configure a single default instead of enumerating every model.
+    if (aliases["*"]) return aliases["*"];
     return null;
   } catch { return null; }
 }
@@ -443,7 +469,9 @@ server.on("error", (e) => {
 server.on("tlsClientError", (e, socket) => {
   if (!kiroDbgEnabled()) return;
   const peer = socket && socket.remoteAddress ? `${socket.remoteAddress}:${socket.remotePort}` : "?";
-  err(`[tls] handshake failed from ${peer}: ${e.code || ""} ${e.message}`);
+  const msg = `[tls] handshake failed from ${peer}: ${e.code || ""} ${e.message}`;
+  err(msg);
+  routeDbgFile(msg);
 });
 
 server.on("clientError", (e, socket) => {
@@ -458,7 +486,9 @@ server.on("clientError", (e, socket) => {
 server.on("secureConnection", (tlsSocket) => {
   if (!kiroDbgEnabled()) return;
   const peer = `${tlsSocket.remoteAddress || "?"}:${tlsSocket.remotePort || "?"}`;
-  log(`[tls] connected servername=${tlsSocket.servername || "-"} alpn=${tlsSocket.alpnProtocol || "-"} from ${peer}`);
+  const msg = `[tls] connected servername=${tlsSocket.servername || "-"} alpn=${tlsSocket.alpnProtocol || "-"} from ${peer}`;
+  log(msg);
+  routeDbgFile(msg);
 });
 
 const { removeAllDNSEntriesSync } = require("./dns/dnsConfig");

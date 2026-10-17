@@ -411,4 +411,4 @@ Error: Rate limit exceeded
 
 - [Cấu hình Cursor](cursor.md) cho tích hợp IDE
 - [Setup Continue](continue.md) cho VSCode
-- [API Reference](../api/reference.md)
+- [API Reference](../../docs/api-reference.md)

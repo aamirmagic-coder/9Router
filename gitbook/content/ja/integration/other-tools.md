@@ -411,4 +411,4 @@ Error: Rate limit exceeded
 
 - [Cursorを設定](cursor.md) IDE統合用
 - [Continueをセットアップ](continue.md) VSCode用
-- [APIリファレンス](../api/reference.md)
+- [APIリファレンス](../../docs/api-reference.md)

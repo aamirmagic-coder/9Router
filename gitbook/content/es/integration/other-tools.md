@@ -411,4 +411,4 @@ Error: Rate limit exceeded
 
 - [Configurar Cursor](cursor.md) para integración con IDE
 - [Configurar Continue](continue.md) para VSCode
-- [Referencia de API](../api/reference.md)
+- [Referencia de API](../../docs/api-reference.md)

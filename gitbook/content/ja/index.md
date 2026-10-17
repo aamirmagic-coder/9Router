@@ -121,7 +121,7 @@ API Key: [ダッシュボードから取得]
 Model: cc/claude-opus-4-5-20251101
 ```
 
-[→ 完全なスタートガイド](#quick-start)
+[→ 完全なスタートガイド](getting-started/quick-start.md)
 
 ---
 
@@ -152,7 +152,7 @@ Model: cc/claude-opus-4-5-20251101
 
 ## 次は?
 
-- [スタートガイド](getting-started/installation.md) - 5分でインストールと設定
+- [スタートガイド](getting-started/quick-start.md) - 5分でインストールと設定
 - [インストールガイド](getting-started/installation.md) - 詳細なセットアップ手順
 - [機能](features/) - すべての機能を確認
 - [FAQ](faq.md) - よくある質問

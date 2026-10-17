@@ -411,4 +411,4 @@ Error: Rate limit exceeded
 
 - [配置 Cursor](cursor.md) 进行 IDE 集成
 - [设置 Continue](continue.md) 用于 VSCode
-- [API 参考](../api/reference.md)
+- [API 参考](../../docs/api-reference.md)

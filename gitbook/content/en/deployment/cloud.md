@@ -475,5 +475,6 @@ chmod 755 /var/lib/9router
 
 ## 🔗 Next Steps
 
+- [Connect Providers](../providers/subscription.md)
 - [Setup Combos](../features/combos.md)
 - [Integrate with Tools](../integration/cursor.md)

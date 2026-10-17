@@ -121,7 +121,7 @@ API Key: [from dashboard]
 Model: cc/claude-opus-4-5-20251101
 ```
 
-[→ Full Getting Started Guide](#quick-start)
+[→ Full Getting Started Guide](getting-started/quick-start.md)
 
 ---
 
@@ -152,7 +152,7 @@ Model: cc/claude-opus-4-5-20251101
 
 ## What's Next?
 
-- [Getting Started](getting-started/installation.md) - Install and configure in 5 minutes
+- [Getting Started](getting-started/quick-start.md) - Install and configure in 5 minutes
 - [Installation Guide](getting-started/installation.md) - Detailed setup instructions
 - [Features](features/) - Explore all capabilities
 - [FAQ](faq.md) - Common questions

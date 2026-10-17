@@ -97,6 +97,21 @@ Result: Never stop coding, minimal cost + 20-40% token savings via RTK
 
 **1. Install globally — upstream build only (no federation):**
 
+> ⚠️ **Prerequisite:** Node.js ≥ 22 is required before running `npm`. On fresh
+> bunker/SSH-only boxes the OS image ships `git` + `docker` but **not** `node` or
+> `npm`. Rescue path — download the Node tarball, extract into `$HOME` and prepend
+> it to your `PATH`:
+>
+> ```bash
+> # Example (adjust ARCH=x64 or arm64):
+> curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz \
+>   | tar -xJ -C $HOME
+> export PATH=$HOME/node-v22.14.0-linux-x64/bin:$PATH
+> node -v && npm -v  # verify
+> ```
+>
+> After the toolchain is in place, continue below.
+
 ```bash
 npm install -g 9router
 9router

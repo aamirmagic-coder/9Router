@@ -554,6 +554,15 @@ export const PATTERN_CAPABILITIES = [
 
   // ── OpenCode Free Muse Spark (multimodal text+image; OpenAI Responses reasoning supports up to xhigh) ─
   { pattern: "*muse*spark*",    caps: { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 } },
+  // ── Kira AI ───────────────────────────────────────────────────────
+  { pattern: "*kira*image*",    caps: { imageOutput: true, tools: false } },
+  { pattern: "*kira*tts*",      caps: { audioOutput: true, tools: false } },
+  { pattern: "*kira*video*",    caps: { tools: false } },
+  { pattern: "*kira*pdf*",      caps: { vision: true, pdf: true, contextWindow: 1048576, maxOutput: 65536 } },
+  { pattern: "*kira*pro*",      caps: { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 65536 } },
+  { pattern: "*kira*flash*",    caps: { vision: true, contextWindow: 1048576, maxOutput: 65536 } },
+  { pattern: "*kira*",          caps: { vision: true, contextWindow: 1048576, maxOutput: 65536 } },
+
   // ── Others ───────────────────────────────────────────────────────
   { pattern: "*hunyuan*",       caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "hy3*",            caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },

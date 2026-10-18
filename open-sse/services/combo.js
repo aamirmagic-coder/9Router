@@ -336,6 +336,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
+  let lastResponse = null;
 
   for (let i = 0; i < rotatedModels.length; i++) {
     const modelStr = rotatedModels[i];
@@ -389,13 +390,11 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
       }
 
-      // Check if should fallback to next model
-      const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
-
-      if (!shouldFallback) {
-        log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
-        return result;
-      }
+      // Always try the next combo model. Combo fallback is user-configured intent:
+      // a 400/413/"too many payload" on one model says nothing about the next one,
+      // and returning immediately breaks the client. checkFallbackError only decides
+      // credential cooldown, which handleSingleModel already applied.
+      const { cooldownMs } = checkFallbackError(result.status, errorText);
 
       // For transient errors (503/502/504), wait for cooldown before falling through
       // so a briefly-overloaded provider gets a chance to recover rather than being
@@ -409,6 +408,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Fallback to next model
       lastError = errorText || String(result.status);
       if (!lastStatus) lastStatus = result.status;
+      lastResponse = result;
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues
@@ -433,6 +433,10 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   }
 
   log.warn("COMBO", `All models failed | ${msg}`);
+  // Prefer the upstream response so the client keeps its native error shape
+  // (OpenAI vs Anthropic) instead of a bare OpenAI-style message.
+  if (lastResponse) return lastResponse;
+
   return new Response(
     JSON.stringify({ error: { message: msg } }),
     { status, headers: { "Content-Type": "application/json" } }

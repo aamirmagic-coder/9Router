@@ -220,18 +220,23 @@ describe("applyThinking per provider format", () => {
     ["gpt-5.6-luna", "ultra", "max"],
   ])("normalizes Codex %s effort %s to %s", (model, effort, expected) => {
     const out = apply("openai-responses", model, { reasoning: { effort } }, "codex");
-    expect(out.reasoning?.effort).toBe(expected);
-    expect(out.reasoning_effort).toBeUndefined();
+    expect(out.reasoning_effort).toBe(expected);
   });
   it("applies a supported Codex Ultra suffix", () => {
     const out = apply("openai-responses", "gpt-5.6-sol(ultra)", {}, "codex");
-    expect(out.reasoning?.effort).toBe("ultra");
-    expect(out.reasoning_effort).toBeUndefined();
+    expect(out.reasoning_effort).toBe("ultra");
   });
   it("keeps native reasoning.effort for OpenAI Responses targets", () => {
-    const out = apply("openai-responses", "gpt-5.6-sol", {
-      reasoning: { effort: "high", summary: "auto" },
-    }, "openai-compatible-responses-test");
+    const out = apply("openai-responses", "gpt-5.4", {
+      reasoning: { effort: "high", summary: "detailed" },
+    }, "openai");
+    expect(out.reasoning).toEqual({ effort: "high", summary: "detailed" });
+    expect(out.reasoning_effort).toBeUndefined();
+  });
+  it("nests flat reasoning_effort for first-party OpenAI Responses", () => {
+    const out = apply("openai-responses", "gpt-5.4", {
+      reasoning_effort: "high",
+    }, "openai");
     expect(out.reasoning).toEqual({ effort: "high", summary: "auto" });
     expect(out.reasoning_effort).toBeUndefined();
   });
@@ -296,5 +301,29 @@ describe("extractReasoningText (response shapes)", () => {
   });
   it("no reasoning → empty", () => {
     expect(extractReasoningText({ content: "hello" })).toBe("");
+  });
+});
+
+describe("OpenCode Free ids with no capabilities entry (#2690)", () => {
+  const bunny = (effort) => ({
+    model: "oc/space-bunny-free",
+    messages: [{ role: "user", content: "hi" }],
+    reasoning_effort: effort,
+  });
+
+  it("keeps the client reasoning_effort for space-bunny-free", () => {
+    for (const level of ["low", "medium", "high", "xhigh", "none"]) {
+      expect(apply("openai", "oc/space-bunny-free", bunny(level), "oc").reasoning_effort).toBe(level);
+      expect(apply("openai-responses", "oc/space-bunny-free", bunny(level), "oc").reasoning_effort).toBe(level);
+    }
+  });
+
+  it("clamps max to xhigh (openai format has no max)", () => {
+    expect(apply("openai", "oc/space-bunny-free", bunny("max"), "oc").reasoning_effort).toBe("xhigh");
+    expect(apply("openai-responses", "oc/space-bunny-free", bunny("max"), "oc").reasoning_effort).toBe("xhigh");
+  });
+
+  it("still strips it for a model that has no entry at all (control)", () => {
+    expect(apply("openai", "oc/no-such-model-xyz", bunny("high"), "oc").reasoning_effort).toBeUndefined();
   });
 });

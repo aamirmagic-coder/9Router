@@ -10,7 +10,7 @@ import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel }
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
   openai: "openai",
-  "openai-responses": "openai-responses",
+  "openai-responses": "openai",
   "openai-response": "openai",
   codex: "openai",
   claude: "claude-budget",
@@ -129,12 +129,19 @@ const NATIVE_ONLY_FORMATS = new Set(["gemini-level", "gemini-budget", "claude-bu
 
 function resolveFormat(targetFormat, model, provider) {
   if (targetFormat === "commandcode") return "commandcode";
-  if (targetFormat === "openai-responses") return "openai-responses";
+  // First-party OpenAI Responses uses nested reasoning; some compatible providers
+  // still use Chat-style reasoning_effort even on a Responses-labelled transport.
+  if (targetFormat === "openai-responses" && provider === "openai") return "openai-responses";
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
   const caps = getCapabilitiesForModel(provider, model);
   const isOpenAIWire = targetFormat === "openai" || targetFormat === "openai-responses";
   if (caps.thinkingFormat && !(isOpenAIWire && NATIVE_ONLY_FORMATS.has(caps.thinkingFormat))) {
+    // Muse (Meta) strict Responses API rejects top-level reasoning_effort and
+    // requires nested reasoning: { effort, summary }. Other upstreams keep Chat-shaped effort.
+    if (provider === "muse" && targetFormat === "openai-responses") {
+      return "openai-responses";
+    }
     return caps.thinkingFormat;
   }
   return FORMAT_TO_NATIVE[targetFormat] || "openai";
@@ -268,11 +275,16 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, existingRea
     case "openai-responses": {
       const reasoning = existingReasoning || {};
       if (none && canDisable) {
-        body.reasoning = { ...reasoning, effort: "none" };
+        delete body.reasoning;
+        delete body.reasoning_effort;
         break;
       }
       const level = toLevel(eff);
-      if (level) body.reasoning = { ...reasoning, effort: normalizeOpenAILevel(level, supportedLevels) };
+      if (level) {
+        body.reasoning = { ...reasoning, effort: normalizeOpenAILevel(level, supportedLevels) };
+        if (!body.reasoning.summary) body.reasoning.summary = "auto";
+      }
+      delete body.reasoning_effort;
       break;
     }
     case "claude-adaptive": {
@@ -282,7 +294,11 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, existingRea
       if (canDisable) body.thinking = { type: "adaptive", ...(display ? { display } : {}) };
       else delete body.thinking;
       const level = toLevel(eff);
-      body.output_config = { effort: level === "xhigh" || level === "auto" ? "high" : level };
+      // xhigh is model-gated (Opus/Sonnet 4.6 reject it) — clamp when not advertised.
+      // Claude effort has no "minimal" (always-on models clamp "none" to it).
+      body.output_config = { effort: level === "auto" ? "high"
+        : level === "minimal" ? "low"
+        : level === "xhigh" && !supportedLevels?.includes("xhigh") ? "high" : level };
       break;
     }
     case "claude-budget": {
@@ -292,7 +308,10 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, existingRea
       break;
     }
     case "gemini-level": {
-      const level = none ? "minimal" : toGeminiThinkingLevel(eff);
+      let level = none ? "minimal" : toGeminiThinkingLevel(eff);
+      // Models without a "minimal" tier (Gemini 4) reject it with 400 — clamp to the lowest supported level.
+      const lowest = supportedLevels?.find((l) => l !== "none");
+      if (supportedLevels?.length && lowest && !supportedLevels.includes(level)) level = lowest;
       setGeminiThinking(body, { thinkingLevel: level, includeThoughts: level !== "minimal" });
       ensureGeminiOutputFloor(body, geminiLevelOutputFloor(level), caps);
       break;
@@ -361,6 +380,18 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, existingRea
       if (none && canDisable) break;
       const level = toLevel(eff);
       if (level) body.reasoning_effort = level === "xhigh" || level === "max" ? "high" : level;
+      break;
+    }
+    case "nous": {
+      // Nous's first-party client omits `reasoning` when disabled and sends a
+      // nested object when enabled. The API does not advertise top-level
+      // `reasoning_effort` for all models, so send nested `reasoning`.
+      if (none && canDisable) break;
+      const level = eff.mode === "auto" ? "medium" : toLevel(eff);
+      body.reasoning = {
+        enabled: true,
+        ...(level ? { effort: level } : {}),
+      };
       break;
     }
     case "tokenrouter": {

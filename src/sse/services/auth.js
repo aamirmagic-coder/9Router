@@ -19,6 +19,19 @@ function githubMonthlyResetMs(status, errorText, provider) {
 }
 
 /**
+ * Active proxy pools that can actually egress, minus ids already excluded by
+ * the retry loop. Both exclusion key forms are honored: `proxy:<id>` (the
+ * virtual no-auth connection) and the raw pool id.
+ */
+async function resolveProxyPoolCandidates(excludeSet) {
+  const pools = (await getProxyPools({ isActive: true })).filter((p) => p.proxyUrl);
+  const candidates = pools
+    .map((p) => p.id)
+    .filter((id) => !excludeSet.has(`proxy:${id}`) && !excludeSet.has(id));
+  return { configured: pools.length, candidates };
+}
+
+/**
  * Get provider credentials from localDb
  * Filters out unavailable accounts and returns the selected account based on strategy
  * @param {string} provider - Provider name
@@ -50,16 +63,18 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       const strategy = override.rotateStrategy || "none";
       let pickedId = override.proxyPoolId || null;
       if (strategy !== "none") {
-        const allPools = await getProxyPools({ isActive: true });
-        const poolIds = allPools
-          .filter(p => p.proxyUrl)
-          .map(p => p.id)
-          .filter(id => !excludeSet.has(`proxy:${id}`) && !excludeSet.has(id));
-        if (poolIds.length === 0) {
-          log.warn("AUTH", `${provider} | all proxy pools exhausted (${excludeSet.size} excluded)`);
+        const { configured, candidates } = await resolveProxyPoolCandidates(excludeSet);
+        if (candidates.length === 0 && configured > 0) {
+          // Rotation was configured and pools exist, but every candidate was
+          // excluded after a fallbackable error. Fail closed: never leak the
+          // host IP over a direct connection when the user asked for rotation.
+          log.warn("AUTH", `${provider} | all ${configured} proxy pool(s) excluded`);
           return null;
         }
-        pickedId = pickProxyPoolId(poolIds, strategy, providerId);
+        // No pool is configured at all (pools deleted/deactivated while the
+        // rotation setting stayed behind) or candidates remain: an empty list
+        // falls through to the direct "noauth" credential, as before #4998.
+        pickedId = pickProxyPoolId(candidates, strategy, providerId);
       } else if (pickedId && (excludeSet.has(`proxy:${pickedId}`) || excludeSet.has(pickedId))) {
         // The pinned pool failed with a fallbackable error (403/429/5xx) and the
         // retry excluded it. "None" rotation means "do not cycle pools per
@@ -67,21 +82,24 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         // blocked relay egress IP cannot take the provider down while healthy
         // pools are configured. The exclusion set grows per failed attempt, so a
         // chain of dead pools walks the list without extra state.
-        const allPools = await getProxyPools({ isActive: true });
-        const fallbackIds = allPools
-          .filter(p => p.proxyUrl)
-          .map(p => p.id)
-          .filter(id => !excludeSet.has(`proxy:${id}`) && !excludeSet.has(id));
-        if (fallbackIds.length === 0) {
+        const { candidates } = await resolveProxyPoolCandidates(excludeSet);
+        if (candidates.length === 0) {
           log.warn("AUTH", `${provider} | configured proxy pool ${pickedId} excluded, no fallback pool available`);
           return null;
         }
-        log.warn("AUTH", `${provider} | configured proxy pool ${pickedId} excluded → failing over to pool ${fallbackIds[0]}`);
-        pickedId = fallbackIds[0];
+        log.warn("AUTH", `${provider} | configured proxy pool ${pickedId} excluded → failing over to pool ${candidates[0]}`);
+        pickedId = candidates[0];
       }
       const resolvedProxy = await resolveConnectionProxyConfig({ proxyPoolId: pickedId || "" });
-      const connectionId = pickedId ? `proxy:${pickedId}` : "noauth";
-      const connectionName = pickedId ? (resolvedProxy.proxyPool?.name || `Proxy (${pickedId.slice(0, 8)})`) : "Public";
+      // The pin can point at a deleted/inactive pool while the setting stays
+      // behind; resolveConnectionProxyConfig then reports source "none". Label
+      // the connection from what actually egressed, not from the stale pin.
+      const usingPool = resolvedProxy.proxyPool != null;
+      const resolvedPoolId = resolvedProxy.proxyPoolId || pickedId || "";
+      const connectionId = usingPool ? `proxy:${resolvedPoolId}` : "noauth";
+      const connectionName = usingPool
+        ? (resolvedProxy.proxyPool.name || `Proxy (${resolvedPoolId.slice(0, 8)})`)
+        : "Public";
       return {
         id: connectionId,
         connectionId,
@@ -275,7 +293,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
   if (connectionId.startsWith("proxy:")) {
-    const { shouldFallback, cooldownMs } = checkFallbackError(status, errorText, 0, provider);
+    const { shouldFallback, cooldownMs } = checkFallbackError(status, errorText, 0, resolveProviderId(provider));
     return { shouldFallback, cooldownMs };
   }
   const connections = await getProviderConnections({ provider });

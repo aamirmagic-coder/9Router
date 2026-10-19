@@ -163,6 +163,7 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
   
   const emit = (eventType, data) => {
     data.sequence_number = nextSeq();
+    data.type = eventType; // ensure required "type" key for OpenCode decoder
     events.push({ event: eventType, data });
   };
 
@@ -581,6 +582,7 @@ function flushEvents(state) {
   const nextSeq = () => ++state.seq;
   const emit = (eventType, data) => {
     data.sequence_number = nextSeq();
+    data.type = eventType; // ensure required "type" key for OpenCode decoder
     events.push({ event: eventType, data });
   };
 

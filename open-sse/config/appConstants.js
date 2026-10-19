@@ -3,9 +3,20 @@ import { PROVIDERS, PROVIDER_OAUTH } from "./providers.js";
 import { ANTIGRAVITY_IDE_USER_AGENT } from "../providers/shared.js";
 import { createRequire } from "module";
 
+// Nous Portal requires attribution for some API-key models. Use a neutral
+// router identity rather than exposing a credential or claiming another client.
+export const NOUS_ATTRIBUTION = {
+  hostname: "inference-api.nousresearch.com",
+  chatCompletionsPath: "/v1/chat/completions",
+  tags: ["product=9router", "client=9router", "user=9router"],
+};
+
 // === Gemini CLI === derive từ registry gemini-cli.transport
 export const GEMINI_CLI_VERSION = PROVIDERS["gemini-cli"]?.cliVersion;
 export const GEMINI_CLI_API_CLIENT = PROVIDERS["gemini-cli"]?.apiClient;
+
+// === Codex CLI === derive từ registry codex.transport
+export const CODEX_CLI_VERSION = PROVIDERS["codex"]?.cliVersion;
 
 // Map Node arch to Gemini CLI arch string (x64/x86/arm64/...)
 function geminiCLIArch() {
@@ -156,6 +167,13 @@ export const LOAD_CODE_ASSIST_HEADERS = {
   "Client-Metadata": JSON.stringify({ ideType: IDE_TYPE.ANTIGRAVITY, platform: getPlatformEnum(), pluginType: PLUGIN_TYPE.GEMINI }),
 };
 
+// Real Antigravity IDE doesn't send X-Goog-Api-Client/Client-Metadata on loadCodeAssist/onboardUser —
+// Google's backend fingerprints those and silently refuses to provision a cloudaicompanionProject.
+export const ANTIGRAVITY_LOAD_CODE_ASSIST_HEADERS = {
+  "Content-Type": "application/json",
+  "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
+};
+
 export const LOAD_CODE_ASSIST_METADATA = {
   ideType: IDE_TYPE.ANTIGRAVITY,
   platform: getPlatformEnum(),
@@ -164,6 +182,18 @@ export const LOAD_CODE_ASSIST_METADATA = {
 
 // System prompts
 export const CLAUDE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
+// Rewrite rules applied to Antigravity system prompts: competing-client branding
+// makes the backend flag the request and answer 429 Quota Exhausted.
+export const ANTIGRAVITY_PROMPT_REWRITES = [
+  { from: "You are a Claude agent, built on Anthropic's Claude Agent SDK.", to: "" },
+  { from: /You are Hermes(?: Agent)?(?:,\s*(?:an intelligent AI assistant|an AI assistant|an AI agent))?(?:,?\s*(?:built|created)\s+by\s+Nous Research)?\./gi, to: "You are an AI assistant." },
+  // Claude Code prepends this line to its system prompt. The Claude-format translator strips it,
+  // but OpenAI-format clients (e.g. proxies that convert Claude Code to /v1/chat/completions)
+  // pass it through, and any system text containing it gets a fake 429 RESOURCE_EXHAUSTED.
+  { from: /^x-anthropic-billing-header:[^\n]*(?:\r?\n)*/gim, to: "" },
+  { from: /opencode/gi, to: (m) => (m === "OpenCode" ? "Antigravity" : m === "OPENCODE" ? "ANTIGRAVITY" : "antigravity") }
+];
+
 export const ANTIGRAVITY_DEFAULT_SYSTEM = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.**Absolute paths only****Proactiveness**";
 
 // Derive từ registry oauth.refreshLeadMs
@@ -176,7 +206,6 @@ export const OAUTH_ENDPOINTS = {
   google:    { token: "https://oauth2.googleapis.com/token", auth: "https://accounts.google.com/o/oauth2/auth" },
   openai:    { token: PROVIDER_OAUTH["codex"]?.tokenUrl, auth: PROVIDER_OAUTH["codex"]?.authorizeUrl },
   anthropic: { token: PROVIDER_OAUTH["claude"]?.tokenUrl, auth: "https://api.anthropic.com/v1/oauth/authorize" }, // ≠ claude.authorizeUrl (claude.ai login) — keep
-  qwen:      { token: PROVIDER_OAUTH["qwen"]?.tokenUrl, auth: PROVIDER_OAUTH["qwen"]?.deviceCodeUrl },
   iflow:     { token: PROVIDER_OAUTH["iflow"]?.tokenUrl, auth: PROVIDER_OAUTH["iflow"]?.authorizeUrl },
   github:    { token: PROVIDER_OAUTH["github"]?.tokenUrl, auth: PROVIDER_OAUTH["github"]?.authorizeUrl, deviceCode: PROVIDER_OAUTH["github"]?.deviceCodeUrl },
 };

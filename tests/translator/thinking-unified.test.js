@@ -226,6 +226,20 @@ describe("applyThinking per provider format", () => {
     const out = apply("openai-responses", "gpt-5.6-sol(ultra)", {}, "codex");
     expect(out.reasoning_effort).toBe("ultra");
   });
+  it("keeps native reasoning.effort for OpenAI Responses targets", () => {
+    const out = apply("openai-responses", "gpt-5.4", {
+      reasoning: { effort: "high", summary: "detailed" },
+    }, "openai");
+    expect(out.reasoning).toEqual({ effort: "high", summary: "detailed" });
+    expect(out.reasoning_effort).toBeUndefined();
+  });
+  it("nests flat reasoning_effort for first-party OpenAI Responses", () => {
+    const out = apply("openai-responses", "gpt-5.4", {
+      reasoning_effort: "high",
+    }, "openai");
+    expect(out.reasoning).toEqual({ effort: "high", summary: "auto" });
+    expect(out.reasoning_effort).toBeUndefined();
+  });
   it("keeps Codex-only GPT-5.6 levels out of Kiro translation", () => {
     const out = apply("openai", "gpt-5.6-sol", { reasoning_effort: "max" }, "kiro");
     expect(out.reasoning_effort).toBe("xhigh");

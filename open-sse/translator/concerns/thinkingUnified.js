@@ -129,6 +129,9 @@ const NATIVE_ONLY_FORMATS = new Set(["gemini-level", "gemini-budget", "claude-bu
 
 function resolveFormat(targetFormat, model, provider) {
   if (targetFormat === "commandcode") return "commandcode";
+  // First-party OpenAI Responses uses nested reasoning; some compatible providers
+  // still use Chat-style reasoning_effort even on a Responses-labelled transport.
+  if (targetFormat === "openai-responses" && provider === "openai") return "openai-responses";
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
   const caps = getCapabilitiesForModel(provider, model);
@@ -256,7 +259,7 @@ function stripAll(body) {
 }
 
 // Apply unified thinking config to body in the resolved provider-native format.
-function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
+function applyFormat(fmt, body, cfg, caps, supportedLevels, display, existingReasoning = null) {
   const none = cfg.mode === "none";
   const canDisable = caps.thinkingCanDisable !== false;
   // Model cannot disable thinking → clamp "none" to minimal effort instead.
@@ -270,16 +273,15 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
       break;
     }
     case "openai-responses": {
-      // The Responses API nests effort: reasoning:{effort,summary}. A top-level
-      // reasoning_effort is rejected by strict upstreams (Meta: "unknown
-      // parameter `reasoning_effort`"). "none" is expressed by omitting reasoning.
-      if (none && canDisable) { delete body.reasoning; break; }
+      const reasoning = existingReasoning || {};
+      if (none && canDisable) {
+        delete body.reasoning;
+        delete body.reasoning_effort;
+        break;
+      }
       const level = toLevel(eff);
       if (level) {
-        const current = body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
-          ? body.reasoning
-          : {};
-        body.reasoning = { ...current, effort: normalizeOpenAILevel(level, supportedLevels) };
+        body.reasoning = { ...reasoning, effort: normalizeOpenAILevel(level, supportedLevels) };
         if (!body.reasoning.summary) body.reasoning.summary = "auto";
       }
       delete body.reasoning_effort;
@@ -444,7 +446,13 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
   // comes back at all; keep what the client asked for instead of resetting it.
   // An OpenAI-shaped client's ask arrives via the captured intent instead.
   const display = typeof body.thinking?.display === "string" ? body.thinking.display : intent?.display;
+  const existingReasoning = targetFormat === "openai-responses"
+    && body.reasoning
+    && typeof body.reasoning === "object"
+    && !Array.isArray(body.reasoning)
+    ? { ...body.reasoning }
+    : null;
   stripAll(body);
-  applyFormat(fmt, body, cfg, caps, supportedLevels, display);
+  applyFormat(fmt, body, cfg, caps, supportedLevels, display, existingReasoning);
   return body;
 }

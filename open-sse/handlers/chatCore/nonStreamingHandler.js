@@ -7,8 +7,9 @@ import { createErrorResult } from "../../utils/error.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
+import { claudeMessageFromChatCompletion } from "./clientFormatResponse.js";
 import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
-import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine } from "./requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, resolveUsage, responseContentLength, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
@@ -94,7 +95,7 @@ function openAICompletionToResponses(responseBody, customToolNames = null) {
 /**
  * Translate non-streaming response body from provider format → OpenAI format.
  */
-export function translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames = null) {
+function translateUpstreamResponse(responseBody, targetFormat, sourceFormat, customToolNames = null) {
   if (targetFormat === sourceFormat) return responseBody;
   // Provider responded in OpenAI Chat Completions shape but the client speaks
   // Responses API — convert so tool_calls/text surface as Responses `output`.
@@ -102,7 +103,7 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
     return openAICompletionToResponses(responseBody, customToolNames);
   }
   if (targetFormat === FORMATS.OPENAI && sourceFormat === FORMATS.CLAUDE) {
-    return openAICompletionToClaudeMessage(responseBody);
+    return claudeMessageFromChatCompletion(responseBody);
   }
   if (targetFormat === FORMATS.OPENAI) return responseBody;
 
@@ -232,6 +233,37 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 }
 
 /**
+ * Adapt a translated body to the CLIENT's format — applied ONCE, at the single
+ * exit of `translateNonStreamingResponse`, after every upstream branch.
+ *
+ * The branches above all produce OpenAI `chat.completion` bodies whenever the
+ * upstream answers in OpenAI-ish shape (Ollama via `ollamaBodyToOpenAI`,
+ * Gemini/Antigravity/Gemini-CLI/Vertex built inline). A Claude-format client
+ * (`POST /v1/messages`, the format `detectFormatByEndpoint()` assigns) reads
+ * `content[]`, never `choices[]`: handing it a chat.completion body is a silent
+ * HTTP 200 with no assistant content rather than an error. Patching the
+ * conversion into each upstream branch is how that hole reappears the next time
+ * a branch is added, so it lives here instead.
+ *
+ * Only an OpenAI-shaped result is converted (`choices[]` or
+ * `object:"chat.completion"`), so a body an upstream already returned in
+ * Anthropic shape — or one this function already converted — passes through
+ * untouched.
+ */
+function toClientFormat(body, sourceFormat) {
+  if (sourceFormat !== FORMATS.CLAUDE) return body;
+  const isOpenAIShaped = Array.isArray(body?.choices) || body?.object === "chat.completion";
+  return isOpenAIShaped ? claudeMessageFromChatCompletion(body) : body;
+}
+
+export function translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames = null) {
+  return toClientFormat(
+    translateUpstreamResponse(responseBody, targetFormat, sourceFormat, customToolNames),
+    sourceFormat
+  );
+}
+
+/**
  * Handle non-streaming response from provider.
  */
 export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log }) {
@@ -274,9 +306,18 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   // Decloak tool_use names once on raw Claude body, before any translation (INPUT side)
   responseBody = decloakToolNames(responseBody, toolNameMap);
 
-  const usage = extractUsageFromResponse(responseBody);
+  const upstreamUsage = extractUsageFromResponse(responseBody);
+  const contentLength = responseContentLength(responseBody);
+  // The usage this request is logged and recorded with: the upstream's own
+  // counts when it reports them, otherwise an ESTIMATE (marked `estimated`) —
+  // a native Ollama non-streaming body carries its counts on the TOP LEVEL and
+  // has no `usage` object at all, so without the fallback a successful
+  // completion recorded nothing and the "📊 DONE" line read "IN 0 · OUT 0"
+  // (DF-9ROUTER-26). One resolution feeds the log line AND the DB row, so the
+  // two can never disagree.
+  const usage = resolveUsage({ tokens: upstreamUsage, body, contentLength });
   appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+  saveUsageStats({ provider, model, tokens: upstreamUsage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true, body, contentLength });
   if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)

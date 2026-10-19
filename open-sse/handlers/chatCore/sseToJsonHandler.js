@@ -6,7 +6,8 @@ import { FORMATS } from "../../translator/formats.js";
 import { openAICompletionToClaudeMessage } from "../../translator/concerns/claudeMessage.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
-import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { claudeMessageFromChatCompletion } from "./clientFormatResponse.js";
+import { ROLE, RESPONSES_ITEM, OPENAI_FINISH } from "../../translator/schema/index.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
@@ -35,6 +36,21 @@ function pickAssistantMessageForChatCompletion(output) {
   }
   const last = messages[messages.length - 1];
   return { msgItem: last, textContent: textFromResponsesMessageItem(last) };
+}
+
+/**
+ * Upstream Responses API status → OpenAI `finish_reason`.
+ *
+ * A Responses body legitimately carries `in_progress` / `queued` / `failed` /
+ * `incomplete`, and none of those are OpenAI finish_reason values: a client that
+ * receives one cannot tell a truncated or unfinished answer from a finished one.
+ * `incomplete` means the upstream cut the answer short at max_output_tokens, so it
+ * maps to `length`; every other status — including a non-terminal one — is the
+ * explicit `stop` default. The result is always inside the OpenAI enum.
+ */
+function finishReasonFromResponsesStatus(status, hasToolCalls) {
+  if (hasToolCalls) return OPENAI_FINISH.TOOL_CALLS;
+  return status === "incomplete" ? OPENAI_FINISH.LENGTH : OPENAI_FINISH.STOP;
 }
 
 /**
@@ -202,6 +218,41 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
   if (isCodexResponsesApi) {
     try {
       const jsonResponse = await convertResponsesStreamToJson(providerResponse.body);
+
+      // A Responses upstream that closed the stream WITHOUT a terminal event has
+      // not answered, so a body with no assistant output there is a failed
+      // upstream (quota, abort, free-route rate limit) — not an empty answer. Left
+      // alone it ships as HTTP 200 + `finish_reason:"in_progress"` to a chat client
+      // and as `content:[{type:"text",text:""}]` + `stop_reason:"end_turn"` to an
+      // Anthropic one, neither of which a health check can tell apart from a model
+      // that legitimately had nothing to say. Fail loud instead. A COMPLETED
+      // upstream with empty output is still a 200: it explicitly finished.
+      const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
+      // A tool-only answer is not an empty one: `function_call` items (and their
+      // Responses `custom_tool_call` sibling) are real assistant output.
+      const funcCallItems = (jsonResponse.output || []).filter(item => item.type === "function_call");
+      const toolItems = (jsonResponse.output || []).filter(item => item.type === "function_call" || item.type === "custom_tool_call");
+      const hasAssistantOutput = (typeof textContent === "string" && textContent.length > 0) || toolItems.length > 0;
+      if (!jsonResponse.terminal && !hasAssistantOutput) {
+        console.error("[ChatCore] Responses API upstream closed without a terminal event and produced no output");
+        return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Upstream returned no output and never completed (upstream_empty_completion)");
+      }
+
+      // Tool calls are Responses `function_call` items and pin finish_reason to
+      // `tool_calls`. The ONE mapped finish_reason below is used by both the client
+      // body and the recorded detail row, so a DB read can never disagree with what
+      // the client received.
+      const toolCalls = funcCallItems.map((item, idx) => ({
+        id: item.call_id || `call_${item.name}_${Date.now()}_${idx}`,
+        type: "function",
+        function: {
+          name: item.name,
+          arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || {})
+        }
+      }));
+      const hasToolCalls = toolCalls.length > 0;
+      const finishReason = finishReasonFromResponsesStatus(jsonResponse.status, hasToolCalls);
+
       if (onRequestSuccess) await onRequestSuccess();
 
       const usage = jsonResponse.usage || {};
@@ -214,14 +265,13 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       const inTokensForLog = (usage.input_tokens || 0)
         + (usage.cache_read_input_tokens || usage.cached_tokens || 0)
         + (usage.cache_creation_input_tokens || 0);
-      const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
       const totalLatency = Date.now() - requestStartTime;
 
       saveRequestDetail(buildRequestDetail({
         ...ctx,
         latency: { ttft: totalLatency, total: totalLatency },
         tokens: { prompt_tokens: inTokensForLog, completion_tokens: usage.output_tokens || 0 },
-        response: { content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
+        response: { content: textContent, thinking: null, finish_reason: finishReason },
         status: "success"
       }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
 
@@ -247,18 +297,6 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         : {};
       let finalResp;
 
-      // Extract tool calls from Responses API output (function_call items)
-      const funcCallItems = (jsonResponse.output || []).filter(item => item.type === "function_call");
-      const toolCalls = funcCallItems.map((item, idx) => ({
-        id: item.call_id || `call_${item.name}_${Date.now()}_${idx}`,
-        type: "function",
-        function: {
-          name: item.name,
-          arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || {})
-        }
-      }));
-      const hasToolCalls = toolCalls.length > 0;
-
       if (sourceFormat === FORMATS.ANTIGRAVITY || sourceFormat === FORMATS.GEMINI || sourceFormat === FORMATS.GEMINI_CLI) {
         finalResp = {
           response: {
@@ -271,9 +309,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       } else {
         const message = { role: "assistant", content: textContent || (hasToolCalls ? null : "") };
         if (hasToolCalls) message.tool_calls = toolCalls;
-        const responseDone = jsonResponse.status === "completed" || jsonResponse.status === "done";
-        const finishReason = hasToolCalls ? "tool_calls" : (responseDone ? "stop" : (jsonResponse.status || "stop"));
-        finalResp = {
+        const chatCompletion = {
           id: jsonResponse.id || `chatcmpl-${Date.now()}`,
           object: "chat.completion",
           created: jsonResponse.created_at || Math.floor(Date.now() / 1000),
@@ -281,6 +317,11 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
           choices: [{ index: 0, message, finish_reason: finishReason }],
           usage: { prompt_tokens: inTokens, completion_tokens: outTokens, total_tokens: inTokens + outTokens, ...cacheDetails }
         };
+        // An Anthropic client reads `content[]`, never `choices[]`. Handing it a
+        // chat.completion body is a silent HTTP 200 with no content, not an error.
+        finalResp = sourceFormat === FORMATS.CLAUDE
+          ? claudeMessageFromChatCompletion(chatCompletion)
+          : chatCompletion;
       }
 
       if (sourceFormat === FORMATS.CLAUDE) {
@@ -361,11 +402,18 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     // lost on the non-streaming return path. Inlined (not imported from
     // nonStreamingHandler.js) to avoid a circular import: nonStreamingHandler
     // already imports parseSSEToOpenAIResponse from this module.
-    const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
-      ? chatCompletionToResponses(parsed, customToolNames)
-      : sourceFormat === FORMATS.CLAUDE
-        ? openAICompletionToClaudeMessage(parsed)
-        : parsed;
+    //
+    // An Anthropic client (`POST /v1/messages`) needs the same treatment in the
+    // other direction: it reads `content[]`, so a raw chat.completion body is a
+    // silent HTTP 200 with no assistant content.
+    let finalBody;
+    if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
+      finalBody = chatCompletionToResponses(parsed, customToolNames);
+    } else if (sourceFormat === FORMATS.CLAUDE) {
+      finalBody = claudeMessageFromChatCompletion(parsed);
+    } else {
+      finalBody = parsed;
+    }
 
     return { success: true, response: new Response(JSON.stringify(restoreToolNames(finalBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {

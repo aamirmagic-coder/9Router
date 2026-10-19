@@ -76,6 +76,46 @@ That's it! Start coding with FREE AI models.
 
 ---
 
+## Run this fork from source
+
+The published `npm install -g 9router` package is upstream. To build and run the
+CLI launcher in this fork from a source checkout, run:
+
+```bash
+npm --prefix cli install   # one-time: CLI build deps (esbuild)
+DATA_DIR=/tmp/9router-cli-pack npm run cli:pack
+node cli/cli.js --skip-update --no-browser
+```
+
+The `DATA_DIR` override keeps the reproducible pack command writable when an
+ambient `.env` points at a system-owned directory. `npm run cli:pack` writes a
+`9router-<version>.tgz` artifact at the repository root; run the source
+launcher at `cli/cli.js`, which is also the installed `9router` executable.
+There is no separate compiled CLI entrypoint.
+
+---
+
+## Process lifecycle / shutdown
+
+The foreground launcher starts its server as a detached process group. In
+foreground mode, Ctrl+C (`SIGINT`), `SIGTERM`, and `SIGHUP` run launcher cleanup,
+which kills that server process and its group before the launcher exits. Stop a
+foreground launcher with Ctrl+C or `SIGTERM` rather than `SIGKILL`.
+
+`SIGKILL` cannot be handled. If a timeout wrapper sends `SIGKILL` to the
+launcher, its cleanup cannot run and the detached server can remain serving.
+That is an unavoidable orphan limitation, not evidence that normal shutdown
+failed.
+
+When Windows or Linux users select the tray/background option, the launcher
+starts an unreferenced detached tray process, cleans up the foreground server,
+and exits so the background launcher can own the port. Stop that mode through
+the tray **Quit** action; there is no `--stop` flag. On macOS the launcher keeps
+its current process instead, because a detached child loses the login session
+required by `NSStatusItem`; use the tray **Quit** action there as well.
+
+---
+
 ## 🚀 CLI Options
 
 ```bash
@@ -85,6 +125,20 @@ That's it! Start coding with FREE AI models.
 9router --skip-update      # Skip auto-update check
 9router --help             # Show all options
 ```
+
+**Port precedence** (highest first): `--port/-p` → `PORT` env var → `20128`.
+The launcher reads the process environment only (it does not load `.env`), so a
+host that already runs 9router on `20128` can be given a different port either way:
+
+```bash
+PORT=20129 9router --skip-update --no-browser   # env fallback
+9router --port 20129 --skip-update --no-browser # --port overrides PORT
+```
+
+An unusable `PORT` (empty, non-numeric, `0`, negative, `>65535`) is ignored with a
+one-line warning naming the value and the port actually used; an unusable `--port`
+argument falls back the same way. An occupied port is refused with an
+`EADDRINUSE` message that names both `--port <other port>` and `PORT=<other port>`.
 
 **Dashboard**: `http://localhost:20128/dashboard`
 
@@ -193,6 +247,37 @@ Any tool supporting OpenAI/Claude-compatible API works.
 - **macOS/Linux**: `~/.9router/db/data.sqlite`
 - **Windows**: `%APPDATA%/9router/db/data.sqlite`
 - **Docker**: `/app/data/db/data.sqlite` (mount `$HOME/.9router` to persist)
+
+---
+
+## Generate a video with xAI Grok Imagine
+
+Start the 9Router gateway first, then run the subcommand in another terminal:
+
+```bash
+9router xai video --prompt "A quiet mountain lake at sunrise" --output sunrise.mp4
+```
+
+This subcommand does not start the gateway. By default it connects to `127.0.0.1:20128`, polls until the job finishes, and downloads the MP4 to the output path. The gateway must have an xAI account connected (Grok Build OAuth or an API key). If gateway authentication is enabled, provide a 9Router API key with `--api-key <key>` or `NINE_ROUTER_API_KEY`.
+
+Options:
+
+| Option | Description |
+| --- | --- |
+| `--prompt <text>` | Video description (required). |
+| `--output <file>`, `-o <file>` | Output MP4 path (default: `video.mp4`). |
+| `--model <id>` | Model (default: `xai/grok-imagine-video`). |
+| `--duration <seconds>` | Requested video duration. |
+| `--aspect-ratio <ratio>` | Aspect ratio, e.g. `16:9`, `9:16`, or `1:1`. |
+| `--resolution <res>` | Resolution: `480p`, `720p`, or `1080p`. |
+| `--image <path-or-url>` | Image input for image-to-video. |
+| `--timeout <seconds>` | Maximum wait (default: 600 seconds). |
+| `--host <host>`, `-H <host>` | Gateway host (default: `127.0.0.1`). |
+| `--port <port>`, `-p <port>` | Gateway port (default: `20128`). |
+| `--api-key <key>` | 9Router API key; alternatively set `NINE_ROUTER_API_KEY`. |
+| `--help`, `-h` | Show subcommand help. |
+
+See the exact current option list with `9router xai video --help`.
 
 ---
 

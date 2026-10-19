@@ -27,8 +27,12 @@ export default {
     refreshUrl: "https://auth.x.ai/oauth2/token",
   },
   models: [
+    { id: "grok-4.20", name: "Grok 4.20" },
+    { id: "grok-4.20-multi-agent", name: "Grok 4.20 Multi-Agent" },
     { id: "grok-4.6", name: "Grok 4.6" },
     { id: "grok-4.5", name: "Grok 4.5" },
+    { id: "grok-4.3", name: "Grok 4.3" },
+    { id: "grok-build-0.1", name: "Grok Build 0.1" },
     { id: "grok-4", name: "Grok 4" },
     { id: "grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning" },
     { id: "grok-code-fast-1", name: "Grok Code Fast" },
@@ -42,7 +46,7 @@ export default {
   // Docs: https://docs.x.ai/developers/rest-api-reference/inference/videos
   videoConfig: { baseUrl: "https://api.x.ai/v1/videos" },
   searchViaChat: {
-    defaultModel: "grok-4.20-reasoning",
+    defaultModel: "grok-4.20",
     endpoint: "https://api.x.ai/v1/responses",
     pricingUrl: "https://x.ai/api#pricing",
   },

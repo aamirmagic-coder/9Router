@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DefaultExecutor } from "./default.js";
 
 /**
@@ -12,6 +13,15 @@ import { DefaultExecutor } from "./default.js";
 export class CodeBuddyExecutor extends DefaultExecutor {
   constructor() {
     super("codebuddy-cn");
+  }
+
+  buildHeaders(credentials, stream = true, url, model, body = null) {
+    const headers = super.buildHeaders(credentials, stream, url, model, body);
+    const convId = credentials?.rawHeaders?.["x-conversation-id"] || randomUUID();
+    headers["X-Conversation-ID"] = convId;
+    headers["X-Conversation-Request-ID"] = randomUUID().replace(/-/g, "");
+    headers["X-Conversation-Message-ID"] = randomUUID().replace(/-/g, "");
+    return headers;
   }
 
   transformRequest(model, body, stream, credentials) {

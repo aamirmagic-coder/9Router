@@ -61,8 +61,23 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         }
         pickedId = pickProxyPoolId(poolIds, strategy, providerId);
       } else if (pickedId && (excludeSet.has(`proxy:${pickedId}`) || excludeSet.has(pickedId))) {
-        log.warn("AUTH", `${provider} | configured proxy pool ${pickedId} excluded`);
-        return null;
+        // The pinned pool failed with a fallbackable error (403/429/5xx) and the
+        // retry excluded it. "None" rotation means "do not cycle pools per
+        // request", not "give up": fail over to the other active pools so one
+        // blocked relay egress IP cannot take the provider down while healthy
+        // pools are configured. The exclusion set grows per failed attempt, so a
+        // chain of dead pools walks the list without extra state.
+        const allPools = await getProxyPools({ isActive: true });
+        const fallbackIds = allPools
+          .filter(p => p.proxyUrl)
+          .map(p => p.id)
+          .filter(id => !excludeSet.has(`proxy:${id}`) && !excludeSet.has(id));
+        if (fallbackIds.length === 0) {
+          log.warn("AUTH", `${provider} | configured proxy pool ${pickedId} excluded, no fallback pool available`);
+          return null;
+        }
+        log.warn("AUTH", `${provider} | configured proxy pool ${pickedId} excluded → failing over to pool ${fallbackIds[0]}`);
+        pickedId = fallbackIds[0];
       }
       const resolvedProxy = await resolveConnectionProxyConfig({ proxyPoolId: pickedId || "" });
       const connectionId = pickedId ? `proxy:${pickedId}` : "noauth";

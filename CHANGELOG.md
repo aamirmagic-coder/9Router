@@ -2,6 +2,7 @@
 
 ## Fixes
 - **Auth / Proxy**: support proxy pool fallback and pool exclusion for no-auth free providers (`FREE_PROVIDERS`); mark `proxy:*` virtual connections unavailable on fallbackable HTTP errors (403/429/5xx) so rotating pools seamlessly fail over to working relays
+- **Auth / Proxy**: fail over from a pinned single pool (`rotateStrategy: "none"` + `proxyPoolId`) when that pool returns a fallbackable error — the retry now walks the other active pools instead of returning "no accounts available", so `oc/deepseek-v4.1-flash-free` (and every other no-auth free provider) no longer hard-fails while healthy relays exist just because one relay's egress IP is blocked upstream
 - **OpenCode**: match `deepseek-v4.1-flash-free` in `OPENCODE_FAMILIES` regex and add `deepseek-v4.1-flash-free` to OpenCode registry models with `[openai, claude, openai-responses]` supported formats
 
 # v0.5.104 (2026-10-15)

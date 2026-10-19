@@ -10,6 +10,7 @@ const BASE = (process.env.COMMAND_CODE_API_BASE_URL || "https://api.commandcode.
 
 const PLAN_NAMES = {
   "individual-go": "Go",
+  "individual-go-v1": "Go",
   "individual-goat": "GOAT",
   "individual-pro": "Pro",
   "individual-pro-v1": "Pro",
@@ -19,8 +20,12 @@ const PLAN_NAMES = {
   "teams-pro": "Teams Pro",
 };
 
+// Monthly credit allowance per plan. Without the entry the monthly row has no
+// cap and reads as "Unlimited" while the provider's own dashboard shows a
+// percentage (live check: individual-go-v1 = 10, i.e. 10 − 7.563 rounded = 24%).
 const PLAN_CAPS = {
   "individual-go": 10,
+  "individual-go-v1": 10,
   "individual-goat": 70,
   "individual-pro": 30,
   "individual-pro-v1": 80,
@@ -119,6 +124,9 @@ export async function getCommandCodeUsage(apiKey, proxyOptions = null) {
       total,
       remaining,
       unlimited: cap <= 0,
+      // No plan cap means the row is a balance, not a limit: the dashboard must
+      // not claim "Unlimited" for a plan whose allowance we simply don't know.
+      isCreditBalance: cap <= 0,
       resetAt: parseResetTime(subsBody?.data?.currentPeriodEnd),
     };
 

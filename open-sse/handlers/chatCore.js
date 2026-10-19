@@ -5,6 +5,7 @@ import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
+import { modelLevelError } from "../services/accountFallback.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelSupportedFormats, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { PROVIDERS } from "../config/providers.js";
@@ -497,13 +498,36 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       status: "error"
     })).catch(() => { });
 
+    // A serving restriction is a verdict about the model, not a quota or rate-limit
+    // state: report it as one, and drop the upstream's wait hint with it. A client
+    // that reads `insufficient_quota` here parks the credential for a whole usage
+    // window — or aborts the turn when the hint exceeds its own delay cap — over a
+    // model this caller will never be served. Resolved before the log line because
+    // the operator reads that line, not the client body: when a rule explains the
+    // rejection better than the upstream does (a gate that blames a credential it
+    // did not use), the explanation comes first and the upstream's own words stay
+    // behind it.
+    const modelLevel = modelLevelError(statusCode, message, provider);
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
     if (log?.errorLine) {
       const urlStr = providerUrl ? `\n    URL: ${providerUrl}` : "";
-      log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);
+      const reason = modelLevel?.message ? `${modelLevel.message}\n    upstream: ${message}` : errMsg;
+      log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${reason}`);
     }
     reqLogger.logError(new Error(message), finalBody || translatedBody);
-    return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
+    // Keep the upstream text on `result.error`: the request loop classifies from
+    // that field, and a rule's own wording must not hide the text that matched it.
+    // `modelLevel.message` reaches the client through the response body instead.
+    // The reset hint is dropped with the headers: auth.js resolves `resetsAtMs`
+    // before checkFallbackError, so keeping it would re-arm rotation and a real
+    // cooldown for the very verdict the noFallback rule keeps out of rotation.
+    return createErrorResult(
+      statusCode,
+      errMsg,
+      modelLevel ? null : resetsAtMs,
+      modelLevel ? null : upstreamResponseHeaders(providerResponse.headers),
+      modelLevel
+    );
   }
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };

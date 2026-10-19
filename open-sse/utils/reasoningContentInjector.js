@@ -11,7 +11,12 @@ const providerRuleFor = (provider) => PROVIDERS[provider]?.reasoningInject;
 // Model-level rules: matched by predicate against model id
 const MODEL_RULES = [
   { match: m => /^kimi-/i.test(m || ""), scope: "toolCalls" },
-  { match: m => /deepseek/i.test(m || ""), scope: "all" }
+  { match: m => /deepseek/i.test(m || ""), scope: "all" },
+  // The reflection family on the Command Code gateway validates every earlier
+  // assistant message and answers an OpenAI-format transcript that dropped the
+  // reasoning with 400 "Missing required parameter: 'messages[N].reasoning_content'".
+  // The placeholder is what keeps that turn replayable.
+  { match: m => /^reflection\//i.test(m || ""), scope: "all" }
 ];
 
 const DEEPSEEK_V4_PRO = "deepseek-v4-pro";

@@ -686,6 +686,25 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "commandcode":
+        // Credits is the monthly plan allowance (used/total of the plan cap);
+        // Session (5h) and Weekly are rolling windows. `unlimited`/`isCreditBalance`
+        // must survive: without a known cap the credits row is a balance, not a gauge.
+        // Don't forward Command Code's absolute `remaining` — see the Qoder note.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              unlimited: quota.unlimited === true,
+              isCreditBalance: quota.isCreditBalance === true,
+              resetAt: quota.resetAt || null,
+            });
+          });
+        }
+        break;
+
       case "deepseek":
         // Credit balance — remainingPercentage only (no absolute remaining).
         if (data.quotas) {

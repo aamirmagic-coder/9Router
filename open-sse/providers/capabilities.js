@@ -715,26 +715,63 @@ function isCommandCodeTextOnly(model) {
   }
   return false;
 }
+
+// Command Code's System-One lane (typesafe/*): these ids answer typed questions
+// instead of generating chat turns and validate their request body strictly —
+// any reasoning field is rejected (`400 Invalid option: expected one of
+// "off"|"low"|"medium"|"high"|"xhigh"|"max"`). Report them as non-reasoning so
+// applyThinking strips client thinking fields instead of rewriting them.
+const COMMANDCODE_NO_REASONING = ["typesafe/"];
+
+function isCommandCodeNoReasoning(model) {
+  const key = String(model || "").toLowerCase();
+  return COMMANDCODE_NO_REASONING.some((prefix) => key.startsWith(prefix));
+}
+
+// Only the DeepSeek line can turn thinking off. Probed live across the whole
+// catalog on 2026-10-16: the ids that accept reasoning_effort "off" are all
+// deepseek/*, and every other id — Meta/muse-spark, GLM, Kimi, MiniMax, Qwen,
+// grok, gemini, stepfun, nvidia, the free rows — answers 400 `Model "..." does
+// not support reasoning_effort "off". Only models that can turn thinking off
+// accept it.` A client asking for no thinking must therefore get the lowest
+// level instead; writing "off" kills the whole turn.
+function commandCodeCanDisableThinking(model) {
+  return String(model || "").toLowerCase().startsWith("deepseek/");
+}
 export function getCapabilitiesForModel(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
   const baseModel = model.includes("/") ? model.split("/").pop() : model;
 
-  // CommandCode wire is /alpha/generate for every model. Family patterns
-  // (deepseek-v4 → thinkingFormat:deepseek, vision:false) must not win here.
+  // CommandCode's wire is OpenAI-shaped NDJSON on both the provider surface and
+  // the CLI lane; family patterns (deepseek-v4 → thinkingFormat:deepseek,
+  // vision:false) must not win here.
   if (provider === "commandcode" || provider === "cmc") {
     const providerCaps = PROVIDER_CAPABILITIES.commandcode;
-    if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
-    if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
+    const exact = providerCaps?.[model] || providerCaps?.[baseModel];
+    // Apply the provider-wide disable rule before the exact entry so an entry
+    // that only pins limits still gets the right thinking contract.
+    if (exact) return { ...DEFAULT_CAPABILITIES, thinkingCanDisable: commandCodeCanDisableThinking(model), ...exact };
+    if (isCommandCodeNoReasoning(model)) {
+      // 64K is the documented per-request ceiling for the System-One lane
+      // (32K state + the longest question); it takes text/JSON state only.
+      return { ...DEFAULT_CAPABILITIES, vision: false, contextWindow: 64000 };
+    }
     return {
       ...DEFAULT_CAPABILITIES,
       reasoning: true,
       thinkingFormat: "commandcode",
       thinkingEffortSupported: true,
+      thinkingCanDisable: commandCodeCanDisableThinking(model),
       vision: !isCommandCodeTextOnly(model),
       contextWindow: 1000000,
-      maxOutput: 384000,
+      // The envelopes validate max_tokens as <= 200000 ("Too big: expected number
+      // to be <=200000 at params.max_tokens", verified live: 200000 accepted,
+      // 200001 rejected), so advertise the schema limit rather than the model's
+      // larger nominal window — a client that sizes the budget from the advertised
+      // capability would otherwise get every turn rejected with a 400.
+      maxOutput: 200000,
     };
   }
 

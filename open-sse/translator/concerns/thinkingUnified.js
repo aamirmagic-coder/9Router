@@ -129,6 +129,11 @@ const NATIVE_ONLY_FORMATS = new Set(["gemini-level", "gemini-budget", "claude-bu
 
 function resolveFormat(targetFormat, model, provider) {
   if (targetFormat === "commandcode") return "commandcode";
+  // Command Code's provider surface (the registry default) takes
+  // reasoning_effort top-level, the same as any OpenAI body, but validates the
+  // value against its own enum; only the CLI envelope nests it under params
+  // (see openai-to-commandcode.js).
+  if (provider === "commandcode" || provider === "cmc") return "openai-commandcode";
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
   const caps = getCapabilitiesForModel(provider, model);
@@ -171,6 +176,18 @@ function normalizeOpenAILevel(level, supportedLevels) {
   if (supportedLevels?.includes(level)) return level;
   if (level === "ultra" && supportedLevels?.includes("max")) return "max";
   return "xhigh";
+}
+
+// Command Code's provider surface validates reasoning_effort against its own
+// enum — off|low|medium|high|xhigh|max. Its disable token is "off" (not the
+// gateway's "none"), and "minimal" is not in the enum at all, so the gateway's
+// vocabulary is mapped onto the provider's before the field is written.
+const COMMANDCODE_EFFORT = ["off", "low", "medium", "high", "xhigh", "max"];
+const COMMANDCODE_EFFORT_ALIAS = { auto: "high", minimal: "low", ultra: "max" };
+
+function toCommandCodeEffort(level) {
+  const mapped = COMMANDCODE_EFFORT_ALIAS[level] || level;
+  return COMMANDCODE_EFFORT.includes(mapped) ? mapped : null;
 }
 
 function toGeminiThinkingLevel(cfg) {
@@ -267,6 +284,14 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
       if (level) body.reasoning_effort = normalizeOpenAILevel(level, supportedLevels);
+      break;
+    }
+    case "openai-commandcode": {
+      // Same top-level field as "openai", narrower vocabulary: "off" disables.
+      if (none && canDisable) { body.reasoning_effort = "off"; break; }
+      const level = toLevel(eff);
+      const effort = level ? toCommandCodeEffort(level) : null;
+      if (effort) body.reasoning_effort = effort;
       break;
     }
     case "openai-responses": {

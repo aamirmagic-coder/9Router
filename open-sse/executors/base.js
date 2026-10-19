@@ -97,7 +97,9 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
+  // fetchOptions: extra request options for this executor's own `proxyAwareFetch`
+  // call (e.g. a dispatcher), the request shape itself excluded.
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null, fetchOptions = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -144,6 +146,7 @@ export class BaseExecutor {
         const fetchT0 = Date.now();
         dbg("FETCH", `${this.provider.toUpperCase()} → ${url} | body=${bodyStr.length}B | connectTimeout=${timeoutMs}ms`);
         const response = await proxyAwareFetch(url, {
+          ...fetchOptions,
           method: "POST",
           headers,
           body: bodyStr,

@@ -61,7 +61,18 @@ const USAGE_EXTRACTORS = {
   commandcode(raw) {
     const input = n(raw.inputTokens), output = n(raw.outputTokens);
     const total = typeof raw.totalTokens === "number" ? raw.totalTokens : input + output;
-    return { promptTokens: input, completionTokens: output, totalTokens: total };
+    // inputTokens already counts the cached prefix (verified live: cacheRead(N)
+    // ≈ inputTokens(N-1)), which is exactly 9router's inclusive convention —
+    // the cache counters ride along as subsets, not as extra prompt tokens.
+    const details = raw.inputTokenDetails;
+    // AI SDK v5 carries the cache read at top level (`cachedInputTokens`) in some
+    // builds and nested under `inputTokenDetails` in others. The nested shape is
+    // the one verified live here, so it wins when non-zero and the top-level
+    // alias fills the gap; without this a top-level-only event records 0 and the
+    // dashboard bills the cached prefix at the full input rate.
+    const cachedTokens = n(details?.cacheReadTokens) || n(raw.cachedInputTokens);
+    const cacheCreationTokens = details && typeof details.cacheWriteTokens === "number" ? details.cacheWriteTokens : 0;
+    return { promptTokens: input, completionTokens: output, totalTokens: total, cachedTokens, cacheCreationTokens };
   },
 };
 

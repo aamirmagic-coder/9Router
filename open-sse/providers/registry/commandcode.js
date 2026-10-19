@@ -19,12 +19,22 @@ export default {
   },
   category: "apikey",
   transport: {
-    baseUrl: "https://api.commandcode.ai/alpha/generate",
-    format: "commandcode",
+    // Provider surface first: it is the documented Provider API (OpenAI-shaped
+    // body, no CLI version gate). /alpha/generate is the CLI-only endpoint — it
+    // answers 403 upgrade_required when x-command-code-version is absent or below
+    // its minimum — and stays as the replay lane for turns the provider surface
+    // refuses. Neither surface owns the model verdicts: the Cloudflare edge that
+    // answers does, so the executor reconnects before reporting one.
+    baseUrl: "https://api.commandcode.ai/provider/v1/chat/completions",
+    cliUrl: "https://api.commandcode.ai/alpha/generate",
+    // The provider surface takes the OpenAI body. The CLI replay builds its own
+    // envelope, and the executor pins responseFormat to "commandcode" so both
+    // stream shapes run through the SSE translator.
+    format: "openai",
     forceStream: true,
     headers: {
-      "x-command-code-version": "0.25.7",
-      "x-cli-environment": "cli",
+      // Latest published CLI build (registry.npmjs.org/command-code/latest).
+      "x-command-code-version": "1.81.0",
     },
   },
   models: [
@@ -50,7 +60,15 @@ export default {
     { id: "stepfun/Step-3.7-Flash", name: "Step 3.7 Flash" },
     { id: "stepfun/Step-3.5-Flash", name: "Step 3.5 Flash" },
     { id: "nvidia/nemotron-3-ultra-550b-a55b", name: "Nemotron 3 Ultra" },
+    { id: "meta/muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor" },
+    { id: "meta/muse-spark-1.2-contributor", name: "Muse Spark 1.2 Contributor" },
+    { id: "meta/muse-spark-1.3", name: "Muse Spark 1.3" },
+    { id: "meta/muse-spark-1.2", name: "Muse Spark 1.2" },
   ],
+  // The live catalog is public and rotates; the list above is the offline seed
+  // and any id the account actually has is allowed through.
+  modelsFetcher: { url: "https://api.commandcode.ai/provider/v1/models", type: "commandcode" },
+  passthroughModels: true,
   features: {
     usage: true,
     usageApikey: true,

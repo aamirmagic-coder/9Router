@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
+import UsageLimitsPanel from "./UsageLimitsPanel";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -1373,6 +1374,11 @@ export default function ProviderLimits() {
                   <div className="text-center py-5">
                     <p className="text-xs text-text-muted">{quota.message}</p>
                   </div>
+                ) : conn.provider === "commandcode" ? (
+                  <UsageLimitsPanel
+                    quotas={visibleQuotas}
+                    onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
+                  />
                 ) : (
                   <QuotaTable
                     quotas={visibleQuotas}

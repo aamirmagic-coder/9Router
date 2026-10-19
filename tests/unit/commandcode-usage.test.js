@@ -41,11 +41,33 @@ const SUBS = {
 };
 
 function mockHappyPath() {
+  mockUsage({});
+}
+
+// Live-shape payload for a Go v1 subscription: 7.5633222903 of a 10-credit
+// monthly allowance left, so the provider's own dashboard reads 24%.
+const GO_V1_CREDITS = {
+  credits: { monthlyCredits: 7.5633222903, purchasedCredits: 0, freeCredits: 0 },
+  windowLimits: {
+    fiveHour: { used: 1.1345262453, cap: 3, resetAt: 1791893425711 },
+    weekly: { used: 2.4366777097, cap: 6, resetAt: 1792397174201 },
+  },
+};
+const GO_V1_SUBS = {
+  data: {
+    planId: "individual-go-v1",
+    currentPeriodStart: "2026-10-10T02:30:18.000Z",
+    currentPeriodEnd: "2026-11-10T02:30:18.000Z",
+  },
+};
+
+function mockUsage({ planId, credits = CREDITS }) {
   proxyAwareFetch.mockImplementation(async (url) => {
     const u = String(url);
+    const subs = planId ? { data: { ...SUBS.data, planId } } : SUBS;
     if (u.includes("/alpha/whoami")) return jsonResponse(WHOAMI);
-    if (u.includes("/alpha/billing/credits")) return jsonResponse(CREDITS);
-    if (u.includes("/alpha/billing/subscriptions")) return jsonResponse(SUBS);
+    if (u.includes("/alpha/billing/credits")) return jsonResponse(credits);
+    if (u.includes("/alpha/billing/subscriptions")) return jsonResponse(subs);
     return jsonResponse({ error: "unexpected " + u }, 404);
   });
 }
@@ -117,6 +139,36 @@ describe("getUsageForProvider(commandcode)", () => {
     });
     expect(usage.message).toMatch(/auth|key|login/i);
   });
+
+  it("reads a percentage for the Go v1 plan instead of reporting it unlimited", async () => {
+    mockUsage({ planId: "individual-go-v1", credits: GO_V1_CREDITS });
+    const usage = await getUsageForProvider({
+      provider: "commandcode",
+      apiKey: "user_test",
+    });
+
+    expect(usage.plan).toBe("Go");
+    const credits = usage.quotas.Credits;
+    expect(credits.unlimited).toBe(false);
+    expect(credits.isCreditBalance).toBe(false);
+    expect(credits.total).toBe(10);
+    expect(credits.used).toBeCloseTo(2.4366777097, 6);
+    // What the provider's own dashboard shows for the same month.
+    expect(Math.round((credits.used / credits.total) * 100)).toBe(24);
+  });
+
+  it("reports an unmapped plan as a balance, never as unlimited", async () => {
+    mockUsage({ planId: "individual-something-new" });
+    const usage = await getUsageForProvider({
+      provider: "commandcode",
+      apiKey: "user_test",
+    });
+
+    // Fixture balance is 14 credits and the cap is unknown.
+    expect(usage.quotas.Credits.unlimited).toBe(true);
+    expect(usage.quotas.Credits.isCreditBalance).toBe(true);
+    expect(usage.quotas.Credits.total).toBe(14);
+  });
 });
 
 describe("parseQuotaData(commandcode)", () => {
@@ -131,5 +183,21 @@ describe("parseQuotaData(commandcode)", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ name: "Credits", used: 56, total: 70 });
     expect(rows[1]).toMatchObject({ name: "Session (5h)", used: 2, total: 10 });
+  });
+
+  it("keeps an unmapped plan's credits row flagged as a balance", () => {
+    const rows = parseQuotaData("commandcode", {
+      plan: "individual-something-new",
+      quotas: {
+        Credits: {
+          used: 0,
+          total: 7.5633222903,
+          unlimited: true,
+          isCreditBalance: true,
+          resetAt: "2026-11-10T02:30:18.000Z",
+        },
+      },
+    });
+    expect(rows[0]).toMatchObject({ name: "Credits", unlimited: true, isCreditBalance: true });
   });
 });

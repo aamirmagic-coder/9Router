@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { injectReasoningContent } from "../../open-sse/utils/reasoningContentInjector.js";
 import { OpenCodeExecutor } from "../../open-sse/executors/opencode.js";
+import { CommandCodeExecutor } from "../../open-sse/executors/commandcode.js";
 
 const assistantWithToolCall = {
   role: "assistant",
@@ -154,6 +155,53 @@ describe("OpenCodeExecutor — issue #1543 regression", () => {
       "deepseek-v4-flash-free",
       bodyWith([{ role: "user", content: "hi" }, assistantWithToolCall]),
     );
+    const assistant = out.messages.find((m) => m.role === "assistant");
+    expect(assistant.reasoning_content).toBeDefined();
+  });
+});
+
+describe("CommandCodeExecutor — reflection reasoning round-trip", () => {
+  // The gateway validates every earlier assistant message of this family
+  // ("Missing required parameter: 'messages[N].reasoning_content'"). Clients in
+  // OpenAI format keep no reasoning to echo, so the placeholder is what makes
+  // the second turn of a tool-using conversation replayable at all.
+  const reflectionBody = () => ({
+    model: "reflection/beam:free",
+    stream: true,
+    max_tokens: 1024,
+    messages: [
+      { role: "user", content: "step one" },
+      { role: "assistant", content: "answer" },
+      assistantWithToolCall,
+    ],
+  });
+
+  it("injects reasoning_content on every assistant message of the family", () => {
+    const out = injectReasoningContent({ provider: "commandcode", model: "reflection/beam:free", body: reflectionBody() });
+    const assistants = out.messages.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(2);
+    for (const assistant of assistants) {
+      expect(typeof assistant.reasoning_content).toBe("string");
+      expect(assistant.reasoning_content.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("preserves a reasoning_content the caller did send", () => {
+    const original = "the model's own earlier reasoning";
+    const body = reflectionBody();
+    body.messages[1].reasoning_content = original;
+    const out = injectReasoningContent({ provider: "commandcode", model: "reflection/beam:free", body });
+    expect(out.messages[1].reasoning_content).toBe(original);
+  });
+
+  it("leaves the other Command Code models untouched", () => {
+    const out = injectReasoningContent({ provider: "commandcode", model: "zai-org/GLM-5.2", body: reflectionBody() });
+    expect(out.messages[1].reasoning_content).toBeUndefined();
+  });
+
+  it("CommandCodeExecutor.transformRequest runs the injector", () => {
+    const executor = new CommandCodeExecutor();
+    const out = executor.transformRequest("reflection/beam:free", reflectionBody(), true, {});
     const assistant = out.messages.find((m) => m.role === "assistant");
     expect(assistant.reasoning_content).toBeDefined();
   });

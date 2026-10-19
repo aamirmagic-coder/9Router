@@ -197,7 +197,7 @@ describe("openaiToCommandCodeRequest — native image blocks", () => {
 
     expect(out.params.messages[0].content).toEqual([
       { type: "text", text: "what color?" },
-      { type: "image", image: DATA_URI, mimeType: "image/png" },
+      { type: "image", image: DATA_URI, mimeType: "image/png", mediaType: "image/png" },
     ]);
   });
 
@@ -212,7 +212,7 @@ describe("openaiToCommandCodeRequest — native image blocks", () => {
     }, true);
 
     expect(out.params.messages[0].content).toEqual([
-      { type: "image", image: DATA_URI, mimeType: "image/png" },
+      { type: "image", image: DATA_URI, mimeType: "image/png", mediaType: "image/png" },
     ]);
   });
 
@@ -231,5 +231,48 @@ describe("openaiToCommandCodeRequest — native image blocks", () => {
       .filter((b) => b.type === "text")
       .map((b) => b.text);
     expect(texts).not.toContain("[image omitted]");
+  });
+});
+
+describe("openaiToCommandCodeRequest — output budget", () => {
+  // Live upstream (2026-10-13): params.max_tokens <= 200000 is validated, 200001
+  // answers 400 "Too big: expected number to be <=200000 at params.max_tokens".
+  // Clients size the field from the advertised 1M-context capability, so a request
+  // that follows the catalog must not be the one the upstream rejects.
+  it("clamps an oversized max_output_tokens to the upstream limit", () => {
+    const out = openaiToCommandCodeRequest(MODEL, {
+      messages: [{ role: "user", content: "hi" }],
+      max_output_tokens: 1000000,
+    }, true);
+
+    expect(out.params.max_tokens).toBe(200000);
+  });
+
+  it("clamps an oversized max_tokens to the upstream limit", () => {
+    const out = openaiToCommandCodeRequest(MODEL, {
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 384000,
+    }, true);
+
+    expect(out.params.max_tokens).toBe(200000);
+  });
+
+  it("leaves a budget inside the limit untouched", () => {
+    const out = openaiToCommandCodeRequest(MODEL, {
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 8192,
+    }, true);
+
+    expect(out.params.max_tokens).toBe(8192);
+  });
+
+  it("falls back to the default budget when the client sends none", () => {
+    const out = openaiToCommandCodeRequest(MODEL, {
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 0,
+    }, true);
+
+    expect(out.params.max_tokens).toBeGreaterThan(0);
+    expect(out.params.max_tokens).toBeLessThanOrEqual(200000);
   });
 });

@@ -81,6 +81,7 @@ export function createResponsesApiTransformStream(logger = null) {
   
   const emit = (controller, eventType, data) => {
     data.sequence_number = nextSeq();
+    data.type = eventType; // ensure required "type" key for OpenCode decoder
     const output = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
     logger?.logOutput(output.trim());
     controller.enqueue(encoder.encode(output));

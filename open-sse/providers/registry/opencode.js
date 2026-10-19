@@ -32,6 +32,13 @@ export default {
     // upstreams, breaking DF-9ROUTER-11/16's pinned wire contract. Removed at
     // the v0.5.81 merge; revisit if upstream's executor path changes.
     noAuth: true,
+    // Zen reasoning models reject multi-turn history whose assistant messages
+    // carry no reasoning_content (400 missing_required_parameter), and the
+    // response pipeline strips the field before it reaches the client, so the
+    // echo can never come from the client. Inject a placeholder instead.
+    reasoningInject: {
+      scope: "all",
+    },
     quirks: {
       forceAutoToolChoiceModels: ["muse-spark-1.3-contributor-free"],
     },

@@ -181,8 +181,10 @@ describe("fresh-install model catalog (DF-9ROUTER-2)", () => {
 
     expect(list).toContain("anthropic/claude-sonnet-4-20250514");
     expect(list).not.toContain("deepseek/deepseek-v4-flash");
-    // Only providers with a configured connection are listed on this path.
-    expect(list).not.toContain("oc/muse-spark-1.2-contributor-free");
+    // Upstream #3115 (v0.5.104): no-auth free providers get a virtual
+    // "noauth" connection, so their models stay listed even once a real
+    // provider is connected — only credential-required providers stay hidden.
+    expect(list).toContain("oc/muse-spark-1.2-contributor-free");
   });
 
   it("GET /v1/models hides credential-required and vendor-client-only static models on a fresh install", async () => {

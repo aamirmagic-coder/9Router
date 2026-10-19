@@ -93,6 +93,7 @@ export async function deleteProviderNode(id) {
     removed = rowToNode(row);
     const d = stampDelete(db);
     db.run(`UPDATE providerNodes SET ${d.set} WHERE id = ?`, [...d.params, id]);
+    db.run(`DELETE FROM kv WHERE scope = 'customModels' AND key LIKE ?`, [`${id}|%`]);
   });
   return removed;
 }

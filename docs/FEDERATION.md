@@ -114,7 +114,7 @@ All `FEDERATION_*` vars are optional. Defaults live in
 | `DATA_DIR` | Per-instance (each instance has its own SQLite replica). In Docker, one volume per instance. |
 | `PORT` | Per-instance (each instance listens on its own port). |
 | `JWT_SECRET` | **Share across all instances.** Dashboard sessions are signed with it; a mismatched secret makes the dashboard on one instance reject sessions issued by another. |
-| `API_KEY_SECRET` | **Share across all instances.** API keys are derived from it; a mismatch makes `/v1` keys issued on central invalid on edges (and vice versa). |
+| `API_KEY_SECRET` | **Share across all instances.** API keys are derived from it; a mismatch makes `/v1` keys issued on central invalid on edges (and vice versa). It is a server-side HMAC/signing secret only — minted `sk-…` client keys are what remote callers send; the secret itself is never a valid client credential. |
 | `INITIAL_PASSWORD` | Share if you want the same first-login password everywhere. |
 | `MACHINE_ID_SALT` | Share if machine-id-derived values (e.g. default `FEDERATION_EDGE_ID`) must be stable across instances. |
 | `BASE_URL` / `NEXT_PUBLIC_BASE_URL` | Per-instance public URL (used by internal sync jobs / UI links). |
@@ -123,7 +123,7 @@ All `FEDERATION_*` vars are optional. Defaults live in
 > (`/v1`, `/v1beta`, `/api/v1`, `/api/v1beta`, `/codex`, `/responses` — `PUBLIC_PREFIXES` in
 > `src/dashboardGuard.js`) are public at the *dashboard* layer but authenticate
 > separately: a request from a non-loopback peer with no valid key gets
-> `401 {"error":"API key required for remote API access"}` unless the effective
+> `401 {"error":{"message":"API key required for remote API access","type":"authentication_error","code":"invalid_api_key"}}` unless the effective
 > `requireApiKey` setting is exactly `false` (set `REQUIRE_API_KEY=false` — the
 > `.env.example` default, honored on remote routes since QA-9ROUTER-5). Keys are
 > derived from `API_KEY_SECRET` above, so **one key works on central and on
@@ -306,7 +306,8 @@ curl http://localhost:20129/api/federation/local-status
 
 # b) /v1 keeps serving from the local replica. /v1 is a REMOTE API surface:
 #    a non-loopback caller with no valid key gets
-#    401 {"error":"API key required for remote API access"}.
+#    401 {"error":{"message":"API key required for remote API access",
+#    "type":"authentication_error","code":"invalid_api_key"}}.
 #    Prerequisite — create ONE key (dashboard → Endpoint → API Keys, or the
 #    login + POST /api/keys recipe in docs/api-reference.md) and use it
 #    everywhere: keys are derived from the shared API_KEY_SECRET (§3), so
@@ -361,9 +362,9 @@ curl -i http://localhost:20129/v1/models -H "Authorization: Bearer $KEY"
 | Edge stays LINKED but `/v1` 502s | `FEDERATION_CENTRAL_URL` unreachable from the edge (firewall, DNS, TLS). Check `curl https://central/api/federation/verify` with the token. |
 | **`/api/federation/status` (or any federation API call) 401s with your own token** | Two causes, in this order. **(1) You are not talking to the compose central** — something else already serves that host port (an existing 9router install, a stale stack), so its `FEDERATION_TOKEN` is a different secret and every call 401s while the container you meant to hit is fine. Check what is published (`docker compose -p 9router-federation -f docker-compose.federation.yml ps`) and what is actually listening (`ss -tlnp \| grep <port>`), then either re-run the stack on override ports (§6.1) or stop the other instance. **(2) The container was booted with a different `FEDERATION_TOKEN` than your shell's** — compare `docker compose -p 9router-federation -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN` with `$FEDERATION_TOKEN`; fix `.env` and `docker compose -p 9router-federation -f docker-compose.federation.yml up -d` again (a re-`up` recreates the containers with the corrected value). Only after both are ruled out is regenerating the token (§6.5) the fix. |
 | `curl: (6) Could not resolve host: edge` | There is no `edge` service. The compose services are `central` / `edge-a` / `edge-b`: from the host use `localhost:<published port>` (defaults 20128 / 20129 / 20130), from inside `federation_net` use `http://edge-a:20128`. |
-| `/v1` 401 `{"error":"API key required for remote API access"}` | The caller is remote (not loopback as the instance sees it) and presented no valid API key. Create one (dashboard → Endpoint → API Keys, or the login + `POST /api/keys` recipe in `docs/api-reference.md`) and send it as `Authorization: Bearer <key>`, `x-api-key`, `x-goog-api-key` or `?key=` — a key from any instance works on all of them (§3 shares `API_KEY_SECRET`). Only `requireApiKey: false` (`REQUIRE_API_KEY=false`) allows the remote call keyless. See §5.2. |
+| `/v1` 401 `{"error":{"message":"API key required for remote API access","type":"authentication_error","code":"invalid_api_key"}}` | The caller is remote (not loopback as the instance sees it) and presented no valid API key. Create one (dashboard → Endpoint → API Keys, or the login + `POST /api/keys` recipe in `docs/api-reference.md`) and send it as `Authorization: Bearer <key>`, `x-api-key`, `x-goog-api-key` or `?key=` — a key from any instance works on all of them (§3 shares `API_KEY_SECRET` — that shared secret is what makes minted keys portable; the secret itself is not a client key). Only `requireApiKey: false` (`REQUIRE_API_KEY=false`) allows the remote call keyless. See §5.2. |
 | Dashboard sessions break across instances | `JWT_SECRET` mismatch. |
-| `/v1` keys invalid on edges | `API_KEY_SECRET` mismatch. |
+| `/v1` keys invalid on edges | `API_KEY_SECRET` mismatch (keys are derived from it). Note `API_KEY_SECRET` itself is a server-side signing secret, never a client key — see §3.1. |
 | Edge never catches up (`revisionLag` grows) | `FEDERATION_SYNC_INTERVAL_MS` too high, or central overloaded. Check central logs for slow delta builds. |
 | `SCHEMA_BLOCKED` (see below) | Edge migration version < central's. Upgrade the edge image. |
 | Writes marked `failed` in the queue | Replay 409'd twice (stale fence) or 4xx. Check `pendingWrites.last_error` via diagnostics. |

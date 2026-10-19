@@ -97,6 +97,21 @@ Result: Never stop coding, minimal cost + 20-40% token savings via RTK
 
 **1. Install globally — upstream build only (no federation):**
 
+> ⚠️ **Prerequisite:** Node.js ≥ 22 is required before running `npm`. On fresh
+> bunker/SSH-only boxes the OS image ships `git` + `docker` but **not** `node` or
+> `npm`. Rescue path — download the Node tarball, extract into `$HOME` and prepend
+> it to your `PATH`:
+>
+> ```bash
+> # Example (adjust ARCH=x64 or arm64):
+> curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz \
+>   | tar -xJ -C $HOME
+> export PATH=$HOME/node-v22.14.0-linux-x64/bin:$PATH
+> node -v && npm -v  # verify
+> ```
+>
+> After the toolchain is in place, continue below.
+
 ```bash
 npm install -g 9router
 9router
@@ -149,6 +164,11 @@ PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
 Restart the server after adding a provider connection — running config is loaded at boot.
+
+> Note (removing an install): stop the dev server first (`pkill next-server` or
+> Ctrl-C in its terminal) before deleting the directory. The `bunkerd destroy`
+> gate refuses to remove an install with live processes running and names them
+> in the error — this is intentional protection, not a failure.
 
 > ⚠️ In a copied or relocated tree `npm run dev` can fail before the server
 > starts, with Turbopack complaining `Symlink [project]/node_modules/... points
@@ -308,7 +328,7 @@ Verified in source AND live against a fresh instance (2026-09-17):
   `401 {"error":"Unauthorized"}` (confirmed live). The dashboard UI is never needed.
 - Passwords: with `INITIAL_PASSWORD` unset and no stored password, the built-in
   default is `123456` for a loopback session. `.env.example` ships
-  `INITIAL_PASSWORD=change-me`, which replaces that default — posting `123456` then
+  `INITIAL_PASSWORD=change-me-to-a-strong-password`, which replaces that default — posting `123456` then
   answers `401 {"error":"INITIAL_PASSWORD is set — the default password (123456) is
   disabled."}` (`src/app/api/auth/login/route.js:99-106`). Send your
   `INITIAL_PASSWORD` value instead.
@@ -330,7 +350,7 @@ PORT=20129 node cli/cli.js --skip-update --no-browser -t &
 curl -s -c cookies.txt -X POST http://localhost:20129/api/auth/login \
   -H "Content-Type: application/json" -d '{"password":"123456"}'
 # → 200 {"success":true,"mustChangePassword":false}   (INITIAL_PASSWORD unset —
-#    send that value instead when .env sets it, e.g. "change-me")
+#    send that value instead when .env sets it, e.g. "change-me-to-a-strong-password")
 
 # 3. Register a local Ollama provider — the one provider that needs no credential
 curl -s -b cookies.txt -X POST http://localhost:20129/api/providers \
@@ -1493,6 +1513,24 @@ Vertex Partner (Anthropic / DeepSeek / GLM / Qwen via Vertex):
   vertex-partner/qwen/qwen3-next-80b-a3b-thinking-maas
 ```
 
+For a raw Google Cloud API-key connection, set the following through
+`PUT /api/providers/<connection-id>` to select the global endpoint:
+
+```json
+{
+  "providerSpecificData": {
+    "projectId": "YOUR_GOOGLE_CLOUD_PROJECT_ID",
+    "location": "global"
+  }
+}
+```
+
+With an explicit project, API-key requests honor `location` and default to
+`global` when it is omitted. Connections without an explicit project retain
+the projectless endpoint. Gemini 4 Argon supports `global`, `us`, and `eu`,
+not regional locations such as `europe-west1`; see
+[Google's supported locations](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/4-argon).
+
 **Pro Tip:** New Google Cloud accounts get $300 credits free for 90 days. Plenty for daily coding.
 
 </details>
@@ -1733,11 +1771,11 @@ docker pull decolua/9router:latest   # update to latest
 | `CLOUD_URL`                                          | `https://9router.com`                    | Dashboard URL used by the CLI endpoint presets and URL matching                               |
 | `NEXT_PUBLIC_BASE_URL`                               | `http://localhost:3000`                  | Backward-compatible/public base URL (prefer `BASE_URL` for server runtime)          |
 | `NEXT_PUBLIC_CLOUD_URL`                              | `https://9router.com`                    | Backward-compatible/public dashboard URL fallback (prefer `CLOUD_URL`)             |
-| `API_KEY_SECRET`                                     | `endpoint-proxy-api-key-secret`          | HMAC secret for generated API keys                                                  |
+| `API_KEY_SECRET`                                     | `endpoint-proxy-api-key-secret`          | Server-side HMAC secret used to derive and validate generated API keys. **This is not a client credential — never send it as `Authorization: Bearer <API_KEY_SECRET>` to `/v1`.** Remote clients must use an active API key minted in the dashboard (Endpoint → API Keys) or via login + `POST /api/keys` (keys look like `sk-…`). |
 | `MACHINE_ID_SALT`                                    | `endpoint-proxy-salt`                    | Salt for stable machine ID hashing                                                  |
 | `ENABLE_REQUEST_LOGS`                                | `false`                                  | Enables request/response logs under `logs/`                                         |
 | `AUTH_COOKIE_SECURE`                                 | `false`                                  | Force `Secure` auth cookie (set `true` behind HTTPS reverse proxy)                  |
-| `REQUIRE_API_KEY`                                    | `false`                                  | API-key enforcement on the public LLM API (`/v1`, `/v1beta`, `/api/v1`, `/api/v1beta`, `/codex`, `/responses`) for remote clients. `true` = a remote client must send a valid key (trusted-local clients still pass the dashboard gate, and the LLM handlers layer their own key check on top while it is `true`); `false` = a remote client may call the LLM API with no key. Unset = the stored setting applies, whose default is `true` (secure). `.env.example` ships `false` for local use — set `true` before exposing the gateway to the internet (recommended for internet-exposed deploys). |
+| `REQUIRE_API_KEY`                                    | `false`                                  | API-key enforcement on the public LLM API (`/v1`, `/v1beta`, `/api/v1`, `/api/v1beta`, `/codex`, `/responses`) for remote clients. `true` = a remote client must send a valid key (trusted-local clients still pass the dashboard gate, and the LLM handlers layer their own key check on top while it is `true`); `false` = a remote client may call the LLM API with no key. Unset = the stored setting applies, whose default is `true` (secure). `.env.example` ships `false` for local use — set `true` before exposing the gateway to the internet (recommended for internet-exposed deploys). This opt-out is a deployment setting only — it is never a reason to send `API_KEY_SECRET` as a client key; remote clients still use a minted `sk-…` API key when a key is needed. |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` | empty                                    | Optional outbound proxy for upstream provider calls                                 |
 | `SEARXNG_URL`                                        | `http://localhost:8888/search`           | Endpoint for the built-in unauthenticated SearXNG web-search provider               |
 
@@ -1879,7 +1917,7 @@ The list is synced from the provider registry (`open-sse/providers/registry/curs
 **First login not working**
 
 - Check `INITIAL_PASSWORD` in `.env`. If it is set (the `.env.example` default is
-  `change-me`), that value is the password — not the built-in fallback.
+  `change-me-to-a-strong-password`), that value is the password — not the built-in fallback.
 - Only when `INITIAL_PASSWORD` is completely unset does the built-in fallback
   `123456` apply (loopback sessions only). See "Headless / Docker first login"
   above for why a copied `.env.example` rejects `123456`.

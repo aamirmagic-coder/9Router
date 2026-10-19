@@ -10,6 +10,8 @@ Run 9Router in a container. Published image: [`decolua/9router`](https://hub.doc
 
 Before starting, create a local environment file and replace the example values. Set a non-default `INITIAL_PASSWORD` and long random `JWT_SECRET` and `API_KEY_SECRET` values; never use the example `change-me` values in a reachable deployment.
 
+> **`API_KEY_SECRET` is a server-side secret, not a client key.** The gateway uses it (an HMAC secret) to derive and validate the API keys it mints — clients must never send it as `Authorization: Bearer <API_KEY_SECRET>` against `/v1`. When your tools need a key, create one in the dashboard (Endpoint → API Keys) or with login + `POST /api/keys`; minted keys look like `sk-…`. In federation deployments, sharing `API_KEY_SECRET` across instances keeps minted client keys valid everywhere — it does not make the secret itself a client key.
+
 ```bash
 cp .env.example .env
 # Edit .env: set INITIAL_PASSWORD, JWT_SECRET, and API_KEY_SECRET.

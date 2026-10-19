@@ -39,6 +39,15 @@ vi.mock("@/lib/disabledModelsDb", () => ({
   getDisabledModels: mocks.getDisabledModels,
 }));
 
+// This file's charter is compatible-NODE prefix/alias mechanics. The static
+// no-auth free-provider surface (upstream #3115, v0.5.104) leaks oc/*, mmf/* …
+// ids into every expected listing, so it is silenced here — the free surface
+// has its own coverage in fresh-install-model-catalog-339.test.js.
+vi.mock("@/shared/constants/providers", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, FREE_PROVIDERS: {} };
+});
+
 const { GET, buildModelsListForRequest } = await import("../../src/app/api/v1/models/route.js");
 
 const OPENAI_NODE_ID = "openai-compatible-chat-9f0c2b1a-1111-4222-8333-444455556666";

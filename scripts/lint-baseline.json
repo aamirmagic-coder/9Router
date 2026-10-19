@@ -5,10 +5,10 @@
   "scope": "Full tree (`eslint .` from the repo root). Gitignored build output (`**/.next-cli-build/**`) is excluded in eslint.config.mjs and never baselined.",
   "totals": {
     "errors": 140,
-    "warnings": 215,
-    "problems": 355,
-    "filesLinted": 1455,
-    "filesWithProblems": 230
+    "warnings": 219,
+    "problems": 359,
+    "filesLinted": 1505,
+    "filesWithProblems": 234
   },
   "issues": {
     "gitbook/postcss.config.mjs|import/no-anonymous-default-export|1": 1,
@@ -54,6 +54,8 @@
     "open-sse/providers/registry/bai.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/baidu.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/bazaarlink.js|import/no-anonymous-default-export|1": 1,
+    "open-sse/providers/registry/bedrock-xai.js|import/no-anonymous-default-export|1": 1,
+    "open-sse/providers/registry/bedrock.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/black-forest-labs.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/blackbox.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/bluesminds.js|import/no-anonymous-default-export|1": 1,
@@ -114,6 +116,8 @@
     "open-sse/providers/registry/local-device.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/mimo-free.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/minimax-cn.js|import/no-anonymous-default-export|1": 1,
+    "open-sse/providers/registry/minimax-code-global.js|import/no-anonymous-default-export|1": 1,
+    "open-sse/providers/registry/minimax-code.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/minimax.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/mistral.js|import/no-anonymous-default-export|1": 1,
     "open-sse/providers/registry/mmf.js|import/no-anonymous-default-export|1": 1,

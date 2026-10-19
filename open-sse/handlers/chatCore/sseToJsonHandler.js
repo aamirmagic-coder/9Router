@@ -149,6 +149,10 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
   const first = chunks[0];
   const contentParts = [];
   const reasoningParts = [];
+  // Nonstandard `delta.reasoning` (some upstreams/relayers stream the thinking
+  // block under this key). Kept separate and used ONLY when no canonical
+  // `delta.reasoning_content` was seen, so a stream carrying both cannot double up.
+  const legacyReasoningParts = [];
   const toolCallMap = new Map(); // index -> { id, type, function: { name, arguments } }
   let finishReason = "stop";
   let usage = null;
@@ -158,6 +162,7 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
     const delta = choice?.delta || {};
     if (typeof delta.content === "string" && delta.content.length > 0) contentParts.push(delta.content);
     if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) reasoningParts.push(delta.reasoning_content);
+    else if (typeof delta.reasoning === "string" && delta.reasoning.length > 0) legacyReasoningParts.push(delta.reasoning);
     if (choice?.finish_reason) finishReason = choice.finish_reason;
     if (chunk?.usage && typeof chunk.usage === "object") usage = chunk.usage;
 
@@ -177,7 +182,8 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
   }
 
   const message = { role: "assistant", content: contentParts.join("") || (toolCallMap.size > 0 ? null : "") };
-  if (reasoningParts.length > 0) message.reasoning_content = reasoningParts.join("");
+  const reasoningText = reasoningParts.length > 0 ? reasoningParts.join("") : legacyReasoningParts.join("");
+  if (reasoningText.length > 0) message.reasoning_content = reasoningText;
   if (toolCallMap.size > 0) {
     message.tool_calls = [...toolCallMap.entries()].sort((a, b) => a[0] - b[0]).map(([, tc]) => tc);
   }

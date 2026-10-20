@@ -1,5 +1,26 @@
 # Unreleased
 
+- fix(providers): compatible-node edits now fix existing connections; the
+  connection API accepts the node prefix (DF-9ROUTER-63). Connections to
+  OpenAI-compatible / Anthropic-compatible / custom-embedding nodes snapshot
+  the node's `baseUrl`/`apiType` at create time, so correcting a node with
+  `PUT /api/provider-nodes/<id>` left every existing connection dialing the
+  old URL until each was recreated, and `POST /api/providers` demanded the
+  node's generated id — sending the user-chosen prefix returned a bare
+  `404 "OpenAI Compatible node not found"` that named no contract. Three
+  changes: (1) request-time credential resolution overlays the node's CURRENT
+  `baseUrl`/`apiType`/`prefix`/`nodeName` onto the stored snapshot (fail-open
+  to the snapshot if the node row is gone), so a node fix reaches existing
+  connections with no recreation; (2) the node PUT's snapshot re-sync no
+  longer writes a null `apiType` key onto anthropic/embedding connections;
+  (3) `POST /api/providers` resolves the node from the generated id OR the
+  prefix in either form (`pfx`, `openai-compatible-pfx`), stores the
+  connection under the node id, and a miss returns 404 with a message naming
+  both accepted forms and `GET /api/provider-nodes`. Contract documented in
+  `docs/ARCHITECTURE.md`. Tests:
+  `tests/unit/provider-node-update-propagation.test.js`,
+  `tests/unit/credentials-node-overlay.test.js`.
+
 - fix(api): /v1/* error envelope drift — OpenAI shapes on both pre-handler 404/401
   paths (DF-9ROUTER-56). Two paths answered shapes OpenAI SDK clients could not
   read: (1) a remote `/v1` request with a missing/invalid key got the dashboard

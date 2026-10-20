@@ -367,7 +367,14 @@ flowchart LR
 
 - `src/app/api/v1/*`, `src/app/api/v1beta/*`: compatibility APIs
 - `src/app/api/providers*`: provider CRUD, validation, testing
-- `src/app/api/provider-nodes*`: custom compatible node management
+- `src/app/api/provider-nodes*`: custom compatible node management. Contract
+  (DF-9ROUTER-63): the node is the source of truth for `baseUrl`/`apiType` —
+  PUT `/api/provider-nodes/<id>` re-syncs existing connections' snapshots, and
+  request-time credential resolution overlays the node's CURRENT values over
+  any stored snapshot, so fixing a node fixes existing connections without
+  recreating them. `POST /api/providers` accepts either the generated node id
+  or the node's prefix (bare or kind-qualified, e.g. `pfx` or
+  `openai-compatible-pfx`); a miss returns 404 naming both accepted forms.
 - `src/app/api/oauth/*`: OAuth/device-code flows
 - `src/app/api/keys*`: local API key lifecycle
 - `src/app/api/models/alias`: alias management

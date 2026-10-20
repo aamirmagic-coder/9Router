@@ -104,3 +104,44 @@ Gotchas (measured 2026-09-24, DF-9ROUTER-38..41):
   `FEDERATION_CENTRAL_URL`): the edge's replica carries the node, connection (credentials
   included), client key and full model import (96 ids, revisionLag 0) and serves chat +
   embeddings from the replica alone (`EDGE-SNAPSHOT-OK`).
+
+## Fresh install from the published package (verified on a clean machine, 2026-10-20)
+
+The artifact a new user touches is the npm package, not this repo. Measured on a bare
+Ubuntu 24.04 box (no Node runtime, no toolchain):
+
+```bash
+# 1. Node is a PREREQUISITE THE README OMITS (engines: node >=18):
+#    nodejs.org latest-v22.x linux-x64 tarball -> $HOME/node, export PATH="$HOME/node/bin:$PATH"  (~4 s)
+# 2. README:116
+npm install -g 9router                       # rc=0, ~10 s → binary `9router`
+9router --port 20128 --skip-update --no-browser    # /api/health 200 in ~6 s
+# 3. first login: the default password is the source fallback 123456 (not in the README)
+curl -s -X POST $URL/api/auth/login -H 'Content-Type: application/json' -d '{"password":"123456"}' -c cookies.txt
+curl -s -b cookies.txt -X POST $URL/api/keys -H 'Content-Type: application/json' -d '{"name":"my-client"}'
+```
+
+**Trap — a fresh install's `/v1/models` is a list of things that do not work.** With no
+provider configured it returns the whole static catalog (measured: 824 ids, 317 KB) and every
+id 404s on chat with `No active credentials for provider: <p>` (7 ms); the deliberately
+credentialless ids the server advertises (`mmf/mimo-auto`, `oc/*-free`) return 400 upstream
+(`ModelProtocolUnsupported` / `Unsupported model`). Save a provider node + connection first,
+then query models, then chat — and never cache the list: once a connection existed the same
+endpoint answered 5 ids, not 824. Filed as `DF-9ROUTER-2-R2` (recurrence of DF-9ROUTER-2/7/54).
+
+Source path (`README:158`): `git clone https://github.com/totalwindupflightsystems/9router.git`
+(~1 s, public) — but the default branch is the **upstream mirror** (`master`); the fork's
+feature work lives on `federation`. `npm install` in the clone: 594 packages, ~77 s.
+
+Timings from that run: health 2.45-3.60 ms warm, `/v1/models` (824 ids) 5.73-10.02 ms,
+`/login` 2.38-11.74 ms, `/dashboard` 307 @2.58 ms — nothing a user would notice.
+
+Full run report: `docs/dogfood/2026-10-20-published-package-fresh-install.md`.
+
+## Repo hygiene note
+
+`.gitignore:102` (`9router-*`) ignores new per-surface skill directories, so a new
+`skills/9router-<surface>/SKILL.md` cannot be added with a plain `git add` — the dogfood
+convention (12 tracked `9router-*` skill dirs) predates the rule. Add the surface section to
+this file instead, or amend the ignore rule deliberately.
+

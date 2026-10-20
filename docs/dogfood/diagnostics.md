@@ -570,3 +570,45 @@ No PERF row — nothing a user would notice.
 Board rows: DF-9ROUTER-48..51. No bunker leg this run (all las hosts
 unreachable / bunkerd stuck) — SKIPPED row filed; compensating fresh-daemon
 install proven on-host.
+
+## 17. Run 16b (2026-10-20, published npm 0.5.104, second angle of the same tick): the chained hop re-introduces the glued-SSE defect, and a fresh install can die silently
+
+Why this run exists: the same-day sibling (736dd292) proved the
+published-package fresh-machine angle (824 advertised ids, 0 completable —
+DF-9ROUTER-2-R2). This angle drove the CHAINED path: fresh v0.5.104 instance →
+live central v0.5.99 → real completion. The chain works when you know the
+incantation, and the wire shape it returns is broken in exactly the way
+DF-9ROUTER-55 described and DF-9ROUTER-62's failing force-stream tests predict.
+
+The mechanism, reproduced in one minute (docs/dogfood/2026-10-20-live-chain-sse-integration.md
+has the full table): central direct with no stream key → clean application/json;
+same body through a compat-node hop with no stream key → 200 text/event-stream
+with `data: [DONE]` glued to the JSON (jq: "Invalid numeric literal"); explicit
+`stream:false` → clean; `stream:true` → sentinel twice. The stream-absent shape
+is what every SDK sends, so the chained surface is broken for every real
+consumer at v0.5.104. The probable root cause is the same force-stream backport
+that broke the 8 CI tests (DF-9ROUTER-62) — two independent observations of one
+merge, one in CI, one on the wire.
+
+Two smaller traps a fresh operator hits that no surface documents:
+(1) connections snapshot the node's baseUrl/apiType at create time — correcting
+a node with PUT does not fix existing connections, and the connection POST
+wants the node's generated id (openai-compatible-chat-<uuid>), not the
+user-visible prefix; (2) fresh instances on a headless host die silently
+15-20 min after boot, twice in 50 minutes, empty logs, no kernel OOM — the
+launcher's tray/lifecycle path is the suspect and there is no flag to disable
+it. Restart persistence is solid, so the data survives; the process does not.
+
+The install leg ran the full ephemeral battery for the first time since the
+compose plugin gap was closed: toolchain-bootstrap now installs compose+buildx
+and fresh-install is a 2s OK. The ci-pass cell FAILED on the 15 pass→fail
+regressions (force-stream ×2 + security-audit source-audit ×12 + mimo live ×1)
+— same set as local, same root merge as the SSE defect above.
+
+Perf: nothing user-noticeable (health p50 3ms, models p50 7ms, chained chat
+1.2-7.9s upstream-bound). No PERF row.
+
+Board rows: DF-9ROUTER-55-R2 (P1 recurrence, chained glued-SSE), 
+DF-9ROUTER-63 (P2 node-connection snapshot + prefix/id contract),
+DF-9ROUTER-64 (P2 silent headless death), DF-9ROUTER-62 (P1, sibling's,
+extended with this run's wire-shape evidence as its upstream twin).

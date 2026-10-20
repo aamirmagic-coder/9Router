@@ -1,0 +1,15 @@
+{
+  "tick_id": "9router-foreman-2026-10-20-19-33-59",
+  "block_id": "DF-9ROUTER-64",
+  "wave_size": 1,
+  "reason": "block_drive selected DF-9ROUTER-64, but only its recurrence row DF-9ROUTER-55-R2 remained ready; no second independent ready row in the block",
+  "rows": [
+    {
+      "id": "DF-9ROUTER-55-R2",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-55-R2",
+      "branch": "wt/DF-9ROUTER-55-R2",
+      "commit": "86ae83562715cabfb9f2d08c0a1716aac2f3f23c",
+      "brief": "/tmp/DF-9ROUTER-55-R2-brief.txt"
+    }
+  ]
+}

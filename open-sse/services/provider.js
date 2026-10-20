@@ -1,5 +1,6 @@
 import { PROVIDERS } from "../config/providers.js";
 import { OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
+import { DEFAULT_REPLAY_POLICY, NON_REPLAYABLE, readReplayPolicy } from "../config/replayPolicy.js";
 
 const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 const OPENAI_COMPATIBLE_DEFAULTS = {
@@ -28,6 +29,12 @@ export function resolveOpenAICompatibleApiType(provider, credentials = null) {
   const stored = credentials?.providerSpecificData?.apiType;
   if (stored === "chat" || stored === "responses") return stored;
   return typeof provider === "string" && provider.includes("responses") ? "responses" : "chat";
+}
+
+export function resolveReplayPolicy(provider, credentials = null) {
+  if (!isOpenAICompatible(provider)) return DEFAULT_REPLAY_POLICY;
+  const stored = credentials?.providerSpecificData?.replayPolicy;
+  return readReplayPolicy(stored) === NON_REPLAYABLE ? NON_REPLAYABLE : DEFAULT_REPLAY_POLICY;
 }
 
 // Detect request format from body structure

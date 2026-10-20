@@ -6,6 +6,8 @@ import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
+import { NON_REPLAYABLE } from "../config/replayPolicy.js";
+import { hasDispatchStarted } from "../utils/dispatchState.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
@@ -275,6 +277,26 @@ export function getComboModelsFromData(modelStr, combosData) {
 }
 
 /**
+ * Resolve nested fusion members before any child request is started.
+ * The resolver returns { replayPolicy, models } for a direct model or combo.
+ */
+export async function findNonReplayableFusionMember(models, resolveMember, seen = new Set()) {
+  if (typeof resolveMember !== "function") return null;
+  for (const model of Array.isArray(models) ? models : []) {
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    const resolved = await resolveMember(model);
+    if (resolved?.replayPolicy === NON_REPLAYABLE) {
+      return { model, replayPolicy: NON_REPLAYABLE };
+    }
+    const nested = resolved?.models || resolved?.nestedModels;
+    const nestedMember = await findNonReplayableFusionMember(nested, resolveMember, seen);
+    if (nestedMember) return nestedMember;
+  }
+  return null;
+}
+
+/**
  * Handle combo chat with fallback
  * @param {Object} options
  * @param {Object} options.body - Request body
@@ -316,6 +338,11 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Success (2xx) - return response
       if (result.ok) {
         log.info("COMBO", `Model ${modelStr} succeeded`);
+        return result;
+      }
+
+      if (result.replayPolicy === NON_REPLAYABLE && hasDispatchStarted(result.dispatchState)) {
+        log.warn("COMBO", `Model ${modelStr} failed after dispatch; replay disabled`, { status: result.status });
         return result;
       }
 
@@ -365,6 +392,9 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Catch unexpected exceptions to ensure fallback continues
       lastError = error.message || String(error);
       if (!lastStatus) lastStatus = 500;
+      if (error.replayPolicy === NON_REPLAYABLE && hasDispatchStarted(error.dispatchState)) {
+        throw error;
+      }
       log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
     }
   }
@@ -553,7 +583,7 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
  * @param {Object} [options.tuning] - Override FUSION_DEFAULTS (minPanel, grace, timeout)
  * @returns {Promise<Response>}
  */
-export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning }) {
+export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, resolveReplayPolicy }) {
   const panel = Array.isArray(models) ? models.filter(Boolean) : [];
   if (panel.length === 0) {
     return new Response(
@@ -567,9 +597,17 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
     return handleSingleModel(body, panel[0]);
   }
 
+  const judge = judgeModel && judgeModel.trim() ? judgeModel.trim() : panel[0];
+  const incompatible = await findNonReplayableFusionMember([...panel, judge], resolveReplayPolicy);
+  if (incompatible) {
+    return new Response(
+      JSON.stringify({ error: { message: `Fusion combo cannot include non-replayable model: ${incompatible.model}` } }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   const cfg = { ...FUSION_DEFAULTS, ...(tuning || {}) };
   const minPanel = Math.min(Math.max(2, cfg.minPanel), panel.length);
-  const judge = judgeModel && judgeModel.trim() ? judgeModel.trim() : panel[0];
   log.info("FUSION", `Combo "${comboName}" | panel=${panel.length} [${panel.join(", ")}] | judge=${judge} | quorum=${minPanel}`);
 
   // 1. Fan out to the panel in parallel: non-streaming, tools stripped (we want prose).

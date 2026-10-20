@@ -232,6 +232,7 @@ export default function CombosPage() {
             <ComboCard
               key={combo.id}
               combo={combo}
+              combos={combos}
               getCaps={getCaps}
               activeProviders={activeProviders}
               copied={copied}
@@ -294,11 +295,61 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
+function findNonReplayableMember(model, activeProviders, combos, seen = new Set()) {
+  if (!model || seen.has(model)) return null;
+  seen.add(model);
+
+  const nestedCombo = combos.find((entry) => entry.name === model);
+  if (nestedCombo) {
+    for (const member of nestedCombo.models || []) {
+      const unsafe = findNonReplayableMember(member, activeProviders, combos, seen);
+      if (unsafe) return unsafe;
+    }
+    return null;
+  }
+
+  const prefix = model.includes("/") ? model.slice(0, model.indexOf("/")) : model;
+  const connection = activeProviders.find((entry) =>
+    entry.provider === prefix
+    || entry.prefix === prefix
+    || entry.providerSpecificData?.prefix === prefix
+  );
+  return connection?.replayPolicy === "non-replayable" || connection?.providerSpecificData?.replayPolicy === "non-replayable"
+    ? model
+    : null;
+}
+
+function ComboCard({ combo, combos = [], getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
+  const [strategyError, setStrategyError] = useState("");
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
+  const unsafeFusionMember = findNonReplayableMember(judge || combo.models[0], activeProviders, combos)
+    || combo.models.map((model) => findNonReplayableMember(model, activeProviders, combos)).find(Boolean);
+
+  const handleStrategyChange = (event) => {
+    const nextStrategy = event.target.value;
+    if (nextStrategy === "fusion" && unsafeFusionMember) {
+      setStrategyError(`Fusion is unavailable: ${unsafeFusionMember} is non-replayable after dispatch.`);
+      return;
+    }
+    setStrategyError("");
+    onSetStrategy({ fallbackStrategy: nextStrategy });
+  };
+
+  const handleJudgeSelect = (model) => {
+    const nextJudge = model?.value || "";
+    const unsafeJudge = findNonReplayableMember(nextJudge, activeProviders, combos);
+    if (unsafeJudge) {
+      setStrategyError(`Fusion is unavailable: ${unsafeJudge} is non-replayable after dispatch.`);
+      setShowJudgeSelect(false);
+      return;
+    }
+    setStrategyError("");
+    onSetStrategy({ judgeModel: nextJudge });
+    setShowJudgeSelect(false);
+  };
 
   return (
     <Card padding="sm" className="group">
@@ -357,7 +408,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             <Select
               options={STRATEGY_OPTIONS}
               value={current}
-              onChange={(e) => onSetStrategy({ fallbackStrategy: e.target.value })}
+               onChange={handleStrategyChange}
               selectClassName="py-1.5 text-xs"
             />
           </div>
@@ -391,6 +442,11 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             </button>
           </div>
         </div>
+        {(strategyError || (isFusion && unsafeFusionMember)) && (
+          <p className="text-xs text-red-500" role="alert">
+            {strategyError || `Fusion is unavailable: ${unsafeFusionMember} is non-replayable after dispatch.`}
+          </p>
+        )}
       </div>
 
       {/* Judge model picker (single-select; combo members make natural judges too) */}
@@ -398,7 +454,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
         <ModelSelectModal
           isOpen={showJudgeSelect}
           onClose={() => setShowJudgeSelect(false)}
-          onSelect={(m) => { onSetStrategy({ judgeModel: m?.value || "" }); setShowJudgeSelect(false); }}
+           onSelect={handleJudgeSelect}
           activeProviders={activeProviders}
           title="Select Judge Model"
           addedModelValues={judge ? [judge] : []}

@@ -34,12 +34,18 @@ const API_TYPE_OPTIONS = [
   { value: "responses", label: "Responses API" },
 ];
 
+const REPLAY_POLICY_OPTIONS = [
+  { value: "replayable", label: "Replayable (default)" },
+  { value: "non-replayable", label: "Non-replayable after dispatch" },
+];
+
 function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const config = VARIANT_CONFIG[variant];
   const initialFormData = () => ({
     name: "",
     prefix: "",
     ...(config.hasApiType ? { apiType: "chat" } : {}),
+    ...(config.hasApiType ? { replayPolicy: "replayable" } : {}),
     baseUrl: config.defaultBaseUrl,
   });
 
@@ -72,6 +78,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           name: formData.name,
           prefix: formData.prefix,
           ...(config.hasApiType ? { apiType: formData.apiType } : {}),
+          ...(config.hasApiType ? { replayPolicy: formData.replayPolicy } : {}),
           baseUrl: formData.baseUrl,
           type: config.type,
         }),
@@ -100,6 +107,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           baseUrl: formData.baseUrl,
           apiKey: checkKey,
           type: config.type,
+          ...(config.hasApiType ? { replayPolicy: formData.replayPolicy } : {}),
           modelId: checkModelId.trim() || undefined,
         }),
       });
@@ -157,6 +165,19 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
             value={formData.apiType}
             onChange={(e) => setFormData({ ...formData, apiType: e.target.value })}
           />
+        )}
+        {config.hasApiType && (
+          <>
+            <Select
+              label="Retry Policy"
+              options={REPLAY_POLICY_OPTIONS}
+              value={formData.replayPolicy}
+              onChange={(e) => setFormData({ ...formData, replayPolicy: e.target.value })}
+            />
+            <p className="text-sm text-text-muted">
+              Non-replayable stops account and combo retries after native dispatch begins.
+            </p>
+          </>
         )}
         <Input
           label="Base URL"

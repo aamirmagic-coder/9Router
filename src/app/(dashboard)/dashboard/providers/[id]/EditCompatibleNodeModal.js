@@ -9,6 +9,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
     name: "",
     prefix: "",
     apiType: "chat",
+    replayPolicy: "replayable",
     baseUrl: "https://api.openai.com/v1",
   });
   const [saving, setSaving] = useState(false);
@@ -23,6 +24,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
         name: node.name || "",
         prefix: node.prefix || "",
         apiType: node.apiType || "chat",
+        replayPolicy: node.replayPolicy || "replayable",
         baseUrl: node.baseUrl || (isAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"),
       });
     }
@@ -44,6 +46,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
       };
       if (!isAnthropic) {
         payload.apiType = formData.apiType;
+        payload.replayPolicy = formData.replayPolicy;
       }
       await onSave(payload);
     } finally {
@@ -61,6 +64,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
           baseUrl: formData.baseUrl,
           apiKey: checkKey,
           type: isAnthropic ? "anthropic-compatible" : "openai-compatible",
+          replayPolicy: isAnthropic ? undefined : formData.replayPolicy,
           modelId: checkModelId.trim() || undefined
         }),
       });
@@ -99,6 +103,22 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
             value={formData.apiType}
             onChange={(e) => setFormData({ ...formData, apiType: e.target.value })}
           />
+        )}
+        {!isAnthropic && (
+          <>
+            <Select
+              label="Retry Policy"
+              options={[
+                { value: "replayable", label: "Replayable (default)" },
+                { value: "non-replayable", label: "Non-replayable after dispatch" },
+              ]}
+              value={formData.replayPolicy}
+              onChange={(e) => setFormData({ ...formData, replayPolicy: e.target.value })}
+            />
+            <p className="text-sm text-text-muted">
+              Non-replayable stops account and combo retries after native dispatch begins.
+            </p>
+          </>
         )}
         <Input
           label="Base URL"
@@ -154,6 +174,7 @@ EditCompatibleNodeModal.propTypes = {
     prefix: PropTypes.string,
     apiType: PropTypes.string,
     baseUrl: PropTypes.string,
+    replayPolicy: PropTypes.oneOf(["replayable", "non-replayable"]),
   }),
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,

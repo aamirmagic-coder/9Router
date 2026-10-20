@@ -29,14 +29,21 @@ export function buildErrorBody(statusCode, message, diagnostics = {}) {
  * @param {string} message - Error message
  * @returns {Response} HTTP Response object
  */
-export function errorResponse(statusCode, message, diagnostics = {}) {
-  return new Response(JSON.stringify(buildErrorBody(statusCode, message, diagnostics)), {
+export function errorResponse(statusCode, message, diagnostics = {}, metadata = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*"
+  };
+  if (metadata.replayPolicy === "non-replayable" && metadata.dispatchState && metadata.dispatchState !== "pre-dispatch") {
+    headers["x-9router-no-replay"] = "1";
+  }
+  const response = new Response(JSON.stringify(buildErrorBody(statusCode, message, diagnostics)), {
     status: statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
-    }
+    headers
   });
+  if (metadata.dispatchState) response.dispatchState = metadata.dispatchState;
+  if (metadata.replayPolicy) response.replayPolicy = metadata.replayPolicy;
+  return response;
 }
 
 /**
@@ -57,7 +64,7 @@ export async function writeStreamError(writer, statusCode, message) {
  * @param {object} [executor] - Optional executor with parseError() override for provider-specific parsing
  * @returns {Promise<{statusCode: number, message: string, type?: string, param?: string, code?: string, request_id?: string, resetsAtMs?: number}>}
  */
-export async function parseUpstreamError(response, executor = null) {
+export async function parseUpstreamError(response, executor = null, dispatchContext = null) {
   let bodyText = "";
   try {
     bodyText = await response.text();
@@ -100,7 +107,8 @@ export async function parseUpstreamError(response, executor = null) {
     param: safeDiagnostic(parsed?.param) || diagnostics.param,
     code: safeDiagnostic(parsed?.code) || diagnostics.code,
     request_id: safeRequestId(response, parsed?.request_id || diagnostics.request_id),
-    resetsAtMs: parsed?.resetsAtMs
+    resetsAtMs: parsed?.resetsAtMs,
+    dispatchState: dispatchContext?.state || response?.dispatchState
   };
 }
 
@@ -122,13 +130,16 @@ function safeRequestId(response, value) {
  * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
  * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs, diagnostics = {}) {
+export function createErrorResult(statusCode, message, resetsAtMs, diagnostics = {}, metadata = {}) {
+  const response = errorResponse(statusCode, message, diagnostics, metadata);
   return {
     success: false,
     status: statusCode,
     error: message,
     resetsAtMs,
-    response: errorResponse(statusCode, message, diagnostics)
+    dispatchState: metadata.dispatchState,
+    replayPolicy: metadata.replayPolicy,
+    response
   };
 }
 

@@ -30,6 +30,65 @@ describe("fusion combo", () => {
     expect(handleSingleModel.mock.calls[0][1]).toBe("p/only");
   });
 
+  it("rejects a non-replayable panel member before fan-out", async () => {
+    const handleSingleModel = vi.fn(async () => okResponse("should-not-run"));
+    const resolveReplayPolicy = vi.fn(async (model) => ({
+      replayPolicy: model === "p/non-replayable" ? "non-replayable" : "replayable"
+    }));
+
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }] },
+      models: ["p/safe", "p/non-replayable"],
+      handleSingleModel,
+      resolveReplayPolicy,
+      log,
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: { message: "Fusion combo cannot include non-replayable model: p/non-replayable" }
+    });
+    expect(handleSingleModel).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-replayable member nested inside a fusion panel", async () => {
+    const handleSingleModel = vi.fn(async () => okResponse("should-not-run"));
+    const resolveReplayPolicy = vi.fn(async (model) => {
+      if (model === "combo/nested") return { replayPolicy: "replayable", models: ["p/safe", "p/non-replayable"] };
+      return { replayPolicy: model === "p/non-replayable" ? "non-replayable" : "replayable" };
+    });
+
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }] },
+      models: ["combo/nested", "p/other"],
+      handleSingleModel,
+      resolveReplayPolicy,
+      log,
+    });
+
+    expect(res.status).toBe(400);
+    expect(handleSingleModel).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-replayable judge before fan-out", async () => {
+    const handleSingleModel = vi.fn(async () => okResponse("should-not-run"));
+    const resolveReplayPolicy = vi.fn(async (model) => ({
+      replayPolicy: model === "p/judge" ? "non-replayable" : "replayable"
+    }));
+
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }] },
+      models: ["p/a", "p/b"],
+      handleSingleModel,
+      resolveReplayPolicy,
+      judgeModel: "p/judge",
+      log,
+    });
+
+    expect(res.status).toBe(400);
+    expect(handleSingleModel).not.toHaveBeenCalled();
+  });
+
   it("fans out to the panel then routes a synthesis turn to the judge", async () => {
     const seen = [];
     const handleSingleModel = vi.fn(async (body, model, isPanel) => {

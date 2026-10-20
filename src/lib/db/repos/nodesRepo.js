@@ -1,12 +1,14 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { normalizeReplayPolicy, readReplayPolicy } from "../../../../open-sse/config/replayPolicy.js";
 
 function rowToNode(row) {
   if (!row) return null;
   const extra = parseJson(row.data, {});
   return {
     ...extra,
+    replayPolicy: readReplayPolicy(extra.replayPolicy),
     id: row.id,
     type: row.type,
     name: row.name,
@@ -62,6 +64,7 @@ export async function createProviderNode(data) {
     prefix: data.prefix,
     apiType: data.apiType,
     baseUrl: data.baseUrl,
+    replayPolicy: normalizeReplayPolicy(data.replayPolicy),
     createdAt: now,
     updatedAt: now,
   };

@@ -4,6 +4,14 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
+import { readReplayPolicy, NON_REPLAYABLE } from "../config/replayPolicy.js";
+import {
+  canReplayRequest,
+  createDispatchContext,
+  getDispatchState,
+  markDispatchAttempted,
+  markDispatchCompleted,
+} from "../utils/dispatchState.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -97,7 +105,17 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, replayPolicy, dispatchContext = null }) {
+    const normalizedReplayPolicy = readReplayPolicy(replayPolicy);
+    const requestDispatch = dispatchContext || createDispatchContext();
+    if (!canReplayRequest(normalizedReplayPolicy, requestDispatch)) {
+      const error = new Error("Request already dispatched and is marked non-replayable");
+      error.code = "NO_REPLAY";
+      error.dispatchState = getDispatchState(requestDispatch);
+      error.replayPolicy = normalizedReplayPolicy;
+      throw error;
+    }
+
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -141,6 +159,7 @@ export class BaseExecutor {
         const bodyStr = JSON.stringify(transformedBody);
         const fetchT0 = Date.now();
         dbg("FETCH", `${this.provider.toUpperCase()} → ${url} | body=${bodyStr.length}B | connectTimeout=${timeoutMs}ms`);
+        markDispatchAttempted(requestDispatch);
         const response = await proxyAwareFetch(url, {
           method: "POST",
           headers,
@@ -148,21 +167,24 @@ export class BaseExecutor {
           signal: mergedSignal
         }, proxyOptions);
         clearTimeout(connectTimer);
+        markDispatchCompleted(requestDispatch);
         const ct = response.headers?.get?.("content-type") || "";
         const cl = response.headers?.get?.("content-length") || "?";
         dbg("FETCH", `${this.provider.toUpperCase()} ← ${response.status} | ttft=${Date.now() - fetchT0}ms | ct=${ct} | cl=${cl}`);
 
-        if (await tryRetry(urlIndex, response.status, `status ${response.status}`, response)) { urlIndex--; continue; }
+        if (canReplayRequest(normalizedReplayPolicy, requestDispatch) && await tryRetry(urlIndex, response.status, `status ${response.status}`, response)) { urlIndex--; continue; }
 
-        if (this.shouldRetry(response.status, urlIndex)) {
+        if (canReplayRequest(normalizedReplayPolicy, requestDispatch) && this.shouldRetry(response.status, urlIndex)) {
           log?.debug?.("RETRY", `${response.status} on ${url}, trying fallback ${urlIndex + 1}`);
           lastStatus = response.status;
           continue;
         }
 
-        return { response, url, headers, transformedBody };
+        return { response, url, headers, transformedBody, dispatchState: getDispatchState(requestDispatch), replayPolicy: normalizedReplayPolicy };
       } catch (error) {
         clearTimeout(connectTimer);
+        error.dispatchState = getDispatchState(requestDispatch);
+        error.replayPolicy = normalizedReplayPolicy;
         lastError = error;
         const isConnectTimeout = connectCtrl.signal.aborted && error.name === "AbortError";
         dbg("FETCH", `${this.provider.toUpperCase()} ✖ ${error.name}: ${error.message}${isConnectTimeout ? " (connect timeout)" : ""}`);
@@ -170,6 +192,8 @@ export class BaseExecutor {
         if (error.name === "AbortError" && !isConnectTimeout) throw error;
 
         // Map network/fetch exceptions to 502 retry config
+        if (normalizedReplayPolicy === NON_REPLAYABLE && !canReplayRequest(normalizedReplayPolicy, requestDispatch)) throw error;
+
         if (await tryRetry(urlIndex, HTTP_STATUS.BAD_GATEWAY, `network "${error.message}"`)) { urlIndex--; continue; }
 
         if (urlIndex + 1 < fallbackCount) {

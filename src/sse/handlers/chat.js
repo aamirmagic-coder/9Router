@@ -8,7 +8,7 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getProviderConnections } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -25,6 +25,22 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { resolveReplayPolicy } from "open-sse/services/provider.js";
+import { NON_REPLAYABLE, REPLAYABLE } from "open-sse/config/replayPolicy.js";
+import { hasDispatchStarted } from "open-sse/utils/dispatchState.js";
+
+async function resolveFusionReplayPolicy(modelStr) {
+  const nestedModels = await getComboModels(modelStr);
+  if (nestedModels) return { replayPolicy: REPLAYABLE, models: nestedModels };
+
+  const { provider } = await getModelInfo(modelStr);
+  if (!provider) return { replayPolicy: REPLAYABLE };
+  const connections = await getProviderConnections({ provider, isActive: true });
+  const nonReplayable = connections.some((connection) =>
+    resolveReplayPolicy(provider, connection) === NON_REPLAYABLE
+  );
+  return { replayPolicy: nonReplayable ? NON_REPLAYABLE : REPLAYABLE };
+}
 
 /**
  * Handle chat completion request
@@ -132,6 +148,7 @@ async function handleChatInternal(request, clientRawRequest = null, serverReques
         comboName: modelStr,
         judgeModel: comboStrategies[modelStr]?.judgeModel,
         tuning: comboStrategies[modelStr]?.fusionTuning,
+         resolveReplayPolicy: resolveFusionReplayPolicy,
       });
     }
 
@@ -209,6 +226,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
           comboName: modelStr,
           judgeModel: comboStrategies[modelStr]?.judgeModel,
           tuning: comboStrategies[modelStr]?.fusionTuning,
+         resolveReplayPolicy: resolveFusionReplayPolicy,
         });
       }
 
@@ -321,6 +339,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     });
 
     if (result.success) return result.response;
+
+    if (result.replayPolicy === NON_REPLAYABLE && hasDispatchStarted(result.dispatchState)) {
+      log.warn("FALLBACK", `Provider ${provider}/${model} failed after dispatch; replay disabled`);
+      return result.response;
+    }
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;

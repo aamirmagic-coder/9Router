@@ -1,4 +1,4 @@
-import { detectFormat, getTargetFormat, resolveTransport } from "../services/provider.js";
+import { detectFormat, getTargetFormat, resolveTransport, resolveReplayPolicy } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
 import { applyThinking, extractThinking, stripThinkingSuffix } from "../translator/concerns/thinkingUnified.js";
 import { FORMATS } from "../translator/formats.js";
@@ -30,6 +30,7 @@ import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { createDispatchContext, canReplayRequest, getDispatchState } from "../utils/dispatchState.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -302,6 +303,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (passthrough && clientTool === "claude") anchorClaudeCache(translatedBody);
 
   const executor = getExecutor(provider);
+  const replayPolicy = resolveReplayPolicy(provider, credentials);
+  const dispatchContext = createDispatchContext();
   trackPendingRequest(model, provider, connectionId, true);
   appendRequestLog({ model, provider, connectionId, status: "PENDING" }).catch(() => { });
 
@@ -356,7 +359,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // exception: it is decoded by the executor into OpenAI-compatible output.
   let providerResponseFormat = targetFormat;
   try {
-    const result = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions });
+    const result = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions, replayPolicy, dispatchContext });
     providerResponse = result.response;
     providerUrl = result.url;
     providerHeaders = result.headers;
@@ -379,17 +382,23 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
     if (error.name === "AbortError") {
       streamController.handleError(error);
-      return createErrorResult(499, "Request aborted");
+      return createErrorResult(499, "Request aborted", undefined, {}, {
+        dispatchState: getDispatchState(dispatchContext),
+        replayPolicy
+      });
     }
     const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
     if (log?.errorLine) {
       log.errorLine(reqTag, "✗", `ERROR 502 · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${errMsg}${error.stack ? `\n    ${error.stack}` : ""}`);
     }
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
+    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg, undefined, {}, {
+      dispatchState: error.dispatchState || getDispatchState(dispatchContext),
+      replayPolicy
+    });
   }
 
   // Handle 401/403 - try token refresh (skip for noAuth providers)
-  if (!executor.noAuth && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
+  if (!executor.noAuth && canReplayRequest(replayPolicy, dispatchContext) && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
     try {
       // Mutate credentials after each successful refresh: rotating refresh_token
       // providers (xAI/grok-cli) issue a new RT on every refresh; without this,
@@ -410,7 +419,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
           try { await onCredentialsRefreshed(newCredentials); } catch (e) { log?.warn?.("TOKEN", `onCredentialsRefreshed failed: ${e.message}`); }
         }
         try {
-          const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions });
+          const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions, replayPolicy, dispatchContext });
           if (retryResult.response.ok) {
             providerResponse = retryResult.response;
             providerUrl = retryResult.url;
@@ -428,7 +437,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Provider returned error
   if (!providerResponse.ok) {
     trackPendingRequest(model, provider, connectionId, false, true);
-    const diagnostics = await parseUpstreamError(providerResponse, executor);
+    const diagnostics = await parseUpstreamError(providerResponse, executor, dispatchContext);
     const { statusCode, message, resetsAtMs } = diagnostics;
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
@@ -448,7 +457,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);
     }
     reqLogger.logError(new Error(message), finalBody || translatedBody);
-    return createErrorResult(statusCode, errMsg, resetsAtMs, diagnostics);
+    return createErrorResult(statusCode, errMsg, resetsAtMs, diagnostics, {
+      dispatchState: diagnostics.dispatchState || getDispatchState(dispatchContext),
+      replayPolicy
+    });
   }
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };

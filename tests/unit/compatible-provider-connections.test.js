@@ -33,6 +33,8 @@ async function setupTestContext(nodeData) {
     POST,
     getProviderConnections,
     cleanup() {
+      try { global._dbAdapter?.instance?.close?.(); } catch {}
+      delete global._dbAdapter;
       fs.rmSync(tempDir, { recursive: true, force: true });
     },
   };
@@ -58,6 +60,7 @@ function expectCompatibleConnection(connection, node, { apiType } = {}) {
   expect(connection.providerSpecificData).toMatchObject({
     prefix: node.prefix,
     baseUrl: node.baseUrl,
+    replayPolicy: node.replayPolicy,
     nodeName: node.name,
   });
 
@@ -110,6 +113,7 @@ describe("compatible provider connections API", () => {
         prefix: ctx.node.prefix,
         apiType: "chat",
         baseUrl: ctx.node.baseUrl,
+        replayPolicy: ctx.node.replayPolicy,
         nodeName: ctx.node.name,
       },
     });
@@ -140,6 +144,7 @@ describe("compatible provider connections API", () => {
       providerSpecificData: {
         prefix: ctx.node.prefix,
         baseUrl: ctx.node.baseUrl,
+        replayPolicy: ctx.node.replayPolicy,
         nodeName: ctx.node.name,
       },
     });

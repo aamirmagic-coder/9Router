@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
+import { normalizeReplayPolicy } from "../../../../../open-sse/config/replayPolicy.js";
 
 // Fetch with timeout wrapper
 const fetchWithTimeout = (url, options, timeout = 10000) => {
@@ -55,7 +56,14 @@ const getChatErrorMessage = (status) => {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { baseUrl, apiKey, type, modelId } = body;
+    const { baseUrl, apiKey, type, modelId, replayPolicy } = body;
+
+    let normalizedReplayPolicy;
+    try {
+      normalizedReplayPolicy = normalizeReplayPolicy(replayPolicy);
+    } catch (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
 
     if (!baseUrl || !apiKey) {
       return NextResponse.json({ error: "Base URL and API key required" }, { status: 400 });
@@ -92,7 +100,7 @@ export async function POST(request) {
       if (embedRes.ok) {
         const data = await embedRes.json().catch(() => null);
         const dims = Array.isArray(data?.data?.[0]?.embedding) ? data.data[0].embedding.length : null;
-        return NextResponse.json({ valid: true, method: "embeddings", dimensions: dims });
+        return NextResponse.json({ valid: true, method: "embeddings", dimensions: dims, replayPolicy: normalizedReplayPolicy });
       }
       if (embedRes.status === 401 || embedRes.status === 403) {
         return NextResponse.json({ valid: false, error: "API key unauthorized" });
@@ -122,7 +130,7 @@ export async function POST(request) {
         }
       });
 
-      if (res.ok) return NextResponse.json({ valid: true });
+      if (res.ok) return NextResponse.json({ valid: true, replayPolicy: normalizedReplayPolicy });
 
       // Auth errors - no point trying chat fallback
       if (res.status === 401 || res.status === 403) {
@@ -146,7 +154,7 @@ export async function POST(request) {
           })
         });
         if (chatRes.ok) {
-          return NextResponse.json({ valid: true, method: "chat" });
+          return NextResponse.json({ valid: true, method: "chat", replayPolicy: normalizedReplayPolicy });
         }
         return NextResponse.json({
           valid: false,
@@ -164,7 +172,7 @@ export async function POST(request) {
       headers: { "Authorization": `Bearer ${apiKey}` },
     });
 
-    if (res.ok) return NextResponse.json({ valid: true });
+    if (res.ok) return NextResponse.json({ valid: true, replayPolicy: normalizedReplayPolicy });
 
     // Auth errors - no point trying chat fallback
     if (res.status === 401 || res.status === 403) {
@@ -186,7 +194,7 @@ export async function POST(request) {
         })
       });
       if (chatRes.ok) {
-        return NextResponse.json({ valid: true, method: "chat" });
+        return NextResponse.json({ valid: true, method: "chat", replayPolicy: normalizedReplayPolicy });
       }
       return NextResponse.json({
         valid: false,

@@ -137,6 +137,7 @@ export async function POST(request) {
         prefix: node.prefix,
         apiType: node.apiType,
         baseUrl: node.baseUrl,
+        replayPolicy: node.replayPolicy,
         nodeName: node.name,
       };
     } else if (isAnthropicCompatibleProvider(provider)) {
@@ -147,6 +148,7 @@ export async function POST(request) {
       providerSpecificData = {
         prefix: node.prefix,
         baseUrl: node.baseUrl,
+        replayPolicy: node.replayPolicy,
         nodeName: node.name,
       };
     } else if (isCustomEmbeddingProvider(provider)) {

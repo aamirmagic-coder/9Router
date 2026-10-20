@@ -122,9 +122,24 @@ required by `NSStatusItem`; use the tray **Quit** action there as well.
 9router                    # Start with default settings
 9router --port 8080        # Custom port
 9router --no-browser       # Don't open browser
+9router --no-tray          # Headless: skip tray/UI, serve in the foreground
 9router --skip-update      # Skip auto-update check
 9router --help             # Show all options
 ```
+
+**Headless mode** (`--no-tray`): for servers without a display — a VPS, a
+container, an SSH box. The launcher skips the whole tray/UI lifecycle (no tray
+runtime install, no tray icon, no interface menu, no auto-start registration,
+and `--tray` / the non-TTY tray fallback are ignored) and serves in the
+foreground with normal logging until Ctrl+C:
+
+```bash
+9router --no-tray          # foreground server, e.g. under tmux/systemd/ssh
+```
+
+Every lifecycle exit also writes a timestamped line to stderr —
+`[<ISO time>] [9router] exiting: <reason>` — so a headless death is always
+diagnosable from the logs.
 
 **Port precedence** (highest first): `--port/-p` → `PORT` env var → `20128`.
 The launcher reads the process environment only (it does not load `.env`), so a

@@ -94,8 +94,20 @@ if (args[0] === "connect" || args[0] === "show") {
 // better-sqlite3 is optional. Logs to stderr only on failure.
 try { ensureSqliteRuntime({ silent: true }); } catch {}
 
+// Headless escape (DF-9ROUTER-64): `--no-tray` must skip the tray lifecycle
+// ENTIRELY — starting with this runtime install, which on a fresh headless host
+// would otherwise spend a network `npm install systray2` on a tray that can
+// never be initialized without a display. Parsed here (before the main arg
+// loop) because the install runs before that loop; the loop below re-sets the
+// same variable so the flag is handled like every other one.
+const noTrayRequested = args.includes("--no-tray");
+
 // Self-heal tray runtime (systray for macOS/Linux only). Windows skipped.
-try { ensureTrayRuntime({ silent: true }); } catch {}
+// Skipped under --no-tray (DF-9ROUTER-64): no tray is ever initialized on the
+// headless path, so none of its runtime is installed either.
+if (!noTrayRequested) {
+  try { ensureTrayRuntime({ silent: true }); } catch {}
+}
 
 // Configuration constants
 const APP_NAME = pkg.name; // Use from package.json
@@ -132,6 +144,9 @@ let noBrowser = false;
 let skipUpdate = false;
 let showLog = false;
 let trayMode = false;
+// Headless escape (DF-9ROUTER-64): set by `--no-tray`. Default `false` — the
+// interactive launcher behavior is unchanged when the flag is absent.
+let noTray = noTrayRequested;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" || args[i] === "-p") {
@@ -142,6 +157,8 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === "--no-browser" || args[i] === "-n") {
     noBrowser = true;
+  } else if (args[i] === "--no-tray") {
+    noTray = true;
   } else if (args[i] === "--log" || args[i] === "-l") {
     showLog = true;
   } else if (args[i] === "--skip-update") {
@@ -157,6 +174,7 @@ Options:
   -p, --port <port>   Port to run the server (default: ${DEFAULT_PORT})
   -H, --host <host>   Host to bind (default: ${DEFAULT_HOST})
   -n, --no-browser    Don't open browser automatically
+  --no-tray           Headless mode: skip tray/UI, serve in the foreground
   -l, --log           Show server logs (default: hidden)
   -t, --tray          Run in system tray mode (background)
   --skip-update       Skip auto-update check
@@ -192,10 +210,25 @@ Commands:
 const { port, warning: portWarning } = resolvePort({ argPort });
 if (portWarning) console.error(portWarning);
 
-// Auto-relaunch after update: detached process has no TTY → fallback to tray
-if (skipUpdate && !trayMode && !process.stdin.isTTY) {
+// Auto-relaunch after update: detached process has no TTY → fallback to tray.
+// `--no-tray` opts out (DF-9ROUTER-64): a headless operator asked for the
+// foreground server, and a launcher that silently flips itself into the
+// tray/background path is exactly the untraceable lifecycle this flag escapes.
+if (skipUpdate && !trayMode && !noTray && !process.stdin.isTTY) {
   trayMode = true;
   process.env.TRAY_MODE = "1";
+}
+
+// Loud exits (DF-9ROUTER-64): published-package instances on headless hosts were
+// found dying with zero output — no log line, no kernel OOM, nothing to grep.
+// Every lifecycle exit now writes one timestamped line to stderr FIRST, so even
+// a launcher whose stdout was never attached to anything leaves a trace.
+function logExit(reason, detail) {
+  try {
+    const parts = [`[${new Date().toISOString()}]`, "[9router]", "exiting:", reason];
+    if (detail !== undefined) parts.push(JSON.stringify(detail));
+    process.stderr.write(`${parts.join(" ")}\n`);
+  } catch { /* a dying process must never die because logging died */ }
 }
 
 // Always use Node.js runtime with absolute path
@@ -698,6 +731,7 @@ function startServer(updatePromise) {
   function failStartup(result) {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    logExit("startup-failed", { port, result }); // loud BEFORE the report (DF-9ROUTER-64)
     console.error(`\n${describeStartupFailure(port, result)}`);
     printCrashLog();
     cleanup();
@@ -728,10 +762,13 @@ function startServer(updatePromise) {
     } catch (e) { }
   }
 
-  // Suppress all errors during shutdown (systray lib throws JSON parse errors)
+  // Suppress all errors during shutdown (systray lib throws JSON parse errors).
+  // The timestamped line below (DF-9ROUTER-64) makes sure an unexpected
+  // uncaughtException still leaves a dated trace before being swallowed.
   let isShuttingDown = false;
   process.on("uncaughtException", (err) => {
     if (isShuttingDown) return;
+    logExit("uncaught-exception", { message: err && err.message });
     console.error("Error:", err.message);
   });
 
@@ -739,6 +776,7 @@ function startServer(updatePromise) {
   process.on("SIGINT", () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    logExit("signal", { signal: "SIGINT" });
     console.log("\nExiting...");
     cleanup();
     setTimeout(() => process.exit(0), 100);
@@ -746,12 +784,14 @@ function startServer(updatePromise) {
   process.on("SIGTERM", () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    logExit("signal", { signal: "SIGTERM" });
     cleanup();
     setTimeout(() => process.exit(0), 100);
   });
   process.on("SIGHUP", () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    logExit("signal", { signal: "SIGHUP" });
     cleanup();
     setTimeout(() => process.exit(0), 100);
   });
@@ -775,8 +815,10 @@ function startServer(updatePromise) {
     }
   };
 
-  // Tray-only mode: no TUI, just tray icon
-  if (trayMode) {
+  // Tray-only mode: no TUI, just tray icon. `--no-tray` takes precedence
+  // (DF-9ROUTER-64): it is an escape hatch, so even a contradictory `-t` on the
+  // same command line cannot push a headless launch back into the tray path.
+  if (trayMode && !noTray) {
     // Ignore SIGHUP so macOS terminal close doesn't kill the background tray process
     process.removeAllListeners("SIGHUP");
     process.on("SIGHUP", () => {});
@@ -790,6 +832,27 @@ function startServer(updatePromise) {
       initTrayIcon();
       console.log("\n💡 Router is now running in system tray. Close this terminal if you want.");
       console.log("   Right-click tray icon to open dashboard or quit.\n");
+    });
+
+    return;
+  }
+
+  // Headless escape (DF-9ROUTER-64): `--no-tray` serves in the FOREGROUND with
+  // the whole tray/UI lifecycle skipped — no tray icon, no interface menu loop,
+  // no TUI, no hide-to-tray relaunch, no enableAutoStart(). The launcher stays
+  // alive only to supervise its child (readiness gate + restart policy below
+  // still apply) and normal logging goes to the terminal. Unreachable without
+  // the flag, so the default interactive behavior is unchanged.
+  if (noTray) {
+    console.log(`\n🚀 ${pkg.name} v${pkg.version} (headless)`);
+    console.log(`Server: http://${displayHost}:${port}`);
+    console.log(`Dashboard: ${url}`);
+    console.log("Tray/UI disabled (--no-tray). Press Ctrl+C to stop.\n");
+
+    waitForServerReady({ port, child: server }).then((result) => {
+      if (!result.ok) return failStartup(result);
+      serverReady = true;
+      console.log(`[${new Date().toISOString()}] [9router] server ready on http://${displayHost}:${port}`);
     });
 
     return;
@@ -901,6 +964,7 @@ function startServer(updatePromise) {
     server.on("close", (code) => {
       if (!serverReady) return; // pre-ready exits are reported by the startup gate
       if (isShuttingDown || code === 0) {
+        logExit("server-exit", { code: code ?? null, shuttingDown: isShuttingDown }); // loud (DF-9ROUTER-64)
         process.exit(code || 0);
         return;
       }

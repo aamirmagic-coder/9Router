@@ -1,3 +1,5 @@
+import "./env.js";
+
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
 function positiveInteger(value, name, { allowZero = false } = {}) {

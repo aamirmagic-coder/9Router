@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { loadConfig, parseModelAliases } from "../config.js";
+import { loadEnvFileIntoProcess } from "../env.js";
 
 const baseEnv = {
   CGW_SHIM_API_KEY: "test-key",
@@ -16,6 +20,23 @@ test("parses deterministic model aliases", () => {
   });
 });
 
+test("loads dotenv values into the process environment", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cgw-codex-shim-"));
+  const envPath = path.join(directory, ".env");
+  const name = "CGW_SHIM_TEST_LOADED_VALUE";
+  const previous = process.env[name];
+
+  try {
+    await writeFile(envPath, `${name}=loaded-from-dotenv\n`, "utf8");
+    delete process.env[name];
+    assert.equal(loadEnvFileIntoProcess(envPath), true);
+    assert.equal(process.env[name], "loaded-from-dotenv");
+  } finally {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 test("rejects malformed or empty model aliases", () => {
   assert.throws(() => parseModelAliases("[]"), /object/);
   assert.throws(() => parseModelAliases('{"":"native"}'), /alias/);

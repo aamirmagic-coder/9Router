@@ -20,19 +20,29 @@ Chat Completions request into one bounded native `codex exec` invocation.
 
 ## Configuration
 
-PowerShell example:
+The shim automatically loads `.env` from the repository root when any shim
+entrypoint starts. Existing process environment variables remain authoritative.
+Use `.env.example` as the template and keep the real `.env` uncommitted.
+
+Start the long-running relay with:
 
 ```powershell
-$env:CGW_SHIM_HOST = "127.0.0.1"
-$env:CGW_SHIM_PORT = "20129"
-$env:CGW_SHIM_API_KEY = "use-a-dedicated-local-key"
-$env:CGW_SHIM_MODEL_ALIASES_JSON = '{"gpt-6.1-sol":"gpt-6.1-sol"}'
-$env:CGW_SHIM_CODEX_BIN = "codex"
-$env:CGW_SHIM_CODEX_BASE_URL = "http://127.0.0.1:20128/v1"
-$env:CGW_SHIM_CODEX_MODEL_PROVIDER = "9router"
-$env:CGW_SHIM_CODEX_WIRE_API = "responses"
-$env:CGW_SHIM_CODEX_SANDBOX = "read-only"
-$env:CGW_SHIM_CODEX_EPHEMERAL = "true"
+node tools/cgw-codex-shim/run.js
+```
+
+The equivalent variables are:
+
+```dotenv
+CGW_SHIM_HOST=127.0.0.1
+CGW_SHIM_PORT=20129
+CGW_SHIM_API_KEY=use-a-dedicated-local-key
+CGW_SHIM_MODEL_ALIASES_JSON={"gpt-6.1-sol":"gpt-6.1-sol","gpt-5.6-sol":"gpt-5.6-sol"}
+CGW_SHIM_CODEX_BIN=codex
+CGW_SHIM_CODEX_BASE_URL=http://127.0.0.1:20128/v1
+CGW_SHIM_CODEX_MODEL_PROVIDER=9router
+CGW_SHIM_CODEX_WIRE_API=responses
+CGW_SHIM_CODEX_SANDBOX=read-only
+CGW_SHIM_CODEX_EPHEMERAL=true
 ```
 
 Optional `CGW_SHIM_CODEX_HOME` selects the already authenticated native Codex

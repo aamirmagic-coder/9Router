@@ -2,9 +2,6 @@ import { describe, it, expect } from "vitest";
 import { detectRequiredCapabilities, reorderByCapabilities } from "../../open-sse/services/combo.js";
 
 describe("detectRequiredCapabilities", () => {
-  // Validate capability detection against the provider registry
-  // Ensure function tools are recognized correctly
-
   it("text-only -> empty", () => {
     const r = detectRequiredCapabilities({ messages: [{ role: "user", content: "hi" }] });
     expect(r.size).toBe(0);

@@ -130,4 +130,55 @@ describe("normalizeToolSchemasForProvider", () => {
     normalizeToolSchemasForProvider("openrouter", validTools, { debug });
     expect(debug).not.toHaveBeenCalled();
   });
+  it("leaves pattern keys inside default/const/enum/examples data untouched", () => {
+    const parameters = {
+      type: "object",
+      properties: {
+        filter: {
+          type: "object",
+          properties: { pattern: { type: "string", pattern: "(" } },
+          default: { pattern: "[" },
+          examples: [{ pattern: "[a-" }],
+          enum: [{ pattern: "(" }],
+          const: { pattern: "*" },
+        },
+      },
+    };
+    const [tool] = normalizeToolSchemasForProvider("openrouter", [{ type: "function", function: { name: "search", parameters } }]);
+    const filter = tool.function.parameters.properties.filter;
+
+    expect(filter.properties.pattern).toEqual({ type: "string" });
+    expect(filter.default).toEqual({ pattern: "[" });
+    expect(filter.examples).toEqual([{ pattern: "[a-" }]);
+    expect(filter.enum).toEqual([{ pattern: "(" }]);
+    expect(filter.const).toEqual({ pattern: "*" });
+  });
+
+  it("returns an equal schema when every pattern is valid", () => {
+    const parameters = {
+      type: "object",
+      $defs: { id: { type: "string", pattern: "^[A-Z]{3}-\d+$" } },
+      properties: {
+        id: { $ref: "#/$defs/id" },
+        tags: { type: "array", items: { type: "string", pattern: "^#\w+$" } },
+        mode: { anyOf: [{ const: "fast" }, { type: "string", pattern: "^slow-\d$" }] },
+      },
+      patternProperties: { "^x-": { type: "string" } },
+      required: ["id"],
+      additionalProperties: false,
+    };
+    const input = [{ type: "function", function: { name: "lookup", description: "d", parameters } }];
+    const log = { debug: vi.fn() };
+
+    const output = normalizeToolSchemasForProvider("openrouter", input, log);
+
+    expect(output).toEqual(input);
+    expect(log.debug).not.toHaveBeenCalled();
+  });
+
+  it("passes non-function tools and missing parameters through", () => {
+    const input = [{ type: "web_search_preview" }, { type: "function", function: { name: "noop" } }];
+    expect(normalizeToolSchemasForProvider("openrouter", input)).toStrictEqual(input);
+    expect(normalizeToolSchemasForProvider("openrouter", undefined)).toBeUndefined();
+  });
 });

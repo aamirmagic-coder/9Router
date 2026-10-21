@@ -101,7 +101,7 @@ function trailingUserItems(arr) {
 
 // Detect which capabilities a request needs. Modalities (vision/pdf) are scanned
 // only on the current user turn; "search" is request-wide (lives in tools).
-// Returns a Set of: "vision" | "pdf" | "search".
+// Returns a Set of: "vision" | "pdf" | "search" | "tools".
 export function detectRequiredCapabilities(body) {
   const required = new Set();
   if (!body || typeof body !== "object") return required;

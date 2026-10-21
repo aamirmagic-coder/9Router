@@ -7,6 +7,10 @@ function isValidRegex(pattern) {
   }
 }
 
+// Keywords whose values are instance data, not subschemas: a `pattern` key inside
+// them is part of the data (e.g. a default object) and must be left alone.
+const DATA_KEYWORDS = new Set(["default", "const", "enum", "examples"]);
+
 // Recursively strips invalid `pattern` regex constraints from a JSON Schema
 // node. `properties` is special-cased because its keys are arbitrary
 // property *names* (which may themselves be "pattern" or "properties") and
@@ -31,6 +35,10 @@ function stripPatterns(schema, stats) {
       cleaned[key] = props;
       continue;
     }
+    if (DATA_KEYWORDS.has(key)) {
+      cleaned[key] = value;
+      continue;
+    }
     cleaned[key] = stripPatterns(value, stats);
   }
   return cleaned;
@@ -40,13 +48,13 @@ export function normalizeToolSchemasForProvider(provider, tools, log) {
   if (provider !== "openrouter" || !Array.isArray(tools)) return tools;
 
   const stats = { removed: 0 };
-  const normalized = tools.map((tool) => ({
+  const normalized = tools.map((tool) => (tool?.function?.parameters ? {
     ...tool,
-    function: tool.function ? {
+    function: {
       ...tool.function,
       parameters: stripPatterns(tool.function.parameters, stats),
-    } : tool.function,
-  }));
+    },
+  } : tool));
 
   // Redacted diagnostic: provider + rule + count only, never the schema/field content itself.
   if (stats.removed > 0) {

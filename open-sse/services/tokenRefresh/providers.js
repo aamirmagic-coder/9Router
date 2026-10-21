@@ -687,9 +687,63 @@ export async function refreshTraeToken(refreshToken, credentials, log) {
   }, log);
 }
 
+// Cursor CLI session refresh. The IDE client id is public; shouldLogout means
+// the refresh token is dead and the user has to sign in again.
+export async function refreshCursorToken(refreshToken, log) {
+  if (!refreshToken) return null;
+  const oauth = PROVIDER_OAUTH.cursor;
+  if (!oauth?.refreshUrl || !oauth?.authClientId) return null;
+  return dedupRefresh("cursor", refreshToken, async () => {
+    try {
+      const response = await fetch(oauth.refreshUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          client_id: oauth.authClientId,
+          refresh_token: refreshToken,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) {
+        log?.error?.("TOKEN_REFRESH", "Failed to refresh Cursor token", { status: response.status });
+        if (response.status === 401 || response.status === 403) return { error: "invalid_grant" };
+        return null;
+      }
+      const accessToken = data.access_token || data.accessToken;
+      if (data.shouldLogout || typeof accessToken !== "string" || !accessToken) {
+        log?.warn?.("TOKEN_REFRESH", "Cursor refresh token was rejected");
+        return { error: "invalid_grant" };
+      }
+      let expiresIn = data.expires_in || data.expiresIn;
+      if (!expiresIn) {
+        const part = accessToken.includes("::") ? accessToken.split("::").pop() : accessToken;
+        const payload = part.split(".")[1];
+        if (payload) {
+          try {
+            const exp = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))?.exp;
+            if (typeof exp === "number") expiresIn = Math.max(1, exp - Math.floor(Date.now() / 1000));
+          } catch {
+            expiresIn = undefined;
+          }
+        }
+      }
+      return {
+        accessToken,
+        refreshToken: data.refresh_token || data.refreshToken || refreshToken,
+        expiresIn,
+      };
+    } catch (error) {
+      log?.error?.("TOKEN_REFRESH", `Error refreshing Cursor token: ${error.message}`);
+      return null;
+    }
+  }, log);
+}
+
 // Zed access_token is long-lived; auth flow returns no refresh_token.
 // No refresh possible — re-login required when token expires/revoked.
-// Mirrors cursor/kilocode null-refresh pattern.
+// Mirrors the kilocode null-refresh pattern.
 export function refreshZedToken() {
   return null;
 }

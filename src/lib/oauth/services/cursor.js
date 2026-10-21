@@ -130,8 +130,9 @@ export class CursorService {
    */
   extractUserInfo(accessToken) {
     try {
-      // Try to decode as JWT
-      const parts = accessToken.split(".");
+      // IDE tokens are often `userId::jwt`. The checksum header uses the jwt half.
+      const jwt = accessToken.includes("::") ? accessToken.split("::").pop() : accessToken;
+      const parts = jwt.split(".");
       if (parts.length === 3) {
         let payload = parts[1];
         while (payload.length % 4) {

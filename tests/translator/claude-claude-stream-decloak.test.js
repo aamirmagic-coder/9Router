@@ -1,16 +1,15 @@
 // Regression test: claude → claude streaming passthrough must still decloak
-// tool names. translateRequest() cloaks client tool names with CLAUDE_TOOL_SUFFIX
-// for OAuth-cloaked Claude providers (cloakToolsOnOAuth) even when source and
+// tool names. translateRequest() remaps client tool names to TitleCase for
+// OAuth-cloaked Claude providers (cloakToolsOnOAuth) even when source and
 // target formats match; the same-format fast path in translateResponse() used
-// to return chunks untouched, leaking the suffixed name (e.g. "run_code_ide")
-// to the client, which then rejected the call as an unknown tool.
+// to return chunks untouched, leaking the cloaked name (e.g. "RunCode") to
+// the client, which then rejected the call as an unknown tool.
 import { describe, it, expect } from "vitest";
 import "./registerAll.js";
 import { translateResponse } from "../../open-sse/translator/index.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
-import { CLAUDE_TOOL_SUFFIX } from "../../open-sse/config/appConstants.js";
 
-const CLOAKED = "run_code" + CLAUDE_TOOL_SUFFIX;
+const CLOAKED = "RunCode";
 
 const toolUseStart = (name) => ({
   type: "content_block_start",

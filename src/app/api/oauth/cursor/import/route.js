@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CursorService } from "@/lib/oauth/services/cursor";
-import { createProviderConnection } from "@/models";
+import { machineIdConflict } from "@/lib/oauth/cursorLogin";
+import { createProviderConnection, getProviderConnections } from "@/models";
 
 /**
  * POST /api/oauth/cursor/import
@@ -38,6 +39,21 @@ export async function POST(request) {
 
     // Try to extract user info from token
     const userInfo = cursorService.extractUserInfo(tokenData.accessToken);
+
+    const connections = await getProviderConnections({ provider: "cursor" });
+    const conflict = machineIdConflict(connections, tokenData.machineId, {
+      email: userInfo?.email || null,
+      userId: userInfo?.userId || null,
+      accessToken: tokenData.accessToken,
+    });
+    if (conflict) {
+      return NextResponse.json(
+        {
+          error: "This machine ID is already used by another Cursor account. Cursor rejects a second account on one machine ID. Use Login with Cursor for the other account so it gets its own machine ID.",
+        },
+        { status: 409 }
+      );
+    }
 
     // Save to database
     const connection = await createProviderConnection({

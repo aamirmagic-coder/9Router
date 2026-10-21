@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCombos, createCombo, getProviderConnections } from "@/lib/localDb";
 import { buildPresetItems, PRESET_SOURCES } from "@/lib/comboPresets";
-import { resolveCursorModels } from "open-sse/services/cursorModels.js";
+import { cursorCatalogProxyOptions, resolveCursorModels } from "open-sse/services/cursorModels.js";
+import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,11 @@ async function fetchCursorLiveModels() {
       (c) => c.provider === "cursor" && c.isActive !== false
     );
     if (!conn) return null;
+    const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
     const result = await resolveCursorModels({
       accessToken: conn.accessToken,
       providerSpecificData: conn.providerSpecificData || {},
-    }, { log: console });
+    }, { log: console, proxyOptions: cursorCatalogProxyOptions(proxy) });
     return result?.models?.length ? result.models : null;
   } catch (error) {
     console.log("combo presets: cursor live catalog failed", error?.message || error);

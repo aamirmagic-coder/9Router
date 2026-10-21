@@ -2,9 +2,9 @@ import { CURSOR_CONFIG } from "../constants/oauth.js";
 
 const cursor = {
   config: CURSOR_CONFIG,
+  // Browser login lives on /api/oauth/cursor/login/* (CLI deep-control poll).
+  // The generic OAuth router still treats Cursor as import-only.
   flowType: "import_token",
-  // Cursor uses import token flow - tokens are extracted from local SQLite database
-  // No OAuth flow needed, handled by /api/oauth/cursor/import route
   mapTokens: (tokens) => ({
     accessToken: tokens.accessToken,
     refreshToken: null, // Cursor doesn't have public refresh endpoint

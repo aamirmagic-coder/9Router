@@ -55,6 +55,14 @@ export default {
     agentNonPrivacyEndpoint: "https://agentn.api5.cursor.sh",
     clientVersion: "3.12.17",
     clientType: "ide",
+    // Browser login matches the Cursor CLI (`agent login`): PKCE challenge in the
+    // page URL, verifier only on POST /auth/poll. refreshUrl is the session grant.
+    // authClientId is the public IDE client id (not clientId — that name is copied
+    // onto PROVIDERS and would change the transport baseline).
+    loginUrl: "https://cursor.com/loginDeepControl",
+    pollUrl: "https://api2.cursor.sh/auth/poll",
+    refreshUrl: "https://api2.cursor.sh/oauth/token",
+    authClientId: "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB",
     dbKeys: {
       accessToken: "cursorAuth/accessToken",
       machineId: "storage.serviceMachineId",

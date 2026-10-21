@@ -1002,13 +1002,15 @@ Models:
 
 ```bash
 Dashboard → Providers → Connect Cursor
-→ OAuth login
+→ Login with Cursor (each account gets its own machine ID)
 → Monthly subscription
 
 Models:
-  cu/claude-4.6-opus-max
-  cu/claude-4.5-sonnet-thinking
-  cu/gpt-5.3-codex
+  cu/auto
+  cu/composer-2.5
+  cu/claude-opus-5-5-high
+  cu/gpt-5.6-sol-high
+  cu/grok-4.7-medium
 ```
 
 </details>
@@ -1393,10 +1395,11 @@ Notes:
 
 **Cursor (`cu/`)** - Subscription:
 
-- `cu/claude-4.6-opus-max`
-- `cu/claude-4.5-sonnet-thinking`
-- `cu/gpt-5.3-codex`
-- `cu/kimi-k2.5`
+- `cu/auto`
+- `cu/composer-2.5`
+- `cu/claude-opus-5-5-high`
+- `cu/gpt-5.6-sol-high`
+- `cu/grok-4.7-medium`
 
 **GLM (`glm/`)** - $0.6/1M:
 

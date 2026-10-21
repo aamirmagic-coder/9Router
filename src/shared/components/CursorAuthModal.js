@@ -1,14 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { Modal, Button, Input } from "@/shared/components";
+import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 /**
- * Cursor Auth Modal
- * Auto-detect and import token from Cursor IDE's local SQLite database
+ * Cursor connect modal, laid out like Claude Code:
+ * popup login, plus a manual callback URL paste.
+ * Each login still gets its own machine ID.
  */
 export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
+  const [mode, setMode] = useState("login");
+  const [loginUrl, setLoginUrl] = useState("");
+  const [loginId, setLoginId] = useState("");
+  const [callbackUrl, setCallbackUrl] = useState("");
+  const [placeholderUrl, setPlaceholderUrl] = useState("http://localhost:20128/callback?code=...");
+  const [waiting, setWaiting] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [accessToken, setAccessToken] = useState("");
   const [machineId, setMachineId] = useState("");
   const [error, setError] = useState(null);
@@ -16,17 +25,182 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   const [autoDetecting, setAutoDetecting] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
   const [windowsManual, setWindowsManual] = useState(false);
+  const pollRef = useRef(null);
+  const loginIdRef = useRef("");
+  const { copied, copy } = useCopyToClipboard();
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const finish = () => {
+    stopPolling();
+    setWaiting(false);
+    onSuccess?.();
+    onClose();
+  };
+
+  const pollOnce = async (id, pastedUrl) => {
+    const res = await fetch("/api/oauth/cursor/login/poll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        loginId: id,
+        ...(pastedUrl ? { callbackUrl: pastedUrl } : {}),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setPlaceholderUrl(`${window.location.origin}/callback?code=...`);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      stopPolling();
+      loginIdRef.current = "";
+      setMode("login");
+      setLoginUrl("");
+      setLoginId("");
+      setCallbackUrl("");
+      setError(null);
+      setWaiting(false);
+      setConnecting(false);
+      setAccessToken("");
+      setMachineId("");
+      setAutoDetected(false);
+      setWindowsManual(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      stopPolling();
+      setError(null);
+      setWaiting(true);
+      try {
+        const res = await fetch("/api/oauth/cursor/login/start", { method: "POST" });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok || !data.loginUrl || !data.loginId) {
+          throw new Error(data.error || "Could not start Cursor login");
+        }
+        loginIdRef.current = data.loginId;
+        setLoginId(data.loginId);
+        setLoginUrl(data.loginUrl);
+        window.open(data.loginUrl, "cursor_login", "width=600,height=760");
+        pollRef.current = setInterval(async () => {
+          try {
+            const { res: pollRes, data: pollData } = await pollOnce(data.loginId);
+            if (cancelled || pollData.pending) return;
+            if (pollData.success) {
+              finish();
+              return;
+            }
+            if (pollData.fatal || pollRes.status === 400) {
+              stopPolling();
+              setWaiting(false);
+              setError(pollData.error || "Cursor login failed");
+            }
+          } catch {
+            // Keep polling through a single network blip.
+          }
+        }, 2000);
+      } catch (err) {
+        if (cancelled) return;
+        stopPolling();
+        setWaiting(false);
+        setError(err.message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || mode !== "login") return undefined;
+
+    const applyCallback = (data) => {
+      const fullUrl = data?.fullUrl;
+      if (!fullUrl || !loginIdRef.current) return;
+      setCallbackUrl(fullUrl);
+      submitCallback(fullUrl);
+    };
+
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "oauth_callback") applyCallback(event.data.data);
+    };
+    const onStorage = (event) => {
+      if (event.key !== "oauth_callback" || !event.newValue) return;
+      try {
+        applyCallback(JSON.parse(event.newValue));
+      } catch {
+        // Ignore a malformed callback payload.
+      }
+    };
+
+    let channel;
+    try {
+      channel = new BroadcastChannel("oauth_callback");
+      channel.onmessage = (event) => applyCallback(event.data);
+    } catch {
+      channel = null;
+    }
+    window.addEventListener("message", onMessage);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("storage", onStorage);
+      channel?.close();
+    };
+  }, [isOpen, mode]);
+
+  const submitCallback = async (rawUrl) => {
+    const input = (rawUrl ?? callbackUrl).trim();
+    if (!input) return;
+    if (!loginIdRef.current) {
+      setError("Cursor login expired. Close this dialog and start again.");
+      return;
+    }
+    setConnecting(true);
+    setError(null);
+    try {
+      const { res, data } = await pollOnce(loginIdRef.current, input);
+      if (data.success) {
+        finish();
+        return;
+      }
+      if (data.pending) {
+        setError("Cursor has not finished this login yet. Approve it in the browser, then paste the callback URL again.");
+        return;
+      }
+      setError(data.error || (res.ok ? "Cursor login failed" : "Could not use that callback URL"));
+    } catch {
+      setError("Could not use that callback URL");
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const runAutoDetect = async () => {
     setAutoDetecting(true);
     setError(null);
     setAutoDetected(false);
     setWindowsManual(false);
-
     try {
       const res = await fetch("/api/oauth/cursor/auto-import");
       const data = await res.json();
-
       if (data.found) {
         setAccessToken(data.accessToken);
         setMachineId(data.machineId);
@@ -36,33 +210,20 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
       } else {
         setError(data.error || "Could not auto-detect tokens");
       }
-    } catch (err) {
+    } catch {
       setError("Failed to auto-detect tokens");
     } finally {
       setAutoDetecting(false);
     }
   };
 
-  // Auto-detect tokens when modal opens
-  useEffect(() => {
-    if (!isOpen) return;
-    runAutoDetect();
-  }, [isOpen]);
-
   const handleImportToken = async () => {
-    if (!accessToken.trim()) {
-      setError("Please enter an access token");
+    if (!accessToken.trim() || !machineId.trim()) {
+      setError("Access token and machine ID are required");
       return;
     }
-
-    if (!machineId.trim()) {
-      setError("Please enter a machine ID");
-      return;
-    }
-
     setImporting(true);
     setError(null);
-
     try {
       const res = await fetch("/api/oauth/cursor/import", {
         method: "POST",
@@ -72,13 +233,8 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
           machineId: machineId.trim(),
         }),
       });
-
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Import failed");
-      }
-
+      if (!res.ok) throw new Error(data.error || "Import failed");
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -89,114 +245,132 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title="Connect Cursor IDE" onClose={onClose}>
+    <Modal isOpen={isOpen} title="Connect Cursor" onClose={onClose}>
       <div className="flex flex-col gap-4">
-        {/* Auto-detecting state */}
-        {autoDetecting && (
-          <div className="text-center py-6">
-            <div className="size-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
-              <span className="material-symbols-outlined text-3xl text-primary animate-spin">
+        {mode === "login" && (
+          <>
+            <div className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg bg-sidebar/50">
+              <span className="material-symbols-outlined text-base text-primary animate-spin">
                 progress_activity
               </span>
+              <span className="text-sm">
+                {waiting ? "Waiting for popup authorization…" : "Starting Cursor login…"}
+              </span>
             </div>
-            <h3 className="text-lg font-semibold mb-2">Auto-detecting tokens...</h3>
-            <p className="text-sm text-text-muted">
-              Reading from Cursor IDE database
-            </p>
-          </div>
+
+            <div className="flex items-center gap-3 my-1">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-xs text-text-muted uppercase tracking-wider">Or paste callback URL manually</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium mb-2">Step 1: Open this URL in your browser</p>
+                <div className="flex gap-2">
+                  <Input value={loginUrl} readOnly className="flex-1 font-mono text-xs" />
+                  <Button
+                    variant="secondary"
+                    icon={copied === "auth_url" ? "check" : "content_copy"}
+                    onClick={() => copy(loginUrl, "auth_url")}
+                    disabled={!loginUrl}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Step 2: Paste the callback URL here</p>
+                <p className="text-xs text-text-muted mb-2">
+                  After authorization, copy the full URL from your browser.
+                </p>
+                <Input
+                  value={callbackUrl}
+                  onChange={(e) => setCallbackUrl(e.target.value)}
+                  placeholder={placeholderUrl}
+                  className="font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+            <div className="flex gap-2">
+              <Button onClick={() => submitCallback()} fullWidth disabled={!callbackUrl || connecting || !loginId}>
+                {connecting ? "Connecting…" : "Connect"}
+              </Button>
+              <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+            </div>
+
+            <button
+              type="button"
+              className="text-xs text-text-muted hover:text-primary"
+              onClick={() => {
+                setMode("import");
+                setError(null);
+                if (!accessToken && !autoDetecting) runAutoDetect();
+              }}
+            >
+              Import the token from this IDE instead
+            </button>
+          </>
         )}
 
-        {/* Form (shown after auto-detect completes) */}
-        {!autoDetecting && (
+        {mode === "import" && (
           <>
-            {/* Success message if auto-detected */}
+            <button
+              type="button"
+              className="text-xs text-left text-text-muted hover:text-primary"
+              onClick={() => { setMode("login"); setError(null); }}
+            >
+              Back to browser login
+            </button>
+
+            <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                Import uses this IDE&apos;s machine ID. Cursor only allows one account on that ID.
+                Add any other account with browser login.
+              </p>
+            </div>
+
+            {autoDetecting && (
+              <p className="text-sm text-text-muted">Reading the Cursor IDE database…</p>
+            )}
             {autoDetected && (
-              <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
-                <div className="flex gap-2">
-                  <span className="material-symbols-outlined text-green-600 dark:text-green-400">check_circle</span>
-                  <p className="text-sm text-green-800 dark:text-green-200">
-                    Tokens auto-detected from Cursor IDE successfully!
-                  </p>
-                </div>
-              </div>
+              <p className="text-sm text-green-700 dark:text-green-300">Tokens read from Cursor IDE.</p>
             )}
-
-            {/* Windows manual instructions */}
             {windowsManual && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800 flex flex-col gap-2">
-                <div className="flex gap-2 items-center">
-                  <span className="material-symbols-outlined text-amber-600 dark:text-amber-400">info</span>
-                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                    Could not read Cursor database automatically.
-                  </p>
-                </div>
-                <p className="text-xs text-amber-700 dark:text-amber-300">
-                  Make sure Cursor IDE has been opened at least once, then click <strong>Retry</strong>. If the problem persists, paste your tokens manually below.
-                </p>
-                <Button onClick={runAutoDetect} variant="outline" fullWidth>
-                  Retry
-                </Button>
-              </div>
+              <Button onClick={runAutoDetect} variant="outline" fullWidth>Retry</Button>
             )}
 
-            {/* Info message if not auto-detected */}
-            {!autoDetected && !windowsManual && !error && (
-              <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
-                <div className="flex gap-2">
-                  <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">info</span>
-                  <p className="text-sm text-blue-800 dark:text-blue-200">
-                    Cursor IDE not detected. Please paste your tokens manually.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Access Token Input */}
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Access Token <span className="text-red-500">*</span>
-              </label>
+              <label className="block text-sm font-medium mb-2">Access Token</label>
               <textarea
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
-                placeholder="Access token will be auto-filled..."
                 rows={3}
                 className="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:border-primary resize-none"
               />
             </div>
-
-            {/* Machine ID Input */}
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Machine ID <span className="text-red-500">*</span>
-              </label>
+              <label className="block text-sm font-medium mb-2">Machine ID</label>
               <Input
                 value={machineId}
                 onChange={(e) => setMachineId(e.target.value)}
-                placeholder="Machine ID will be auto-filled..."
                 className="font-mono text-sm"
               />
             </div>
-
-            {/* Error Display */}
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg border border-red-200 dark:border-red-800">
-                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-              </div>
-            )}
-
-            {/* Action Buttons */}
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
             <div className="flex gap-2">
               <Button
                 onClick={handleImportToken}
                 fullWidth
                 disabled={importing || !accessToken.trim() || !machineId.trim()}
               >
-                {importing ? "Importing..." : "Import Token"}
+                {importing ? "Importing…" : "Import Token"}
               </Button>
-              <Button onClick={onClose} variant="ghost" fullWidth>
-                Cancel
-              </Button>
+              <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
             </div>
           </>
         )}

@@ -217,6 +217,16 @@ export class DefaultExecutor extends BaseExecutor {
       }
     }
 
+    // Claude OAuth: align X-Claude-Code-Session-Id with metadata.user_id.session_id
+    // (applyCloaking injects the JSON user_id; Anthropic fingerprints a mismatch).
+    if (this.provider === "claude") {
+      const token = credentials?.accessToken || credentials?.apiKey || "";
+      if (token.includes("sk-ant-oat")) {
+        const sid = extractClaudeSessionIdFromUserId(body?.metadata?.user_id);
+        if (sid) headers["x-claude-code-session-id"] = sid;
+      }
+    }
+
     // Strip first-party Claude Code identity headers for non-Anthropic anthropic-compatible upstreams
     if (this.provider?.startsWith?.("anthropic-compatible-")) {
       const baseUrl = credentials?.providerSpecificData?.baseUrl || "";

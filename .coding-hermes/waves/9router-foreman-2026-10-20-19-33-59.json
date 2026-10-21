@@ -11,5 +11,9 @@
       "commit": "86ae83562715cabfb9f2d08c0a1716aac2f3f23c",
       "brief": "/tmp/DF-9ROUTER-55-R2-brief.txt"
     }
-  ]
+  ],
+  "finished_at": "2026-10-21T03:58:42.340306+00:00",
+  "status": "complete",
+  "outcome": "recovery-complete",
+  "recovery_notes": "DF-9ROUTER-55-R2 already merged (86ae8356 ancestor of federation HEAD 451a0cdc); worktree removed, branch deleted. Block REL-9ROUTER-016 closed as verification-only (2 rows: REL-9ROUTER-004 documented drift confirmed, REL-9ROUTER-016 sweep finding confirmed no cut authorized). Commit d3678ae2 pushed."
 }

@@ -9,3 +9,14 @@ tasks:
     gate green, lint:gate green.'
   status: in_progress
   created_at: '2026-10-19T21:07:34.461566+00:00'
+- id: SUP-DEPS-20261020-9R
+  title: Refresh 5 outdated Node packages (safe minor/patch bumps)
+  criteria:
+  - 'PASS: npm outdated shows 0 packages with wanted > current for @aws-sdk/credential-providers,
+    jose, sql.js, undici; eslint held at 9.x (major bump 10.x is breaking, record
+    reason in commit message). Regression gate: node tests/__baseline__/verify-no-regression.mjs
+    reports 0 new fails vs baseline (88 known). Guard: gitreins guard secrets+tests
+    PASS.'
+  status: complete
+  created_at: '2026-10-21T02:59:40.250202+00:00'
+  completed_at: '2026-10-21T03:15:28.724449+00:00'

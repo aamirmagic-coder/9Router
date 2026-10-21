@@ -38,8 +38,11 @@ services:
     ports:
       - "8787:8787"
 
+  # Opt-in: holds the Docker socket (host-level access) and redeploys :latest unattended.
+  # Enable with `docker compose --profile auto-update up -d`; see DOCKER.md.
   freshdock:
-    image: ghcr.io/turbootzz/freshdock:1.4.1
+    image: ghcr.io/turbootzz/freshdock:1.4.1@sha256:e1700a73bc50cf35c271c2cc86b0969dd3f5ecf4655fd8f18ae8cdc7e130fc76
+    profiles: ["auto-update"]
     container_name: freshdock
     restart: unless-stopped
     command: ["run"]

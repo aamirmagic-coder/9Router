@@ -110,23 +110,25 @@ docker pull decolua/9router:0.5.81
 
 ## Automatic updates with Docker Compose
 
-The repository's `docker-compose.yml` includes [freshdock](https://github.com/Turbootzz/freshdock), a health-gated container updater. It checks the 9Router image nightly and recreates the service only when a newer image is available. The updater verifies the new container using the `/api/health` Docker health check and rolls back to the previous container if the new image fails verification. The existing `9router-data` volume is preserved.
+The repository's `docker-compose.yml` includes [freshdock](https://github.com/Turbootzz/freshdock), a health-gated container updater, as an **opt-in** `auto-update` profile. When enabled, it checks the 9Router image nightly and recreates the service only when a newer image is available. The updater verifies the new container using the `/api/health` Docker health check and rolls back to the previous container if the new image fails verification. The existing `9router-data` volume is preserved.
 
-Start or update the Compose stack with:
+A plain `docker compose up -d` does not start freshdock; the `9router` service still gets the health check. Turn automatic updates on with the profile:
 
 ```bash
 docker compose pull
-docker compose up -d
+docker compose --profile auto-update up -d
 docker compose ps
 docker inspect --format '{{json .State.Health}}' 9router
 docker logs -f freshdock
 ```
 
-Only the 9Router service is opted into scheduled updates. Headroom is not opted in, and freshdock excludes itself from updating. The updater image is pinned to a specific version so its own runtime does not silently change; update that pin deliberately when upgrading freshdock.
+Set `COMPOSE_PROFILES=auto-update` in the shell or `.env` to make the profile the default for later `docker compose` commands.
+
+Only the 9Router service is opted into scheduled updates. Headroom is not opted in, and freshdock excludes itself from updating. The updater image is pinned to a version and digest so its own runtime does not silently change; update that pin deliberately when upgrading freshdock.
 
 ### Disable automatic updates
 
-Remove the `freshdock` service from `docker-compose.yml` and remove the `freshdock.enable` and `freshdock.mode` labels from the `9router` service, then run `docker compose up -d`. To keep the updater but stop updates to 9Router, set `freshdock.mode: "off"` or remove `freshdock.enable`.
+Stop the updater with `docker compose --profile auto-update stop freshdock` and run later commands without the profile (unset `COMPOSE_PROFILES` if you set it). To keep the updater but stop updates to 9Router, set `freshdock.mode: "off"` or remove `freshdock.enable` on the `9router` service.
 
 ### Security note
 

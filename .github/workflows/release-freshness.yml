@@ -16,13 +16,14 @@ concurrency:
 jobs:
   check:
     name: Check source, tag, and published image
+    # The check targets decolua/9router's tags and Docker Hub image; on forks it would
+    # compare the fork's version against upstream releases and fail daily.
+    if: github.repository == 'decolua/9router'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify current version is tagged and published
         env:

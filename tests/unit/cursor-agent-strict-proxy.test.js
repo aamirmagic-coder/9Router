@@ -1,4 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { proxyAwareFetch, resolveOutboundProxyUrl } from "../../open-sse/utils/proxyFetch.js";
+
+afterEach(() => vi.unstubAllEnvs());
+
+vi.mock("../../open-sse/services/cursorModels.js", () => ({
+  resolveCursorModels: vi.fn(async () => ({ models: [{ id: "gpt-5.2" }] })),
+}));
 
 import { CursorExecutor } from "../../open-sse/executors/cursor.js";
 
@@ -56,26 +63,31 @@ describe("Cursor AgentService strict-proxy policy guard", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
-  it("fails closed when strict is set via enabled+url", async () => {
+  it("tunnels when a strict proxy URL resolves (CONNECT path)", async () => {
     const executor = new CursorExecutor();
     const { connect } = stubSession(executor);
     await expect(runAgent(executor, {
       strictProxy: true,
       enabled: true,
       url: "http://127.0.0.1:9",
-    })).rejects.toThrow(/strict proxy/u);
-    expect(connect).not.toHaveBeenCalled();
+    })).resolves.toBeTruthy();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][3]).toMatchObject({ enabled: true, url: "http://127.0.0.1:9" });
   });
 
-  it("fails closed when strict is set via connectionProxyEnabled+connectionProxyUrl", async () => {
+  it("tunnels when a strict connectionProxyUrl resolves", async () => {
     const executor = new CursorExecutor();
     const { connect } = stubSession(executor);
     await expect(runAgent(executor, {
       strictProxy: true,
       connectionProxyEnabled: true,
       connectionProxyUrl: "http://127.0.0.1:9",
-    })).rejects.toThrow(/strict proxy/u);
-    expect(connect).not.toHaveBeenCalled();
+    })).resolves.toBeTruthy();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][3]).toMatchObject({
+      connectionProxyEnabled: true,
+      connectionProxyUrl: "http://127.0.0.1:9",
+    });
   });
 
   it("non-strict proxy options keep today's direct h2 behavior", async () => {
@@ -104,15 +116,40 @@ describe("Cursor AgentService strict-proxy policy guard", () => {
     expect(connect).toHaveBeenCalledTimes(1);
   });
 
-  it("a vercel-style relay is exempt: it rides fetch, not the h2 duplex", async () => {
+  it("does not substitute an environment proxy for an excluded strict bound proxy", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:9999");
+    vi.stubEnv("NO_PROXY", "");
+    const proxyOptions = {
+      strictProxy: true, proxyPoolId: "pool-1",
+      connectionProxyEnabled: true, connectionProxyUrl: "http://127.0.0.1:9",
+      connectionNoProxy: "agent.api5.cursor.sh",
+    };
+    expect(resolveOutboundProxyUrl("https://agent.api5.cursor.sh/", proxyOptions)).toBeNull();
+    const executor = new CursorExecutor();
+    const { connect } = stubSession(executor);
+    await expect(runAgent(executor, proxyOptions)).rejects.toThrow(/strict proxy/u);
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("rejects an excluded strict fetch proxy before entering MITM DNS bypass", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:9999");
+    vi.stubEnv("NO_PROXY", "");
+    await expect(proxyAwareFetch("https://api2.cursor.sh/v1/chat", {}, {
+      strictProxy: true, proxyPoolId: "pool-1",
+      connectionProxyEnabled: true, connectionProxyUrl: "http://127.0.0.1:9",
+      connectionNoProxy: "api2.cursor.sh",
+    })).rejects.toThrow(/none resolved.*strictProxy/u);
+  });
+
+  it("rejects an unsupported relay instead of opening a direct h2 session", async () => {
     const executor = new CursorExecutor();
     const { connect } = stubSession(executor);
     await expect(runAgent(executor, {
       strictProxy: true,
       proxyPoolId: "relay-1",
       vercelRelayUrl: "https://relay.example/",
-    })).resolves.toBeTruthy();
-    expect(connect).toHaveBeenCalledTimes(1);
+    })).rejects.toThrow(/strict proxy/u);
+    expect(connect).not.toHaveBeenCalled();
   });
 
   it("execute() routes the failure through its connection_error envelope", async () => {

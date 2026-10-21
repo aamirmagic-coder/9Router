@@ -1,9 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("../../open-sse/services/cursorModels.js", () => ({
+  resolveCursorModels: vi.fn().mockResolvedValue(null),
+  resolveAutoModelSelection: vi.fn().mockReturnValue(null),
+}));
 
 import { CursorExecutor } from "../../open-sse/executors/cursor.js";
 import { decodeMessage, encodeField, wrapConnectRPCFrame } from "../../open-sse/utils/cursorProtobuf.js";
 
 const LEN = 2;
+const VARINT = 0;
 
 // agent.v1.AgentServerMessage.exec_request (field 2) carrying one ExecServerMessage variant.
 function execRequestFrame(execField) {
@@ -28,6 +34,27 @@ function thinkingFrame(text) {
 function turnEndedFrame() {
   const update = Buffer.from(encodeField(14, LEN, new Uint8Array()));
   return Buffer.from(wrapConnectRPCFrame(encodeField(1, LEN, update)));
+}
+
+function kvSetFrame(blobId, blobData, kvId = 1) {
+  const setArgs = Buffer.concat([
+    Buffer.from(encodeField(1, LEN, blobId)),
+    Buffer.from(encodeField(2, LEN, blobData)),
+  ]);
+  const kv = Buffer.concat([
+    Buffer.from(encodeField(1, VARINT, kvId)),
+    Buffer.from(encodeField(3, LEN, setArgs)),
+  ]);
+  return Buffer.from(wrapConnectRPCFrame(encodeField(4, LEN, kv)));
+}
+
+function kvGetFrame(blobId, kvId = 2) {
+  const getArgs = Buffer.from(encodeField(1, LEN, blobId));
+  const kv = Buffer.concat([
+    Buffer.from(encodeField(1, VARINT, kvId)),
+    Buffer.from(encodeField(2, LEN, getArgs)),
+  ]);
+  return Buffer.from(wrapConnectRPCFrame(encodeField(4, LEN, kv)));
 }
 
 function stubAgentSession(executor, frames) {
@@ -198,8 +225,10 @@ describe("CursorExecutor AgentService exec_request handling", () => {
 
     const events = parseSSE(await result.response.text());
     const content = events.map((e) => e.choices?.[0]?.delta?.content || "").join("");
+    const reasoning = events.map((e) => e.choices?.[0]?.delta?.reasoning_content || "").join("");
     expect(content).toBe("OK");
-    expect(JSON.stringify(events)).not.toContain("private reasoning");
+    expect(reasoning).toBe("private reasoning that must not leak");
+    expect(content).not.toContain("private reasoning");
   });
 
   it("flushes Grok thinking as visible content when the turn has no text_delta", async () => {
@@ -211,7 +240,94 @@ describe("CursorExecutor AgentService exec_request handling", () => {
 
     const events = parseSSE(await result.response.text());
     const content = events.map((e) => e.choices?.[0]?.delta?.content || "").join("");
+    const reasoning = events.map((e) => e.choices?.[0]?.delta?.reasoning_content || "").join("");
+    // Live reasoning so clients are not silent until turn_ended; content still
+    // comes from the finish fallback when there was no text_delta.
+    expect(reasoning).toBe("hello from grok");
     expect(content).toBe("hello from grok");
+    const finish = events.find((e) => e.choices?.[0]?.finish_reason);
+    expect(finish?.choices?.[0]?.finish_reason).toBe("stop");
+  });
+
+  it("streams Grok thinking_delta live as reasoning_content before turn_ended", async () => {
+    const { result } = await runAgent({
+      model: "grok-4.7-medium",
+      frames: [
+        thinkingFrame("part-a "),
+        thinkingFrame("part-b"),
+        turnEndedFrame(),
+      ],
+      stream: true,
+    });
+
+    const raw = await result.response.text();
+    expect(raw.trimEnd().endsWith("data: [DONE]")).toBe(true);
+    const events = parseSSE(raw);
+    const reasoningChunks = events
+      .map((e) => e.choices?.[0]?.delta?.reasoning_content)
+      .filter(Boolean);
+    expect(reasoningChunks).toEqual(["part-a ", "part-b"]);
+    const content = events.map((e) => e.choices?.[0]?.delta?.content || "").join("");
+    expect(content).toBe("part-a part-b");
+  });
+
+  it.each([textFrame("partial"), thinkingFrame("partial")])("emits an error terminal after partial output on transport reset", async (frame) => {
+    const executor = new CursorExecutor();
+    let reads = 0;
+    executor.openAgentHttp2Stream = () => ({
+      responseHeaders: Promise.resolve({ ":status": 200 }),
+      write() {},
+      end() {},
+      close() {},
+      async read() {
+        reads++;
+        if (reads === 1) return { value: frame, done: false };
+        throw new Error("h2 reset");
+      },
+    });
+
+    const result = await executor.executeAgent({
+      model: "grok-4.7-medium",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      stream: true,
+      credentials,
+    });
+
+    const raw = await result.response.text();
+    expect(raw).toContain("partial");
+    expect(raw.trimEnd().endsWith("data: [DONE]")).toBe(true);
+    const events = parseSSE(raw);
+    expect(events.filter((e) => e.error)).toEqual([{ error: { message: "h2 reset", type: "api_error" } }]);
+    expect(events.some((e) => e.choices?.[0]?.finish_reason)).toBe(false);
+    expect(raw.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(reads).toBe(2);
+  });
+
+  it("returns stored KV blob bytes on get after set", async () => {
+    const blobId = Buffer.from("deadbeef", "hex");
+    const blobData = Buffer.from('{"role":"system","content":"be brief"}');
+    const { written, result } = await runAgent({
+      frames: [
+        kvSetFrame(blobId, blobData),
+        kvGetFrame(blobId),
+        textFrame("hello"),
+        turnEndedFrame(),
+      ],
+      stream: true,
+    });
+
+    // run + set-ack + get-ack
+    expect(written.length).toBe(3);
+    const getAck = decodeMessage(written[2].subarray(5));
+    expect(getAck.has(3)).toBe(true);
+    const kvClient = decodeMessage(getAck.get(3)[0].value);
+    const getResult = decodeMessage(kvClient.get(2)[0].value);
+    expect(Buffer.from(getResult.get(1)[0].value).toString("utf8")).toBe(blobData.toString("utf8"));
+
+    const content = parseSSE(await result.response.text())
+      .map((e) => e.choices?.[0]?.delta?.content || "")
+      .join("");
+    expect(content).toBe("hello");
   });
 });
 

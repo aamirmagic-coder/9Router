@@ -18,9 +18,19 @@ import { SSE_DONE, SSE_HEADERS } from "../utils/sseConstants.js";
 import { chatChunkSse, sseChunk } from "../utils/sse.js";
 import { FORMATS } from "../translator/formats.js";
 import { ROLE, OPENAI_BLOCK } from "../translator/schema/index.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { proxyAwareFetch, resolveOutboundProxyUrl } from "../utils/proxyFetch.js";
+import { connectHttp2 } from "../utils/http2Connect.js";
 import zlib from "zlib";
 import crypto from "crypto";
+
+function maskProxyUrl(proxyUrl) {
+  try {
+    const parsed = new URL(proxyUrl);
+    return `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`;
+  } catch {
+    return "proxy";
+  }
+}
 
 // Detect cloud environment
 const isCloudEnv = () => {
@@ -63,7 +73,6 @@ function concatBuffers(...parts) {
 
 const agentString = (field, value) => encodeField(field, PROTOBUF_LEN, value);
 const agentMessage = (field, value) => encodeField(field, PROTOBUF_LEN, value);
-const agentBool = (field, value) => encodeField(field, PROTOBUF_VARINT, value ? 1 : 0);
 
 function textFromContent(content) {
   if (typeof content === "string") return content;
@@ -111,7 +120,106 @@ function encodeHistoryMessage(message) {
   return agentMessage(1, agentMessage(1, agentMessage(1, text)));
 }
 
-export function buildAgentRunFrame(messages, model, tools = [], reasoningEffort = null) {
+// Effort / thinking / fast suffixes on Cursor picker ids are ModelParameter
+// entries, not part of model_id. Sending `claude-4.5-opus-high-thinking` as the
+// id makes AgentService accept the RPC and stream an empty turn.
+const CURSOR_EFFORT_SUFFIXES = ["xhigh", "medium", "high", "low", "max", "minimal", "ultra"];
+
+function encodeModelParameter(id, value) {
+  return agentMessage(3, concatBuffers(agentString(1, id), agentString(2, value)));
+}
+
+function normalizeBodyEffort(reasoningEffort) {
+  const bodyEffort = String(reasoningEffort || "").toLowerCase();
+  if (!bodyEffort || bodyEffort === "none") return null;
+  if (bodyEffort === "ultra") return "max";
+  if (bodyEffort === "minimal") return "low";
+  return bodyEffort;
+}
+
+function idHasEffortToken(id) {
+  return CURSOR_EFFORT_SUFFIXES.some((effort) => (
+    id.endsWith(`-${effort}`) || id.includes(`-${effort}-`)
+  ));
+}
+
+/**
+ * Split a Cursor picker id into the base AgentService model_id plus parameters.
+ * Claude/Gemini/Grok/Composer use `effort`; GPT uses `reasoning`. `-thinking`
+ * and Composer/Fable `-fast` become toggles. Opus/GPT/Grok `*-fast` catalog
+ * ids stay intact.
+ *
+ * Catalog rules (live GetUsableModels):
+ * 1. Exact id listed → send verbatim (Cursor often lists effort tiers as full ids).
+ * 2. Else strip suffixes only when the resulting base is listed.
+ * 3. Else keep the original id — inventing a base that is not usable yields an
+ *    empty AgentService turn (seen with gpt-5.6-luna-medium / cursor-grok-*).
+ */
+export function resolveRequestedModel(modelId, reasoningEffort = null, catalogIds = null) {
+  const original = String(modelId || "").trim().split("/").pop() || "";
+  const bodyValue = normalizeBodyEffort(reasoningEffort);
+  let id = original === "auto" ? "default" : original;
+
+  const attachBodyEffort = (model, params) => {
+    if (bodyValue && !idHasEffortToken(model) && !params.some((p) => p.id === "effort" || p.id === "reasoning")) {
+      params.push({ id: /gpt-/i.test(model) ? "reasoning" : "effort", value: bodyValue });
+    }
+    return params;
+  };
+
+  // Exact catalog hit: the account's usable list is authoritative.
+  if (catalogIds instanceof Set && catalogIds.has(id)) {
+    return { modelId: id, parameters: attachBodyEffort(id, []) };
+  }
+
+  const parameters = [];
+  let working = id;
+
+  // Strip -thinking before effort so `…-high-thinking` becomes base + both params.
+  if (working.endsWith("-thinking")) {
+    working = working.slice(0, -"-thinking".length);
+    parameters.push({ id: "thinking", value: "true" });
+  }
+
+  // Composer / Fable `-fast` is a parameter; other families keep catalog `*-fast` ids.
+  if (
+    (working.startsWith("composer-") || /claude-fable/i.test(working))
+    && working.endsWith("-fast")
+  ) {
+    working = working.slice(0, -"-fast".length);
+    parameters.push({ id: "fast", value: "true" });
+  }
+
+  let effortFromId = null;
+  for (const effort of CURSOR_EFFORT_SUFFIXES) {
+    const suffix = `-${effort}`;
+    if (working.length > suffix.length && working.endsWith(suffix)) {
+      working = working.slice(0, -suffix.length);
+      effortFromId = effort === "ultra" ? "max" : effort === "minimal" ? "low" : effort;
+      break;
+    }
+  }
+
+  const stripped = working !== id || parameters.length > 0;
+  // Catalog-aware strip:
+  // - exact id already handled above
+  // - strip only when the resulting base is listed as usable
+  // - empty Set = live fetch failed/empty → keep original (invented bases empty-turn)
+  // - null catalogIds = unit-test / offline path → allow legacy strip
+  if (stripped && catalogIds instanceof Set && (catalogIds.size === 0 || !catalogIds.has(working))) {
+    return { modelId: id, parameters: attachBodyEffort(id, []) };
+  }
+
+  if (effortFromId) {
+    parameters.push({ id: /gpt-/i.test(working) ? "reasoning" : "effort", value: effortFromId });
+  } else {
+    attachBodyEffort(working, parameters);
+  }
+
+  return { modelId: working, parameters };
+}
+
+export function buildAgentRunFrame(messages, model, tools = [], reasoningEffort = null, catalogIds = null) {
   // custom_system_prompt (RunRequest field 8) makes AgentService return an
   // empty turn. Fold system text into the current user message instead.
   const system = messages
@@ -146,24 +254,21 @@ export function buildAgentRunFrame(messages, model, tools = [], reasoningEffort 
     ...(conversationHistory ? [agentMessage(7, conversationHistory)] : []),
   );
   const conversationAction = agentMessage(1, userAction);
-  const effort = String(reasoningEffort || "").toLowerCase();
-  const effortValue = effort === "ultra" ? "max" : effort === "minimal" ? "low" : effort;
-  const parameter = effortValue && effortValue !== "none"
-    ? agentMessage(3, concatBuffers(
-      agentString(1, /gpt-/i.test(model) ? "reasoning" : "effort"),
-      agentString(2, effortValue),
-    ))
-    : null;
+
+  const { modelId, parameters } = resolveRequestedModel(model, reasoningEffort, catalogIds);
+  // RequestedModel: model_id (1) + parameters (3). Field 7 is Bedrock credentials,
+  // not max_mode — writing a bool there yields empty turns on Claude/GPT.
   const requestedModel = concatBuffers(
-    agentString(1, model), agentBool(7, true),
-    ...(parameter ? [parameter] : []),
+    agentString(1, modelId),
+    ...parameters.map((param) => encodeModelParameter(param.id, param.value)),
   );
   // ModelDetails (field 3): thinking variants (Composer, Grok, *-thinking)
-  // return an empty turn when only RequestedModel (field 9) is set.
+  // return an empty turn when only RequestedModel (field 9) is set. Use the
+  // resolved base id so the server can match the catalog entry.
   const modelDetails = concatBuffers(
-    agentString(1, model),
-    agentString(3, model),
-    agentString(4, model),
+    agentString(1, modelId),
+    agentString(3, modelId),
+    agentString(4, modelId),
   );
   const mcpTools = encodeMcpTools(tools);
   const runRequest = concatBuffers(
@@ -241,33 +346,41 @@ function rejectExecRequest(execRequest) {
 
 export function encodeKvClientMessage(kvId, resultField, resultPayload, metadata) {
   const parts = [];
+  // Proto3: omit id when the server did not send one (do not write id=0).
   if (kvId) parts.push(encodeField(1, PROTOBUF_VARINT, kvId));
   parts.push(encodeField(resultField, PROTOBUF_LEN, resultPayload || new Uint8Array()));
   if (metadata && metadata.length) parts.push(encodeField(4, PROTOBUF_LEN, metadata));
   return wrapConnectRPCFrame(agentMessage(3, concatBuffers(...parts)));
 }
 
-// The AgentService h2 path bypasses proxyAwareFetch (Node http2 duplex, no
-// dispatcher), so the strict-proxy guarantee that proxyFetch enforces for
-// regular fetch never applies here. Until h2 proxying lands (see #3276),
-// honor just the policy side: when a proxy is intended AND strict AND cannot
-// be resolved for this request, fail closed instead of silently opening a
-// direct socket that exposes the host's real IP — the exact leak strict mode
-// exists to prevent (#4333). Non-strict callers keep today's direct behavior.
-const proxyIntentFailed = (proxyOptions) => {
+function blobIdKey(blobIdBytes) {
+  if (!blobIdBytes || typeof blobIdBytes === "number") return "";
+  return Buffer.from(blobIdBytes).toString("hex");
+}
+
+// Strict pools must never silently fall back to a direct socket (#4333).
+// With HTTP/2 CONNECT tunneling a resolved connection proxy is honored; fail
+// closed when a bound pool/connection is intended but has no usable URL.
+// Env HTTP_PROXY must not count as "honoring" a drained connection pool.
+function proxyIntentFailed(targetUrl, proxyOptions) {
   if (proxyOptions?.strictProxy !== true) return false;
-  const proxyIntended = Boolean(
-    proxyOptions?.proxyPoolId
-    || proxyOptions?.enabled === true
-    || proxyOptions?.connectionProxyEnabled === true
-    || (proxyOptions?.url || proxyOptions?.connectionProxyUrl || "").trim().length > 0,
-  );
+  // Relay headers cannot carry the AgentService h2 duplex tunnel.
+  if (proxyOptions?.vercelRelayUrl) return true;
+
+  const connectionEnabled = proxyOptions?.enabled === true
+    || proxyOptions?.connectionProxyEnabled === true;
+  const hasPoolId = Boolean(proxyOptions?.proxyPoolId);
+  const explicitUrl = (proxyOptions?.url || proxyOptions?.connectionProxyUrl || "").trim();
+  const proxyIntended = hasPoolId || connectionEnabled || explicitUrl.length > 0;
   if (!proxyIntended) return false;
-  // A vercel/cloudflare-style relay rides on plain fetch, not this h2 path.
-  if (proxyOptions?.vercelRelayUrl) return false;
-  // Proxy intended and strict: the h2 transport below cannot carry it.
-  return true;
-};
+
+  // Bound pool/connection: only the explicit connection URL honors the pool.
+  if (hasPoolId || connectionEnabled) {
+    return !explicitUrl || !resolveOutboundProxyUrl(targetUrl, proxyOptions);
+  }
+
+  return !resolveOutboundProxyUrl(targetUrl, proxyOptions);
+}
 
 const CURSOR_STREAM_DEBUG = process.env.CURSOR_STREAM_DEBUG === "1";
 const debugLog = (...args) => {
@@ -285,6 +398,14 @@ function visibleComposerContentFromThinking(thinking) {
   const endIdx = thinking.lastIndexOf(endTag);
   if (endIdx < 0) return "";
   return thinking.slice(endIdx + endTag.length).trimStart();
+}
+
+function composerReasoningFromThinking(thinking) {
+  if (!thinking) return "";
+  const endTag = "</think>";
+  const endIdx = thinking.lastIndexOf(endTag);
+  if (endIdx < 0) return thinking;
+  return thinking.slice(0, endIdx);
 }
 
 function decompressPayload(payload, flags) {
@@ -537,15 +658,20 @@ export class CursorExecutor extends BaseExecutor {
 
   /**
    * AgentService (agent.api5.cursor.sh) is HTTP/2-only. Node's fetch/undici speaks
-   * HTTP/1.1 and fails with HTTPParserError on the h2 preface — use http2 duplex.
+   * HTTP/1.1 and fails with HTTPParserError on the h2 preface — use http2 duplex,
+   * optionally tunneled through CONNECT/SOCKS so strict proxy pools are honored.
    */
-  openAgentHttp2Stream(url, headers, signal) {
+  async openAgentHttp2Stream(url, headers, signal, proxyOptions = null) {
     if (!http2) {
       throw new Error("HTTP/2 is required for Cursor AgentService (endpoint is h2-only)");
     }
 
     const urlObj = new URL(url);
-    const client = http2.connect(`https://${urlObj.host}`);
+    const proxyUrl = resolveOutboundProxyUrl(url, proxyOptions);
+    if (proxyUrl) {
+      console.info("CURSOR_AGENT", `Run via HTTP/2 proxy ${maskProxyUrl(proxyUrl)}`);
+    }
+    const client = await connectHttp2(url, { proxyUrl });
     const chunkQueue = [];
     let waiting = null;
     let ended = false;
@@ -637,16 +763,15 @@ export class CursorExecutor extends BaseExecutor {
     const agentEndpoint = PROVIDER_OAUTH.cursor?.agentEndpoint;
     if (!agentEndpoint) throw new Error("Cursor AgentService endpoint is not configured");
 
-    // Policy guard: the h2 duplex stream below cannot ride a proxy, so a
-    // strict proxy configuration must fail closed here rather than leak the
-    // real IP on a direct socket (see proxyIntentFailed above).
-    if (proxyIntentFailed(proxyOptions)) {
+    const url = `${agentEndpoint}${AGENT_RUN_PATH}`;
+    // Policy guard: strict proxy intended but unresolved → fail closed rather
+    // than leak the real IP on a direct socket. A resolved proxy rides CONNECT.
+    if (proxyIntentFailed(url, proxyOptions)) {
       throw new Error(
         "Cursor AgentService requires a strict proxy that this HTTP/2 transport cannot honor; refusing to open a direct connection"
       );
     }
 
-    const url = `${agentEndpoint}${AGENT_RUN_PATH}`;
     const headers = this.buildHeaders(credentials);
     const requestController = new AbortController();
     if (signal?.addEventListener) {
@@ -658,12 +783,14 @@ export class CursorExecutor extends BaseExecutor {
     const originalMessages = body.messages || [];
     let workingMessages = originalMessages;
     const tools = body.tools || [];
-    // "Auto (Server Picks)" / "default" is a picker alias, not an AgentService
-    // model id — sending it verbatim yields an empty turn. Resolve it to the
-    // account's default agent-capable model from the live catalog before Run.
+    // Live catalog: resolve auto/default, and keep exact usable-model ids
+    // (including effort tiers) instead of blindly stripping suffixes.
+    // Always pass a Set (possibly empty) so a failed GetUsableModels does not
+    // fall back to inventing stripped bases that AgentService empty-turns.
+    const catalog = await resolveCursorModels(credentials, { signal, log, proxyOptions });
+    const catalogIds = new Set((catalog?.models || []).map((entry) => entry.id));
     let runModel = model;
     if (model === "default" || model === "auto") {
-      const catalog = await resolveCursorModels(credentials, { signal, log });
       const selection = resolveAutoModelSelection(catalog?.models);
       if (selection) {
         log?.info?.("CURSOR", `auto model resolved: ${model} → ${selection.modelId} (${selection.matchedBy})`);
@@ -671,15 +798,25 @@ export class CursorExecutor extends BaseExecutor {
       }
     }
 
-    const openAgentSession = (frameMessages) => {
-      const session = this.openAgentHttp2Stream(url, headers, requestController.signal);
-      session.write(buildAgentRunFrame(frameMessages, runModel, tools, body.reasoning_effort || body.reasoning?.effort));
+    // Request-scoped blob store for AgentService KV get/set. Claude/GPT/Gemini
+    // wait on this handshake; answering get with empty bytes leaves heartbeats only.
+    const blobStore = new Map();
+
+    const openAgentSession = async (frameMessages) => {
+      const session = await this.openAgentHttp2Stream(url, headers, requestController.signal, proxyOptions);
+      session.write(buildAgentRunFrame(
+        frameMessages,
+        runModel,
+        tools,
+        body.reasoning_effort || body.reasoning?.effort,
+        catalogIds,
+      ));
       return session;
     };
 
     let session;
     try {
-      session = openAgentSession(workingMessages);
+      session = await openAgentSession(workingMessages);
     } catch (error) {
       throw new Error(`Cursor AgentService request failed: ${error.message}`);
     }
@@ -718,12 +855,14 @@ export class CursorExecutor extends BaseExecutor {
     // so strict clients such as Claude Code accept the completed stream.
     const responseId = `chatcmpl-msg_${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);
-    const composerModel = isComposerModel(model);
+    const composerModel = isComposerModel(runModel);
     let pending = Buffer.alloc(0);
     let finished = false;
     let thinkingAcc = "";
     let emittedVisible = 0;
+    let emittedReasoning = 0;
     let emittedText = false;
+    let emittedToolCall = false;
 
     const flushThinkingFallback = (onEvent) => {
       if (emittedText || !thinkingAcc) return;
@@ -740,7 +879,7 @@ export class CursorExecutor extends BaseExecutor {
       const finishTurn = () => {
         flushThinkingFallback(onEvent);
         finished = true;
-        if (emittedText) onEvent({ type: "done" });
+        if (emittedText || emittedToolCall) onEvent({ type: "done" });
         else onEvent({ type: "error", value: "Cursor AgentService returned an empty turn" });
       };
       try {
@@ -764,13 +903,23 @@ export class CursorExecutor extends BaseExecutor {
                   onEvent({ type: "text", value: textDelta });
                 }
               }
-              // thinking_delta (field 4). Composer (and some Grok variants) put
-              // the visible answer after </think> here and never send text_delta.
+              // thinking_delta (field 4). Composer puts the visible answer after
+              // </think> and reasoning before it; Grok often only sends this field.
+              // Stream reasoning live for all models so clients (e.g. Hermes) do
+              // not sit in silence until turn_ended and then treat the close as
+              // truncation. Content still comes from text_delta or the finish
+              // fallback when the turn never produced visible text.
               if (update.has(4)) {
                 const thinkingDelta = extractAgentString(decodeMessage(update.get(4)[0].value), 1);
                 if (thinkingDelta) {
                   thinkingAcc += thinkingDelta;
                   if (composerModel) {
+                    const reasoning = composerReasoningFromThinking(thinkingAcc);
+                    if (reasoning.length > emittedReasoning) {
+                      const reasoningDelta = reasoning.slice(emittedReasoning);
+                      emittedReasoning = reasoning.length;
+                      if (reasoningDelta) onEvent({ type: "thinking", value: reasoningDelta });
+                    }
                     const visible = visibleComposerContentFromThinking(thinkingAcc);
                     if (visible.length > emittedVisible) {
                       const deltaContent = visible.slice(emittedVisible);
@@ -778,23 +927,34 @@ export class CursorExecutor extends BaseExecutor {
                       emittedText = true;
                       onEvent({ type: "text", value: deltaContent });
                     }
+                  } else {
+                    onEvent({ type: "thinking", value: thinkingDelta });
                   }
                 }
               }
-              // Keep unsigned reasoning upstream-only for Anthropic clients.
               if (update.has(14)) {
                 finishTurn();
               }
             }
 
-            // KvServerMessage (field 4): get/set blob. Ack so the stream proceeds.
+            // KvServerMessage (field 4): get/set blob. Store set payloads and
+            // return them on get so Claude/GPT/Gemini can continue the turn.
             if (serverMessage.has(4)) {
               const kv = decodeMessage(serverMessage.get(4)[0].value);
               const kvId = kv.get(1)?.[0]?.value || 0;
               const metadata = kv.get(4)?.[0]?.value || null;
               if (kv.has(2)) {
-                session.write(encodeKvClientMessage(kvId, 2, agentMessage(1, new Uint8Array()), metadata));
+                const getArgs = decodeMessage(kv.get(2)[0].value);
+                const key = blobIdKey(getArgs.get(1)?.[0]?.value);
+                const blobData = (key && blobStore.get(key)) || new Uint8Array();
+                session.write(encodeKvClientMessage(kvId, 2, agentMessage(1, blobData), metadata));
               } else if (kv.has(3)) {
+                const setArgs = decodeMessage(kv.get(3)[0].value);
+                const key = blobIdKey(setArgs.get(1)?.[0]?.value);
+                const blobData = setArgs.get(2)?.[0]?.value;
+                if (key && blobData && typeof blobData !== "number") {
+                  blobStore.set(key, Buffer.from(blobData));
+                }
                 session.write(encodeKvClientMessage(kvId, 3, new Uint8Array(), metadata));
               }
             }
@@ -810,6 +970,7 @@ export class CursorExecutor extends BaseExecutor {
                 const name = mcp.toolName || mcp.name;
                 if (name) {
                   log?.info?.("CURSOR", `AgentService MCP tool_call ${name}`);
+                  emittedToolCall = true;
                   finished = true;
                   onEvent({
                     type: "tool_call",
@@ -854,11 +1015,13 @@ export class CursorExecutor extends BaseExecutor {
     const runAgentTurn = async (onEvent) => {
       finished = false;
       emittedText = false;
+      emittedToolCall = false;
       thinkingAcc = "";
       emittedVisible = 0;
+      emittedReasoning = 0;
       pending = Buffer.alloc(0);
       await consume(onEvent);
-      return { sawContent: emittedText };
+      return { sawContent: emittedText || emittedToolCall };
     };
 
     // Wrap events so we never retry once real output has reached the client.
@@ -886,7 +1049,7 @@ export class CursorExecutor extends BaseExecutor {
           attempt++;
           log?.info?.("CURSOR", `empty_turn on ${originalMessages.length}-message session; retry ${attempt}/${CURSOR_EMPTY_TURN_MAX_RETRIES} with tail-only frame`);
           workingMessages = tailOnlyCursorMessages(originalMessages);
-          session = openAgentSession(workingMessages);
+          session = await openAgentSession(workingMessages);
           const retryHeaders = await session.responseHeaders;
           const retryStatus = Number(retryHeaders[":status"] || 0);
           if (retryStatus !== 200) {
@@ -961,12 +1124,39 @@ export class CursorExecutor extends BaseExecutor {
         // Defer terminal SSE until runWithRetry settles. Emitting stop on the
         // first empty upstream turn wedges Cursor before the tail-only retry
         // can recover the session.
+        let streamedOutput = false;
+        let closed = false;
+        const closeCleanly = (finishReason = "stop") => {
+          if (closed) return;
+          closed = true;
+          try {
+            controller.enqueue(encoder.encode(chatChunkSse({
+              id: responseId, created, model, delta: {},
+              finishReason,
+            })));
+            controller.enqueue(encoder.encode(SSE_DONE));
+            controller.close();
+          } catch {
+            // Controller already closed by cancel/error.
+          }
+        };
+        const closeWithError = (message) => {
+          if (closed) return;
+          closed = true;
+          controller.enqueue(encoder.encode(sseChunk({ error: { message, type: "api_error" } })));
+          controller.enqueue(encoder.encode(SSE_DONE));
+          controller.close();
+        };
         runWithRetry((event) => {
+          if (closed) return;
           if (event.type === "text") {
+            streamedOutput = true;
             controller.enqueue(encoder.encode(chatChunkSse({ id: responseId, created, model, delta: { content: event.value } })));
           } else if (event.type === "thinking") {
+            streamedOutput = true;
             controller.enqueue(encoder.encode(chatChunkSse({ id: responseId, created, model, delta: { reasoning_content: event.value } })));
           } else if (event.type === "tool_call") {
+            streamedOutput = true;
             controller.enqueue(encoder.encode(chatChunkSse({
               id: responseId, created, model,
               delta: {
@@ -982,18 +1172,16 @@ export class CursorExecutor extends BaseExecutor {
             // An SSE error frame, not a content delta: a protocol failure must not
             // be rendered to the user as the assistant's reply, and downstream
             // usage tracking must not record the turn as a success.
-            controller.enqueue(encoder.encode(sseChunk({ error: { message: event.value, type: "api_error" } })));
-            controller.enqueue(encoder.encode(SSE_DONE));
-            controller.close();
+            closeWithError(event.value);
           } else if (event.type === "done") {
-            controller.enqueue(encoder.encode(chatChunkSse({
-              id: responseId, created, model, delta: {},
-              finishReason: event.finishReason || "stop",
-            })));
-            controller.enqueue(encoder.encode(SSE_DONE));
-            controller.close();
+            closeCleanly(event.finishReason || "stop");
           }
-        }).catch((error) => controller.error(error));
+        }).catch((error) => {
+          if (closed) return;
+          // Preserve partial deltas without misreporting transport failure as success.
+          if (streamedOutput) closeWithError(error.message);
+          else controller.error(error);
+        });
       },
       cancel() {
         requestController.abort();

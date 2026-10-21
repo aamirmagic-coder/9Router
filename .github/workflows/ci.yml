@@ -18,6 +18,8 @@ concurrency:
 env:
   NODE_VERSION: "22" # matches the Dockerfile base image
   NEXT_TELEMETRY_DISABLED: "1"
+  # Use the committed lockfile when present (npm ci); fall back to npm install until it lands.
+  ROOT_INSTALL: if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund --legacy-peer-deps; fi
 
 jobs:
   security-tests:
@@ -29,8 +31,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # master does not yet contain package-lock.json (#4290 is separate); use npm install until it lands.
-      - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - run: eval "$ROOT_INSTALL"
       - run: npm install --no-audit --no-fund --legacy-peer-deps
         working-directory: tests
       - name: Run tests listed in tests/security-suite.txt (hard gate)
@@ -44,32 +45,62 @@ jobs:
           done < <(grep -vE '^\s*(#|$)' security-suite.txt | tr -d '\r')
           npx vitest run "${files[@]}"
 
-  test-suite:
-    name: Full test suite (no-regression gate)
+  # The suite is not all-green on master, so the gate compares against the PR's base
+  # commit: a test that fails on the base is pre-existing, one that passes there and
+  # fails here is a regression. tests/__baseline__/known-fails.txt still applies (flaky
+  # tests, and the only baseline for pushes to master).
+  test-run:
+    name: Test suite (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [head, base]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - if: matrix.target == 'head' || github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.target == 'base' && github.event.pull_request.base.sha || '' }}
+      - if: matrix.target == 'head' || github.event_name == 'pull_request'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install --no-audit --no-fund --legacy-peer-deps
-      - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - if: matrix.target == 'head' || github.event_name == 'pull_request'
+        run: eval "$ROOT_INSTALL"
+      - if: matrix.target == 'head' || github.event_name == 'pull_request'
+        run: npm install --no-audit --no-fund --legacy-peer-deps
         working-directory: tests
-      # The suite is not all-green yet; known failures live in
-      # tests/__baseline__/known-fails.txt. The gate fails only on a pass→fail change.
-      - name: Run full suite
+      - if: matrix.target == 'head' || github.event_name == 'pull_request'
+        name: Run full suite
         working-directory: tests
         run: npx vitest run --reporter=default --reporter=json --outputFile=results.json || true
-      - name: No-regression gate
-        run: node tests/__baseline__/verify-no-regression.mjs tests/results.json
-      - if: always()
+      - if: matrix.target == 'head' || github.event_name == 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-results
+          name: test-results-${{ matrix.target }}
           path: tests/results.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
+
+  test-suite:
+    name: Full test suite (no-regression gate)
+    needs: test-run
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: test-results-*
+      - name: No-regression gate
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node tests/__baseline__/verify-no-regression.mjs test-results-head/results.json --base test-results-base/results.json
+          else
+            node tests/__baseline__/verify-no-regression.mjs test-results-head/results.json
+          fi
 
   build:
     name: Production build
@@ -80,7 +111,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - run: eval "$ROOT_INSTALL"
       - run: npm run build
 
   dependency-audit:
@@ -92,9 +123,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install --no-audit --no-fund --legacy-peer-deps
-      - name: npm audit (production deps, high+)
-        run: npm audit --omit=dev --audit-level=high
+      # npm audit reads the lockfile; resolve one without installing if none is committed.
+      - run: '[ -f package-lock.json ] || npm install --package-lock-only --no-audit --no-fund --legacy-peer-deps'
+      - name: npm audit (production deps, high+, reviewed exceptions only)
+        run: |
+          npm audit --omit=dev || true
+          npm audit --omit=dev --json > audit.json || true
+          node scripts/ci/audit-gate.mjs audit.json
 
   dependency-review:
     name: Dependency review
@@ -137,7 +172,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - run: eval "$ROOT_INSTALL"
       - name: ESLint on changed JS files
         continue-on-error: true
         env:

@@ -41,3 +41,12 @@ and findings that only affect `next dev`.
   random value. Never reuse the example value from `.env.example` or the docs.
 - Keep `requireLogin` and `requireApiKey` on for anything reachable from a network.
 - Expose the dashboard through a tunnel only when you need it (`tunnelDashboardAccess`).
+
+## CI security gates
+
+- `tests/security-suite.txt` lists the deterministic security regression tests CI runs
+  as a hard gate. Add the regression test for every vulnerability fix there.
+- The dependency audit fails on any high or critical advisory in production
+  dependencies. An advisory with no patched release that 9Router cannot reach may be
+  listed in `.github/audit-exceptions.json` with the exact advisory ID, the reason it
+  is unreachable, and a `reviewBy` date; an expired entry fails the gate again.

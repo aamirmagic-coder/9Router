@@ -305,4 +305,47 @@ describe("dashboard guard helpers", () => {
 
     expect(__test__.extractApiKey(apiRequest)).toBe("header-key");
   });
+
+  it("flags tiny Next-Action values as malformed scanner probes", () => {
+    expect(__test__.isMalformedServerActionId("x")).toBe(true);
+    expect(__test__.isMalformedServerActionId("ab")).toBe(true);
+    expect(__test__.isMalformedServerActionId("")).toBe(true);
+    expect(__test__.isMalformedServerActionId("  ")).toBe(true);
+    expect(__test__.isMalformedServerActionId(null)).toBe(false);
+    expect(__test__.isMalformedServerActionId("0123456789abcdef0123456789abcdef")).toBe(false);
+  });
+});
+
+describe("dashboard guard malformed Next-Action probes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    mocks.validateApiKey.mockResolvedValue(false);
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockResolvedValue(false);
+  });
+
+  it("rejects Next-Action: x with 400 before Next.js handles the request", async () => {
+    const response = await proxy(localRequest("/dashboard", {
+      host: "localhost:20128",
+      "next-action": "x",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid Server Action");
+    expect(mocks.jsonResponse).toHaveBeenCalledWith(
+      { error: "Invalid Server Action" },
+      { status: 400 },
+    );
+  });
+
+  it("allows a normal-length Next-Action id through to route handling", async () => {
+    const response = await proxy(localRequest("/dashboard", {
+      host: "localhost:20128",
+      "next-action": "0123456789abcdef0123456789abcdef",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
 });

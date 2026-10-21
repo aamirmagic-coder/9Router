@@ -193,6 +193,20 @@ function isPublicApi(pathname) {
   return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+/**
+ * Next.js Server Action ids are long non-deterministic strings. Scanners often
+ * POST `Next-Action: x` (or similarly tiny junk), which Next logs as:
+ * "Server Reference ID did not match the expected format".
+ * Reject those early so production logs stay clean.
+ */
+export function isMalformedServerActionId(actionId) {
+  if (actionId == null) return false;
+  const id = String(actionId).trim();
+  if (!id) return true;
+  if (id.length <= 2) return true;
+  return false;
+}
+
 // Shared with src/proxy.js — the mimo login branch must respect dashboard auth.
 export { isAuthenticated };
 
@@ -202,10 +216,16 @@ export const __test__ = {
   extractApiKey,
   canAccessPublicLlmApi,
   canAccessLocalOnlyRoute,
+  isMalformedServerActionId,
 };
 
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
+
+  const nextAction = request.headers.get("next-action");
+  if (nextAction != null && isMalformedServerActionId(nextAction)) {
+    return NextResponse.json({ error: "Invalid Server Action" }, { status: 400 });
+  }
 
   // Local-only gate for spawn-capable / host-secret routes.
   if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {

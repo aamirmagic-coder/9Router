@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Cursor**: send GetUsableModels through the proxy already configured on that connection (same path as chat). Accounts with no proxy still connect directly; a direct socket is what Cursor geo-blocks with 403
+
 # v0.5.104 (2026-10-15)
 
 ## Features

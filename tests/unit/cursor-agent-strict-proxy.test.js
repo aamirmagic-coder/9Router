@@ -56,26 +56,31 @@ describe("Cursor AgentService strict-proxy policy guard", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
-  it("fails closed when strict is set via enabled+url", async () => {
+  it("tunnels when a strict proxy URL resolves (CONNECT path)", async () => {
     const executor = new CursorExecutor();
     const { connect } = stubSession(executor);
     await expect(runAgent(executor, {
       strictProxy: true,
       enabled: true,
       url: "http://127.0.0.1:9",
-    })).rejects.toThrow(/strict proxy/u);
-    expect(connect).not.toHaveBeenCalled();
+    })).resolves.toBeTruthy();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][3]).toMatchObject({ enabled: true, url: "http://127.0.0.1:9" });
   });
 
-  it("fails closed when strict is set via connectionProxyEnabled+connectionProxyUrl", async () => {
+  it("tunnels when a strict connectionProxyUrl resolves", async () => {
     const executor = new CursorExecutor();
     const { connect } = stubSession(executor);
     await expect(runAgent(executor, {
       strictProxy: true,
       connectionProxyEnabled: true,
       connectionProxyUrl: "http://127.0.0.1:9",
-    })).rejects.toThrow(/strict proxy/u);
-    expect(connect).not.toHaveBeenCalled();
+    })).resolves.toBeTruthy();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][3]).toMatchObject({
+      connectionProxyEnabled: true,
+      connectionProxyUrl: "http://127.0.0.1:9",
+    });
   });
 
   it("non-strict proxy options keep today's direct h2 behavior", async () => {

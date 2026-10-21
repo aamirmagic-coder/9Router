@@ -704,8 +704,8 @@ export function parseQuotaData(provider, data) {
         break;
 
       case "cursor":
-        // Plan spend is USD (cents from GetCurrentPeriodUsage). Forward
-        // remainingPercentage only — do not pass absolute remaining (UI treats it as %).
+        // Cursor Models / Other Models percents (+ optional on-demand USD).
+        // Forward remainingPercentage only — do not pass absolute remaining (UI treats it as %).
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
             normalizedQuotas.push({

@@ -1,9 +1,11 @@
 /**
  * Cursor IDE usage — DashboardService Connect JSON on api2.cursor.sh.
  *
- * Pro / Team / Ultra: POST GetCurrentPeriodUsage (spend in USD cents).
+ * Pro / Team / Ultra: POST GetCurrentPeriodUsage (Cursor/Other model %).
+ * Per-model tokens + billed cost: POST GetAggregatedUsageEvents (fail-open).
  * Enterprise request buckets: GET /auth/usage as fallback.
  * Plan label: POST GetPlanInfo (fail-open).
+ * No Plan (USD) progress bar — spend lives in modelUsage cost column.
  */
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
@@ -53,45 +55,13 @@ function addPlanSpendQuotas(quotas, data) {
   const planUsage = data?.planUsage;
   if (!planUsage || typeof planUsage !== "object") return false;
 
-  const limitCents = toFiniteNumber(planUsage.limit, 0);
-  const usedCents = toFiniteNumber(
-    planUsage.includedSpend ?? planUsage.totalSpend,
-    0,
-  );
-  const remainingCents = toFiniteNumber(
-    planUsage.remaining,
-    Math.max(0, limitCents - usedCents),
-  );
+  // Match Cursor's Plan & Usage page: percent bars for Cursor Models /
+  // Other Models only — no Plan (USD) progress bar (spend is in modelUsage).
   const resetAt = parseResetTime(data.billingCycleEnd);
-
-  if (limitCents > 0) {
-    const total = centsToUsd(limitCents);
-    const used = centsToUsd(usedCents);
-    const remainingUsd = centsToUsd(remainingCents);
-    quotas["Plan (USD)"] = {
-      used,
-      total,
-      remainingPercentage:
-        planUsage.totalPercentUsed != null
-          ? remainingFromPercentUsed(planUsage.totalPercentUsed)
-          : total > 0
-            ? (remainingUsd / total) * 100
-            : 0,
-      resetAt,
-    };
-  } else if (planUsage.totalPercentUsed != null) {
-    const used = toFiniteNumber(planUsage.totalPercentUsed, 0);
-    quotas["Included usage"] = {
-      used,
-      total: 100,
-      remainingPercentage: remainingFromPercentUsed(used),
-      resetAt,
-    };
-  }
 
   if (planUsage.autoPercentUsed != null) {
     const used = toFiniteNumber(planUsage.autoPercentUsed, 0);
-    quotas["Auto models (%)"] = {
+    quotas["Cursor Models (%)"] = {
       used,
       total: 100,
       remainingPercentage: remainingFromPercentUsed(used),
@@ -100,7 +70,21 @@ function addPlanSpendQuotas(quotas, data) {
   }
   if (planUsage.apiPercentUsed != null) {
     const used = toFiniteNumber(planUsage.apiPercentUsed, 0);
-    quotas["Named models (%)"] = {
+    quotas["Other Models (%)"] = {
+      used,
+      total: 100,
+      remainingPercentage: remainingFromPercentUsed(used),
+      resetAt,
+    };
+  }
+
+  // Fallback when Cursor only returns a combined percent (no auto/api split).
+  if (
+    Object.keys(quotas).length === 0 &&
+    planUsage.totalPercentUsed != null
+  ) {
+    const used = toFiniteNumber(planUsage.totalPercentUsed, 0);
+    quotas["Included usage (%)"] = {
       used,
       total: 100,
       remainingPercentage: remainingFromPercentUsed(used),
@@ -171,6 +155,53 @@ function addAuthUsageQuotas(quotas, data) {
   return added;
 }
 
+function parseTokenCount(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+  }
+  return 0;
+}
+
+/**
+ * Map GetAggregatedUsageEvents aggregations into modelUsage rows.
+ * costUsd is Cursor's billed amount (totalCents/100), not a local $/1M estimate.
+ */
+export function mapAggregatedUsageEvents(data) {
+  const rows = Array.isArray(data?.aggregations) ? data.aggregations : [];
+  const modelUsage = [];
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const model = typeof row.modelIntent === "string" ? row.modelIntent.trim() : "";
+    if (!model) continue;
+
+    modelUsage.push({
+      model,
+      inputTokens: parseTokenCount(row.inputTokens),
+      outputTokens: parseTokenCount(row.outputTokens),
+      cacheReadTokens: parseTokenCount(row.cacheReadTokens),
+      cacheWriteTokens: parseTokenCount(row.cacheWriteTokens),
+      costUsd: Number((toFiniteNumber(row.totalCents, 0) / 100).toFixed(4)),
+    });
+  }
+
+  modelUsage.sort((a, b) => b.costUsd - a.costUsd || a.model.localeCompare(b.model));
+  return modelUsage;
+}
+
+async function fetchModelUsage(aggregatedUrl, token, machineId, proxyOptions) {
+  if (!aggregatedUrl) return [];
+  try {
+    const response = await postConnectJson(aggregatedUrl, token, machineId, proxyOptions);
+    if (!response?.ok) return [];
+    return mapAggregatedUsageEvents(await readJson(response));
+  } catch {
+    return [];
+  }
+}
+
 export async function getCursorUsage(accessToken, providerSpecificData = {}, proxyOptions = null) {
   if (!accessToken || typeof accessToken !== "string" || !accessToken.trim()) {
     return { message: "Cursor access token not available. Reconnect Cursor to view quota." };
@@ -181,6 +212,7 @@ export async function getCursorUsage(accessToken, providerSpecificData = {}, pro
   const periodUrl = CURSOR_USAGE.url;
   const planInfoUrl = CURSOR_USAGE.planInfoUrl;
   const authUsageUrl = CURSOR_USAGE.authUsageUrl;
+  const aggregatedUrl = CURSOR_USAGE.aggregatedUrl;
 
   if (!periodUrl) {
     return { message: "Cursor usage endpoint is not configured." };
@@ -198,11 +230,14 @@ export async function getCursorUsage(accessToken, providerSpecificData = {}, pro
 
     const quotas = {};
     let periodData = null;
+    let modelUsage = [];
 
     if (periodResponse.ok) {
       periodData = await readJson(periodResponse);
       addPlanSpendQuotas(quotas, periodData);
       addOnDemandQuota(quotas, periodData);
+      // Fail-open: period quota still returned if aggregate call fails.
+      modelUsage = await fetchModelUsage(aggregatedUrl, token, machineId, proxyOptions);
     }
 
     if (Object.keys(quotas).length === 0 && authUsageUrl) {
@@ -247,7 +282,9 @@ export async function getCursorUsage(accessToken, providerSpecificData = {}, pro
       }
     }
 
-    return { plan, quotas };
+    const result = { plan, quotas };
+    if (modelUsage.length > 0) result.modelUsage = modelUsage;
+    return result;
   } catch (error) {
     return { message: `Cursor error: ${error.message}` };
   }

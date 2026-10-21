@@ -28,6 +28,7 @@ export default {
       url: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
       planInfoUrl: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo",
       authUsageUrl: "https://api2.cursor.sh/auth/usage",
+      aggregatedUrl: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetAggregatedUsageEvents",
     },
   },
   models: [

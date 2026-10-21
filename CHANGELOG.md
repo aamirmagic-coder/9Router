@@ -1,3 +1,8 @@
+# Unreleased
+
+## Features
+- **Usage**: Cursor Quota Tracker shows Cursor/Other Models % plus per-model API tokens and billed cost from GetAggregatedUsageEvents (no Plan USD progress bar)
+
 # v0.5.104 (2026-10-15)
 
 ## Features

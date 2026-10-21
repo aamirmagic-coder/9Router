@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
+import CursorModelUsageTable from "./CursorModelUsageTable";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -1374,15 +1375,20 @@ export default function ProviderLimits() {
                     <p className="text-xs text-text-muted">{quota.message}</p>
                   </div>
                 ) : (
-                  <QuotaTable
-                    quotas={visibleQuotas}
-                    compact
-                    sortMode="default"
-                    showSortLabel={
-                      conn.provider === "codex" && quotaSortMode !== "default"
-                    }
-                    onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
-                  />
+                  <>
+                    <QuotaTable
+                      quotas={visibleQuotas}
+                      compact
+                      sortMode="default"
+                      showSortLabel={
+                        conn.provider === "codex" && quotaSortMode !== "default"
+                      }
+                      onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
+                    />
+                    {conn.provider === "cursor" && (
+                      <CursorModelUsageTable modelUsage={quota?.raw?.modelUsage} />
+                    )}
+                  </>
                 )}
                 {quota?.message && !error && !isLoading && (
                   <p className="mt-2 px-1 text-[10px] leading-relaxed text-text-muted">

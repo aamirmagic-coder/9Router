@@ -1,6 +1,6 @@
 # 9Router API Reference
 
-<!-- ch:trace row=DOC-24 spec=docs/api-reference.md#configuration test=none:doc-prose-no-test doc=docs/api-reference.md prompt=/tmp/9router-DOC-24-brief.txt evidence=none:doc-only-local-grep witness=docs/api-reference.md verdict=none:pending-foreman commit=none:pending-foreman-trace memory=none:project-record -->
+<!-- ch:trace row=DOC-24 spec=docs/api-reference.md#configuration test=none:doc-prose-no-test doc=docs/api-reference.md prompt=/tmp/9router-DOC-24-brief.txt evidence=none:doc-only-local-grep witness=docs/api-reference.md verdict=none:pending-foreman commit=0f1ed345 memory=none:project-record -->
 
 9Router exposes an **OpenAI-compatible** API surface at `/v1`, plus an
 Anthropic-compatible `POST /v1/messages`, and a set of dashboard APIs under

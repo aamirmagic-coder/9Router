@@ -136,4 +136,29 @@ describe("stripUnsupportedParams", () => {
       expect(body.response_format).toBe(response_format);
     }
   });
+
+  it("drops unsupported 'text' parameter for NVIDIA provider", () => {
+    const body = {
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      text: "Hello world",
+      messages: [{ role: "user", content: "Hi" }],
+    };
+
+    stripUnsupportedParams("nvidia", "nvidia/nemotron-3-ultra-550b-a55b", body);
+
+    expect(body.text).toBeUndefined();
+    expect(body.messages).toEqual([{ role: "user", content: "Hi" }]);
+  });
+
+  it("drops 'text' parameter for NVIDIA even without provider prefix in model", () => {
+    const body = {
+      model: "nemotron-3-ultra-550b-a55b",
+      text: "Hello world",
+    };
+
+    stripUnsupportedParams("nvidia", "nemotron-3-ultra-550b-a55b", body);
+
+    expect(body.text).toBeUndefined();
+  });
 });
+

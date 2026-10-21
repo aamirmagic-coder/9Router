@@ -1342,6 +1342,7 @@ docker pull decolua/9router:latest   # update to latest
 | `AUTH_COOKIE_SECURE`                                 | `false`                                  | Force `Secure` auth cookie (set `true` behind HTTPS reverse proxy)                  |
 | `REQUIRE_API_KEY`                                    | `false`                                  | Enforce Bearer API key on `/v1/*` routes (recommended for internet-exposed deploys) |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` | empty                                    | Optional outbound proxy for upstream provider calls                                 |
+| `ALLOW_INSECURE_TLS_FALLBACK`                        | `false`                                  | Opt-in: on a TLS certificate error, retry a provider call once **without** certificate verification (TLS-intercepting proxies). Prefer trusting the proxy's root CA with `NODE_EXTRA_CA_CERTS`. `STRICT_SSL=true` always disables it |
 | `SEARXNG_URL`                                        | `http://localhost:8888/search`           | Endpoint for the built-in unauthenticated SearXNG web-search provider               |
 
 Notes:

@@ -313,6 +313,35 @@ describe("dashboard guard local-only access", () => {
     },
   );
 
+  // pxpipe install runs npm install and start/restart load the package in-process.
+  it.each(["/api/pxpipe/install", "/api/pxpipe/start", "/api/pxpipe/restart", "/api/pxpipe/stop"])(
+    "rejects remote %s even with a dashboard session",
+    async (pathname) => {
+      mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+      const response = await proxy(request(pathname, { host: "router.example.com" }));
+
+      expect(response.status).toBe(403);
+    },
+  );
+
+  it("keeps read-only pxpipe status reachable for a remote dashboard session", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/pxpipe/status", { host: "router.example.com" }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("allows pxpipe install with a valid CLI token", async () => {
+    const response = await proxy(request("/api/pxpipe/install", {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
   it("allows local-only route with valid CLI token", async () => {
     const response = await proxy(request("/api/mcp/filesystem/sse", {
       host: "router.example.com",

@@ -89,6 +89,12 @@ const LOCAL_ONLY_PATHS = [
   "/api/headroom/proxy",
   "/api/headroom/restart",
   "/api/headroom/extras",
+  // install runs `npm install` of the package's @latest and start/restart load it into the
+  // server process (start auto-installs when pxpipeAutoInstall is on); stop shares them.
+  "/api/pxpipe/install",
+  "/api/pxpipe/start",
+  "/api/pxpipe/restart",
+  "/api/pxpipe/stop",
 ];
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);

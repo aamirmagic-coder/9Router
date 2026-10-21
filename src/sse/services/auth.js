@@ -5,6 +5,7 @@ import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
+import { extractApiKeyCandidates } from "@/shared/utils/apiKeyCandidates.js";
 
 // Mutex to prevent race conditions during account selection
 let selectionMutex = Promise.resolve();
@@ -345,22 +346,31 @@ export async function clearAccountError(connectionId, currentConnection, model =
 }
 
 /**
- * Extract API key from request headers
+ * Extract API key from request headers (first presented credential).
  */
 export function extractApiKey(request) {
-  // Check Authorization header first
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
+  return extractApiKeyCandidates(request)[0] || null;
+}
 
-  // Check Anthropic x-api-key header
-  const xApiKey = request.headers.get("x-api-key");
-  if (xApiKey) {
-    return xApiKey;
-  }
+// Every presented credential, read by the shared helper that the middleware
+// and the key-access engine also use.
+export { extractApiKeyCandidates };
 
-  return null;
+/**
+ * Resolve the client's API key against the apiKeys table.
+ * Anthropic clients (e.g. Claude Code with an active claude.ai session or
+ * ANTHROPIC_AUTH_TOKEN set) can send an unrelated Authorization header
+ * ALONGSIDE a valid x-api-key, so every presented credential is checked.
+ * Returns { apiKey, valid }: when valid, apiKey is the credential that
+ * actually validated (use it for usage attribution); otherwise apiKey is the
+ * first presented credential (or null if none).
+ */
+export async function resolveClientApiKey(request) {
+  const candidates = extractApiKeyCandidates(request);
+  for (const key of candidates) {
+    if (await validateApiKey(key)) return { apiKey: key, valid: true };
+  }
+  return { apiKey: candidates[0] || null, valid: false };
 }
 
 /**

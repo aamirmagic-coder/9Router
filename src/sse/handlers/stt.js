@@ -1,5 +1,5 @@
 import {
-  extractApiKey, isValidApiKey,
+  resolveClientApiKey,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
 import { getSettings, getCustomModels } from "@/lib/localDb";
@@ -48,9 +48,8 @@ export async function handleStt(request) {
 
   const settings = await getSettings();
   if (settings.requireApiKey) {
-    const apiKey = extractApiKey(request);
+    const { apiKey, valid } = await resolveClientApiKey(request);
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-    const valid = await isValidApiKey(apiKey);
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
   }
 

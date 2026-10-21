@@ -67,19 +67,23 @@ export function budgetToolsToContext(tools, body, connectionId, capabilities = {
   const pinnedCount = tools.filter((tool) => pinned.has(tool?.function?.name || tool?.name)).length;
   if (pinnedCount >= tools.length) return { tools, stats: baseStats };
 
+  // Keep as many ranked tools as fit: find the LARGEST maxTools whose selection is
+  // within budget (selections grow monotonically with maxTools). Probes don't record
+  // disclosure stats; only real turns belong in the dashboard ring buffer. If even the
+  // smallest selection does not fit, leave the tools alone rather than cull for nothing.
   let low = Math.max(1, pinnedCount);
-  let high = tools.length;
+  let high = tools.length - 1;
   let best = tools;
 
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);
-    const candidate = disclosureTools(tools, body, connectionId, { maxTools: mid }).tools;
+    const candidate = disclosureTools(tools, body, connectionId, { maxTools: mid, recordStats: false, fillToBudget: true }).tools;
     const total = messageTokens + estimateTokens(candidate);
     if (total <= inputBudgetTokens) {
       best = candidate;
-      high = mid - 1;
-    } else {
       low = mid + 1;
+    } else {
+      high = mid - 1;
     }
   }
 

@@ -637,12 +637,7 @@ export async function buildModelsList(kindFilter, options = {}) {
   for (const model of models) {
     if (!model?.id || seenModelIds.has(model.id)) continue;
     seenModelIds.add(model.id);
-    dedupedModels.push({
-      capabilities: {},
-      context_length: 8192,
-      max_completion_tokens: 2048,
-      ...model,
-    });
+    dedupedModels.push(model);
   }
 
   return dedupedModels;

@@ -61,7 +61,12 @@ const DEFAULT_SETTINGS = {
   pxpipeEnabled: false,
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
-  pxpipeTimeoutMs: 15000,\n  toolDisclosureEnabled: false,\n  toolDisclosureFilterEnabled: false,\n  toolDisclosureMaxTools: 20,\n  toolDisclosureExcludeServers: [],\n  toolDisclosureExcludeTools: [],
+  pxpipeTimeoutMs: 15000,
+  toolDisclosureEnabled: false,
+  toolDisclosureFilterEnabled: false,
+  toolDisclosureMaxTools: 20,
+  toolDisclosureExcludeServers: [],
+  toolDisclosureExcludeTools: [],
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
 };

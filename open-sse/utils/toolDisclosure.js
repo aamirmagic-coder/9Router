@@ -205,7 +205,7 @@ export function disclosureTools(tools, body, connectionId, config = {}) {
     const rest = tools.filter((t) => !pinned.has(getToolName(t)));
     const selected = [...pinnedTools, ...rest].slice(0, maxTools);
     const stats = { before: tools.length, after: selected.length, stripped: tools.length - selected.length };
-    _recordStats({ connectionId: "no-session", ...stats });
+    if (config.recordStats !== false) _recordStats({ connectionId: "no-session", ...stats });
     return { tools: selected, stats };
   }
 
@@ -238,6 +238,14 @@ export function disclosureTools(tools, body, connectionId, config = {}) {
       .filter((c) => (scores[c.i] || 0) > minScore)
       .slice(0, budget)
       .map((c) => c.tool);
+    // fillToBudget (context budgeting): rank, don't filter. Unmatched tools follow the
+    // matches in their original order, so a query that matches nothing keeps the first
+    // tools instead of none.
+    if (config.fillToBudget && topK.length < budget) {
+      const kept = new Set(topK);
+      const rest = candidates.filter((c) => !kept.has(c.tool)).sort((a, b) => a.i - b.i);
+      topK.push(...rest.slice(0, budget - topK.length).map((c) => c.tool));
+    }
   }
 
   const selected = [...pinnedTools.map((x) => x.tool), ...topK];
@@ -249,7 +257,7 @@ export function disclosureTools(tools, body, connectionId, config = {}) {
     keptNames: selected.map(getToolName),
     strippedNames: tools.filter((t) => !strippedSet.has(getToolName(t))).map(getToolName),
   };
-  _recordStats({ connectionId, ...stats });
+  if (config.recordStats !== false) _recordStats({ connectionId, ...stats });
   return { tools: selected, stats };
 }
 

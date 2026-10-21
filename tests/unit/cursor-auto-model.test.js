@@ -210,6 +210,7 @@ describe("CursorExecutor auto model resolution", () => {
     const run = decodeMessage(decodeMessage(written[0].subarray(5)).get(1)[0].value);
     const requested = decodeMessage(run.get(9)[0].value);
     expect(Buffer.from(requested.get(1)[0].value).toString()).toBe("gpt-5.2");
-    expect(resolveCursorModels).not.toHaveBeenCalled();
+    // Catalog is still fetched so effort-tier ids stay verbatim; it must not rewrite a concrete id.
+    expect(resolveCursorModels).toHaveBeenCalledTimes(1);
   });
 });

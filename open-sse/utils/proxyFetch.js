@@ -228,6 +228,20 @@ function resolveConnectionProxyUrl(targetUrl, proxyOptions) {
 }
 
 /**
+ * Resolve the outbound proxy for a target URL.
+ * Connection proxy pool wins; otherwise HTTP(S)_PROXY / ALL_PROXY from env
+ * (including 9Router Settings → Outbound Proxy).
+ */
+export function resolveOutboundProxyUrl(targetUrl, proxyOptions = null) {
+  const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
+  if (connectionProxyUrl) return connectionProxyUrl;
+  if (proxyOptions?.strictProxy === true && (
+    proxyOptions.proxyPoolId || proxyOptions.enabled === true || proxyOptions.connectionProxyEnabled === true
+  )) return null;
+  return normalizeProxyUrl(getEnvProxyUrl(targetUrl));
+}
+
+/**
  * Create proxy dispatcher lazily (undici-compatible)
  */
 async function getDispatcher(proxyUrl, insecure = false) {
@@ -347,9 +361,14 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
     return originalFetch(vercelRelayUrl, { ...options, headers: relayHeaders });
   }
 
-  const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
-  const envProxyUrl = connectionProxyUrl ? null : normalizeProxyUrl(getEnvProxyUrl(targetUrl));
-  const proxyUrl = connectionProxyUrl || envProxyUrl;
+  const proxyUrl = resolveOutboundProxyUrl(targetUrl, proxyOptions);
+  const proxyIntended = proxyOptions?.proxyPoolId
+    || proxyOptions?.enabled === true
+    || proxyOptions?.connectionProxyEnabled === true
+    || !!normalizeString(proxyOptions?.url ?? proxyOptions?.connectionProxyUrl);
+  if (!proxyUrl && proxyOptions?.strictProxy === true && proxyIntended) {
+    throw new Error("[ProxyFetch] Proxy required but none resolved (strictProxy=true)");
+  }
 
   // MITM DNS bypass: for known MITM-intercepted hosts, resolve real IP to avoid DNS spoof
   if (shouldBypassMitmDns(targetUrl)) {
@@ -385,24 +404,6 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       console.warn(`[ProxyFetch] Proxy failed, falling back to direct: ${proxyError.message}`);
       return fetchWithTlsFallback(url, options, null);
     }
-  }
-
-  // Strict mode means "never leave over the direct IP". Reaching here with a
-  // proxy configured but unresolved is exactly that case — an inactive or
-  // empty pool, or every proxy removed — so refuse instead of silently
-  // exposing the real address (#4333). The catch blocks above only cover a
-  // proxy that was actually tried.
-  //
-  // Gate on a proxy being *intended*: callers like the Qoder executor set
-  // strictProxy to mean "do not replay this request directly if the proxy
-  // fails" (a replayed COSY signature returns 403), not "a proxy is required".
-  // With nothing configured they must keep working.
-  const proxyIntended = proxyOptions?.proxyPoolId
-    || proxyOptions?.enabled === true
-    || proxyOptions?.connectionProxyEnabled === true
-    || !!normalizeString(proxyOptions?.url ?? proxyOptions?.connectionProxyUrl);
-  if (proxyOptions?.strictProxy === true && proxyIntended) {
-    throw new Error("[ProxyFetch] Proxy required but none resolved (strictProxy=true)");
   }
 
   // got-scraping disabled — use native fetch directly

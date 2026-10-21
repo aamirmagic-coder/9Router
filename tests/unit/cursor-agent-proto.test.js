@@ -14,6 +14,7 @@ import {
 import {
   isAgentCapableRequest,
   buildAgentRunFrame,
+  resolveRequestedModel,
 } from "../../open-sse/executors/cursor.js";
 
 // AgentService (agent.v1) codec tests — validate the production implementation
@@ -255,9 +256,99 @@ describe("Cursor AgentService executor helpers (cursor.js)", () => {
     });
   });
 
+  describe("resolveRequestedModel", () => {
+    it("splits Claude thinking + effort suffixes into parameters", () => {
+      expect(resolveRequestedModel("claude-4.5-opus-high-thinking")).toEqual({
+        modelId: "claude-4.5-opus",
+        parameters: [
+          { id: "thinking", value: "true" },
+          { id: "effort", value: "high" },
+        ],
+      });
+    });
+
+    it("uses reasoning for GPT effort and leaves bare gpt-5.2 unchanged", () => {
+      expect(resolveRequestedModel("gpt-5.2")).toEqual({ modelId: "gpt-5.2", parameters: [] });
+      expect(resolveRequestedModel("gpt-5.2", "high")).toEqual({
+        modelId: "gpt-5.2",
+        parameters: [{ id: "reasoning", value: "high" }],
+      });
+    });
+
+    it("leaves gemini and kimi ids unchanged", () => {
+      expect(resolveRequestedModel("gemini-3-flash-preview")).toEqual({
+        modelId: "gemini-3-flash-preview",
+        parameters: [],
+      });
+      expect(resolveRequestedModel("kimi-k2.5")).toEqual({ modelId: "kimi-k2.5", parameters: [] });
+    });
+
+    it("strips Composer -fast into a parameter", () => {
+      expect(resolveRequestedModel("composer-2.5-fast")).toEqual({
+        modelId: "composer-2.5",
+        parameters: [{ id: "fast", value: "true" }],
+      });
+    });
+
+    it("keeps exact live-catalog ids (effort tiers) verbatim", () => {
+      const catalog = new Set(["claude-4.5-opus-high-thinking", "cursor-grok-4.6-medium"]);
+      expect(resolveRequestedModel("claude-4.5-opus-high-thinking", null, catalog)).toEqual({
+        modelId: "claude-4.5-opus-high-thinking",
+        parameters: [],
+      });
+      expect(resolveRequestedModel("cursor-grok-4.6-medium", null, catalog)).toEqual({
+        modelId: "cursor-grok-4.6-medium",
+        parameters: [],
+      });
+    });
+
+    it("does not invent a stripped base that is absent from the catalog", () => {
+      const catalog = new Set(["gpt-5.2", "composer-2.5"]);
+      expect(resolveRequestedModel("gpt-5.6-luna-medium", null, catalog)).toEqual({
+        modelId: "gpt-5.6-luna-medium",
+        parameters: [],
+      });
+      expect(resolveRequestedModel("cursor-grok-4.6-medium", null, catalog)).toEqual({
+        modelId: "cursor-grok-4.6-medium",
+        parameters: [],
+      });
+    });
+
+    it("keeps original ids when the live catalog is empty (fetch failed)", () => {
+      const empty = new Set();
+      expect(resolveRequestedModel("gpt-5.6-luna-medium", null, empty)).toEqual({
+        modelId: "gpt-5.6-luna-medium",
+        parameters: [],
+      });
+      expect(resolveRequestedModel("cursor-grok-4.6-medium", null, empty)).toEqual({
+        modelId: "cursor-grok-4.6-medium",
+        parameters: [],
+      });
+    });
+
+    it("still strips when the base id is present in the catalog", () => {
+      const catalog = new Set(["claude-4.5-opus", "claude-4.5-opus-high-thinking"]);
+      expect(resolveRequestedModel("claude-4.5-opus-high", null, catalog)).toEqual({
+        modelId: "claude-4.5-opus",
+        parameters: [{ id: "effort", value: "high" }],
+      });
+    });
+  });
+
   describe("buildAgentRunFrame", () => {
     // buildAgentRunFrame returns a wrapped Connect-RPC frame (5-byte header + AgentClientMessage).
     const unwrap = (frame) => frame.subarray(5);
+
+    function requestedModelFields(frame) {
+      const run = decodeMessage(decodeMessage(frame).get(1)[0].value);
+      return decodeMessage(run.get(9)[0].value);
+    }
+
+    function modelDetailsId(frame) {
+      const run = decodeMessage(decodeMessage(frame).get(1)[0].value);
+      const details = decodeMessage(run.get(3)[0].value);
+      return Buffer.from(details.get(1)[0].value).toString("utf8");
+    }
 
     it("encodes a text-only run request with system + model", () => {
       const frame = unwrap(buildAgentRunFrame(
@@ -278,6 +369,55 @@ describe("Cursor AgentService executor helpers (cursor.js)", () => {
       const userText = Buffer.from(userMessage.get(1)[0].value).toString("utf8");
       expect(userText).toContain("be brief");
       expect(userText).toContain("hi");
+    });
+
+    it("splits Claude thinking variants into base model_id + parameters", () => {
+      const frame = unwrap(buildAgentRunFrame(
+        [{ role: "user", content: "hi" }],
+        "claude-4.5-opus-high-thinking",
+      ));
+      const run = decodeMessage(decodeMessage(frame).get(1)[0].value);
+      expect(run.has(8)).toBe(false);
+      expect(modelDetailsId(frame)).toBe("claude-4.5-opus");
+      const requested = requestedModelFields(frame);
+      expect(Buffer.from(requested.get(1)[0].value).toString("utf8")).toBe("claude-4.5-opus");
+      expect(requested.has(7)).toBe(false); // field 7 is Bedrock credentials, not max_mode
+      const params = (requested.get(3) || []).map((entry) => {
+        const param = decodeMessage(entry.value);
+        return {
+          id: Buffer.from(param.get(1)[0].value).toString("utf8"),
+          value: Buffer.from(param.get(2)[0].value).toString("utf8"),
+        };
+      });
+      expect(params).toEqual([
+        { id: "thinking", value: "true" },
+        { id: "effort", value: "high" },
+      ]);
+    });
+
+    it("forwards body reasoning_effort for GPT as a reasoning parameter", () => {
+      const frame = unwrap(buildAgentRunFrame(
+        [{ role: "user", content: "hi" }],
+        "gpt-5.2",
+        [],
+        "high",
+      ));
+      const requested = requestedModelFields(frame);
+      expect(Buffer.from(requested.get(1)[0].value).toString("utf8")).toBe("gpt-5.2");
+      const param = decodeMessage(requested.get(3)[0].value);
+      expect(Buffer.from(param.get(1)[0].value).toString("utf8")).toBe("reasoning");
+      expect(Buffer.from(param.get(2)[0].value).toString("utf8")).toBe("high");
+    });
+
+    it("leaves gemini-3-flash-preview unchanged on the wire", () => {
+      const frame = unwrap(buildAgentRunFrame(
+        [{ role: "user", content: "hi" }],
+        "gemini-3-flash-preview",
+      ));
+      expect(modelDetailsId(frame)).toBe("gemini-3-flash-preview");
+      const requested = requestedModelFields(frame);
+      expect(Buffer.from(requested.get(1)[0].value).toString("utf8")).toBe("gemini-3-flash-preview");
+      expect(requested.has(3)).toBe(false);
     });
 
     it("encodes mcp_tools (field 4) when tools are provided", () => {

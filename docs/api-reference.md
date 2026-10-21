@@ -231,20 +231,209 @@ entries (OpenAI shape). Live catalogs are resolved per provider when possible.
 | `POST /v1/audio/speech` | Text-to-speech |
 | `POST /v1/audio/transcriptions` | Speech-to-text |
 | `GET /v1/audio/voices` | List TTS voices for a provider (`?provider=…`) |
+| `POST /v1/api/chat` | Ollama-format chat (NDJSON stream) |
 | `POST /v1/embeddings` | Embeddings |
 | `POST /v1/images/generations` | Image generation |
 | `POST /v1/messages/count_tokens` | Count tokens for a Messages request |
 | `GET /v1/models/info` | Detailed model catalog (kind, endpoint, capabilities) |
+| `GET /v1/models/{kind}` | Model listing filtered by service kind |
+| `GET /v1/models/{provider}/{model}` | Single model lookup from the LLM catalog |
 | `POST /v1/responses` | OpenAI Responses-format endpoint |
 | `POST /v1/responses/compact` | Compact conversation context |
 | `POST /v1/search` | Web search |
+| `POST /v1/systemone` | System One (Jev) decision models |
 | `POST /v1/videos/generations` | Video generation |
 | `POST /v1/videos/edits` | Async video edit (xAI Grok Imagine) |
 | `POST /v1/videos/extensions` | Async video extension (xAI Grok Imagine) |
 | `GET /v1/videos/{id}` | Poll async video job status |
 | `POST /v1/web/fetch` | Web URL fetch/extract |
 
-All are gated by the rules in [Authentication](#authentication).
+All are gated by the rules in [Authentication](#authentication). The four
+endpoints below get the same LLM-API gate as `POST /v1/chat/completions`: the
+dashboard guard treats `/v1` and `/v1beta` as public LLM prefixes (loopback is
+trusted, and a remote keyless request is allowed only while the effective
+`requireApiKey` setting is `false`), and the POST handlers re-check the
+effective `requireApiKey` themselves — so from remote clients they need a valid
+key only while `requireApiKey` is `true`, exactly like a completion call (see
+[Endpoint handlers](#endpoint-handlers--the-second-check)). `GET
+/v1/models/{kind}` is a read-only model listing with no handler-level key
+check — like `GET /v1/models`, it stays keyless on loopback even while
+`requireApiKey` is `true`.
+
+### `POST /v1/systemone` — System One (Jev) decision models
+
+Also reachable as `POST /systemone` (a Next.js rewrite to the same route in
+`next.config.mjs`). Routes a decision request to a `kind: "systemone"` model;
+the body is passed through to the provider's System One endpoint untouched —
+these models have no chat translation layer.
+
+Request:
+
+```json
+{
+  "model": "typesafe/jev-1.13",
+  "state": { "task": "route this ticket", "queue_depth": 3 },
+  "questions": {
+    "priority": "Which lane should this ticket go to?",
+    "escalate": "Should this be escalated?"
+  }
+}
+```
+
+- `model` (required) — a `<provider-alias>/<model>` id resolving to a
+  `kind: "systemone"` model (`typesafe/jev-1.13`, `rev-latest`,
+  `v1m-decision-engine`, `@cf/cloudflare/clef-flash`, …). A missing model, a
+  missing `state`, or a missing `questions` object answers `400`.
+- `state` (required) — any JSON value; forwarded as-is.
+- `questions` (required) — a JSON object (not an array) of the decisions to
+  make; forwarded as-is.
+
+The request goes to the provider's System One endpoint (`systemoneConfig` in
+the provider registry) with the account's own credentials, and the provider's
+JSON response body is returned unchanged:
+
+```json
+{
+  "priority": "urgent",
+  "escalate": false,
+  "usage": { "input_tokens": 120, "output_tokens": 8 }
+}
+```
+
+(Exact response fields are provider-defined; `usage` is optional. Only input/
+output token counts, when present, are recorded for usage tracking.)
+
+Served by providers with a System One lane: **OpenRouter** (`systemone`
+alias), **v1m** (`systemone`/`jev` aliases), **opencode**, **opencode-zen**,
+and **Cloudflare AI** (whose endpoint embeds the account id and model in the
+path, e.g. `@cf/cloudflare/clef-flash`). Requesting a model whose provider has
+no System One endpoint answers `400 Provider 'X' does not support System One.`
+Errors use the OpenAI envelope from [Errors](#errors); auth follows the LLM-API
+gate.
+
+### `POST /v1/api/chat` — Ollama-format chat
+
+Native Ollama client compatibility: an Ollama-format `/api/chat` request
+answered with Ollama NDJSON. Reachable at `/v1/api/chat` via the `/v1/:path*`
+rewrite. The request body is the standard Ollama chat shape (it is routed
+through the same internal chat pipeline as `POST /v1/chat/completions`, so
+`model` accepts the same `<provider-alias>/<model>` ids):
+
+```json
+{
+  "model": "kr/claude-sonnet-4.5",
+  "messages": [{ "role": "user", "content": "Hello!" }]
+}
+```
+
+The response is **always** Ollama NDJSON — one JSON object per line, streamed
+regardless of the request's `stream` field:
+
+```
+{"model":"kr/claude-sonnet-4.5","message":{"role":"assistant","content":"Hi"},"done":false}
+{"model":"kr/claude-sonnet-4.5","message":{"role":"assistant","content":" there"},"done":false}
+{"model":"kr/claude-sonnet-4.5","message":{"role":"assistant","content":""},"done":true}
+```
+
+Tool calls arrive as Ollama `message.tool_calls` with parsed JSON `arguments`
+on the final `done: true` line. The last line always carries `done: true`.
+
+### `GET /v1/models/{kind}` — models filtered by service kind
+
+`GET /v1/models` variant that returns only models of one service kind. The
+kind is a URL slug:
+
+| Slug | Kind(s) selected |
+|---|---|
+| `image` | image generation |
+| `tts` | text-to-speech |
+| `stt` | speech-to-text |
+| `embedding` | embeddings |
+| `image-to-text` | vision / image understanding |
+| `web` | web search and web fetch |
+
+```bash
+curl http://localhost:20128/v1/models/embedding
+```
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "openai/text-embedding-3-small", "object": "model", "...": "..." }
+  ]
+}
+```
+
+The same catch-all route also serves `GET
+/v1/models/{provider}/{model}` — a single-model lookup against the same LLM
+catalog `GET /v1/models` exposes (a one-segment path that is not a kind slug
+is treated as a model id). Unknown model ids answer `404` with
+`code: "model_not_found"`. Per-key model access controls apply to both forms
+when configured.
+
+### `POST /v1beta/models/{model}:generateContent` — Gemini-native generateContent
+
+Gemini API compatibility for clients like Gemini CLI and the `@google/genai`
+SDK. Both actions are served:
+
+- `POST /v1beta/models/{model}:generateContent` — non-streaming (plain JSON)
+- `POST /v1beta/models/{model}:streamGenerateContent` — streaming (Gemini SSE;
+  `@google/genai` calls this with `?alt=sse`). Streaming intent comes from the
+  URL action suffix, not a body field.
+
+The model is a Gemini-native path segment: either a bare id (`gemini-3-flash`)
+or a provider-prefixed id (`google/gemini-3-flash` / `kr/gemini-3-flash`).
+`GET /v1beta/models` lists the catalog in Gemini `models.list` shape
+(`{ "models": [ { "name": "models/<provider>/<model>", … } ] }`).
+
+Request (Gemini `generateContent` body):
+
+```json
+{
+  "systemInstruction": { "parts": [{ "text": "You are concise." }] },
+  "contents": [
+    { "role": "user", "parts": [{ "text": "Hello!" }] }
+  ],
+  "generationConfig": { "temperature": 0.7, "maxOutputTokens": 256 }
+}
+```
+
+The request is translated into the same internal chat pipeline as
+`POST /v1/chat/completions` (`systemInstruction` → system message, `contents`
+→ user/assistant messages, `generationConfig.maxOutputTokens` / `temperature`
+/ `topP` → their OpenAI equivalents) and answered in Gemini format:
+
+```json
+{
+  "candidates": [
+    {
+      "content": { "role": "model", "parts": [{ "text": "Hi there!" }] },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "kr/gemini-3-flash",
+  "usageMetadata": {
+    "promptTokenCount": 12,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 16
+  }
+}
+```
+
+Streaming chunks carry `candidates[].content.parts[].text` deltas, an optional
+`thought: true` part for reasoning deltas, and `finishReason` / `usageMetadata`
+/ `modelVersion` on the final chunk; the stream just closes (no `data: [DONE]`
+sentinel). `finishReason` maps from OpenAI (`stop`→`STOP`, `length`→
+`MAX_TOKENS`, `content_filter`→`SAFETY`).
+
+Special case: a request for a Gemini TTS model (or with
+`generationConfig.responseModalities` containing `AUDIO`) is forwarded
+**natively** to Google's `generativelanguage.googleapis.com` endpoint with a
+Gemini account's own credentials, with account fallback on failures — the body
+is not translated. Auth accepts the client key via `Authorization: Bearer`,
+`x-goog-api-key`, or `?key=` (same LLM-API gate).
 
 ## Errors
 

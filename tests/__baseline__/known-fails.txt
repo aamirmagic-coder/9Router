@@ -91,3 +91,7 @@ tests/unit/image-generation.test.js :: handleImageGenerationCore generates image
 tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest thinking budget clamps reasoning_effort max to Kiro max_thinking_length 32000
 tests/unit/combo-caps-resolver.test.js :: aggregateComboCapabilities: resolveCaps override falls back to the pattern default without a resolver
 tests/unit/cli-connect.test.js :: connect run() each tool inherits its OWN server model, falling back to OpenCode's
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) ui-probe follows the redirect chain (live fixture) with :3111 free RED: the pre-fix decision rejects the redirect-first app
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) ui-probe follows the redirect chain (live fixture) with :3111 free GREEN: the post-fix chain grades it OK and names the landing path
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) ui-probe follows the redirect chain (live fixture) with :3111 free NEGATIVE: a 5xx app still FAILs (the cell is not always-OK)
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) ui-probe follows the redirect chain (live fixture) with :3111 free NEGATIVE: an empty repo still grades N/A (no manufactured positive)

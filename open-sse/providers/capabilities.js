@@ -210,6 +210,10 @@ const DEVIN_CLI_GPT_CAPS = { vision: true, reasoning: true, search: true, thinki
  * Provider-specific capability overrides. Keyed by provider alias/id.
  */
 export const PROVIDER_CAPABILITIES = {
+  // Direct API contract; do not apply these limits to gateway aliases.
+  "minimax": {
+    "MiniMax-M3.1-Flash": { vision: true, videoInput: true, reasoning: true, thinkingFormat: "minimax", thinkingCanDisable: false, thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 524288 },
+  },
   // NVIDIA NIM is OpenAI-compatible → rejects MiniMax/GLM native `thinking` field.
   // Force openai reasoning_effort format for its reasoning models. #issue
   "nvidia": {
@@ -364,6 +368,8 @@ export const PROVIDER_CAPABILITIES = {
     "stealth/missingno":                { tools: true, reasoning: true, thinkingFormat: "nous", contextWindow: 262144, maxOutput: 131072 },
   },
 };
+
+PROVIDER_CAPABILITIES["minimax-cn"] = PROVIDER_CAPABILITIES.minimax;
 
 // Qoder CN serves the identical model catalog from the CN gateway, so it shares
 // the intl Qoder capability table verbatim (vision/reasoning/contextWindow).

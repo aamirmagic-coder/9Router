@@ -487,8 +487,9 @@ export function hoistToolResultImages(body) {
 }
 
 export function prepareClaudeRequest(body, provider = null, apiKey = null, connectionId = null, rawHeaders = null, sessionId = null) {
-  // quirk: MiniMax's Claude-compatible endpoint rejects Anthropic's output_config (400 invalid params)
-  if (PROVIDERS[provider]?.quirks?.dropOutputConfig) {
+  // Legacy models reject output_config; effort-capable models accept it.
+  if (PROVIDERS[provider]?.quirks?.dropOutputConfig
+    && !getCapabilitiesForModel(provider, body.model).thinkingEffortSupported) {
     delete body.output_config;
   }
 

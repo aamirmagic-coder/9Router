@@ -132,7 +132,8 @@ const PROVIDER_MODELS = {
     { id: "kimi-latest" },
   ],
   minimax: [
-    { id: "MiniMax-M2.1" },
+    { id: "MiniMax-M3.1-Flash" },
+    { id: "MiniMax-M3" },
   ],
 };
 

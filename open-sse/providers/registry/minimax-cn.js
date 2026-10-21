@@ -55,7 +55,9 @@ export default {
     },
   ],
   models: [
+    { id: "MiniMax-M3.1-Flash", name: "MiniMax M3.1 Flash", targetFormat: "claude" },
     { id: "MiniMax-M3", name: "MiniMax M3", targetFormat: "claude" },
+    // Retain metadata for explicit saved/legacy requests; choice lists filter these.
     { id: "MiniMax-M2.7", name: "MiniMax M2.7" },
     { id: "MiniMax-M2.5", name: "MiniMax M2.5" },
     { id: "MiniMax-M2.1", name: "MiniMax M2.1" },

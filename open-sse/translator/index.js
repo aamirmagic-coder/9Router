@@ -142,6 +142,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   if (targetFormat === FORMATS.OPENAI) {
     result = filterToOpenAIFormat(result, {
       preserveCacheControl: !!PROVIDERS[provider]?.quirks?.preserveCacheControl,
+      preserveVideo: ["minimax", "minimax-cn"].includes(provider) && model.replace(/\([^()]+\)\s*$/, "") === "MiniMax-M3.1-Flash",
     });
   }
 

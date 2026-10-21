@@ -13,6 +13,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
+import { currentMiniMaxChoices } from "open-sse/providers/models/minimaxChoices.js";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
@@ -160,7 +161,7 @@ export default function ProviderDetailPage() {
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
   const models = (providerId === "cursor" || providerId === "zed") && liveModels.length > 0
-    ? liveModels
+    ? currentMiniMaxChoices(liveModels)
     : staticModels;
   const providerAlias = getProviderAlias(providerId);
   

@@ -1,4 +1,5 @@
 import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS, getModelKind } from "@/shared/constants/models";
+import { currentMiniMaxChoices } from "open-sse/providers/models/minimaxChoices.js";
 import {
   ALIAS_TO_ID,
   AI_PROVIDERS,
@@ -415,7 +416,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     for (const [alias, providerModels] of Object.entries(PROVIDER_MODELS)) {
       const providerId = ALIAS_TO_PROVIDER_ID[alias] || alias;
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
-      for (const model of providerModels) {
+      for (const model of currentMiniMaxChoices(providerModels)) {
         if (!kindFilter.includes(modelKind(model))) continue;
         if (isDisabled(alias, model.id) || isDisabled(providerId, model.id)) continue;
         models.push({
@@ -475,7 +476,7 @@ export async function buildModelsList(kindFilter, options = {}) {
               ),
             ),
           )
-        : providerModels.map((model) => model.id);
+        : currentMiniMaxChoices(providerModels).map((model) => model.id);
 
       if (isCompatibleProvider && rawModelIds.length === 0 && !skipDynamicFetch) {
         rawModelIds = await fetchCompatibleModelIds(conn);
@@ -489,7 +490,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         try {
           const live = await liveResolver(conn);
           if (live?.models?.length) {
-            rawModelIds = live.models.map((m) => m.id);
+            rawModelIds = currentMiniMaxChoices(live.models).map((m) => m.id);
             liveModelKindById = new Map(
               live.models
                 .filter((m) => m?.id)

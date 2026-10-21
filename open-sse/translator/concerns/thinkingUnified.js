@@ -256,7 +256,7 @@ function stripAll(body) {
 }
 
 // Apply unified thinking config to body in the resolved provider-native format.
-function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
+function applyFormat(fmt, body, cfg, caps, supportedLevels, display, targetFormat) {
   const none = cfg.mode === "none";
   const canDisable = caps.thinkingCanDisable !== false;
   // Model cannot disable thinking → clamp "none" to minimal effort instead.
@@ -364,8 +364,14 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
       break;
     }
     case "minimax": {
-      // M3 adaptive; M2.x cannot disable (handled via canDisable clamp).
+      // M3 adaptive; M2.x and Flash cannot disable (handled via canDisable clamp).
       body.thinking = { type: none && canDisable ? "disabled" : "adaptive" };
+      if (caps.thinkingEffortSupported) {
+        const level = toLevel(eff);
+        const effort = level === "auto" ? "max" : level === "minimal" ? "low" : level;
+        if (targetFormat === "claude") body.output_config = { effort };
+        else body.reasoning_effort = effort;
+      }
       break;
     }
     case "hunyuan": {
@@ -445,6 +451,6 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
   // An OpenAI-shaped client's ask arrives via the captured intent instead.
   const display = typeof body.thinking?.display === "string" ? body.thinking.display : intent?.display;
   stripAll(body);
-  applyFormat(fmt, body, cfg, caps, supportedLevels, display);
+  applyFormat(fmt, body, cfg, caps, supportedLevels, display, targetFormat);
   return body;
 }

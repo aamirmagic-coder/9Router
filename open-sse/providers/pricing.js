@@ -193,6 +193,10 @@ export const MODEL_PRICING = {
  * Keyed by provider alias (cc, cx, gc, gh, ...) or provider id (openai, anthropic, ...).
  */
 export const PROVIDER_PRICING = {
+  // Direct international API; cache-write price is not published.
+  minimax: {
+    "MiniMax-M3.1-Flash": { input: 0.15, output: 0.60, cached: 0.015, reasoning: 0.60 },
+  },
   // GitHub Copilot (gh) — explicit override, matches canonical gpt-5.3-codex rate
   gh: {
     "gpt-5.3-codex": { input: 1.75, output: 14.00, cached: 0.175, reasoning: 14.00, cache_creation: 1.75 },

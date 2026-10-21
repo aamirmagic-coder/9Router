@@ -1,4 +1,5 @@
 import REGISTRY from "../providers/registry/index.js";
+import { currentMiniMaxChoices } from "../providers/models/minimaxChoices.js";
 // PROVIDER_MODELS now built from providers/registry (transport + models co-located)
 import { PROVIDER_MODELS } from "../providers/index.js";
 import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId } from "../providers/models/schema.js";
@@ -16,8 +17,8 @@ export function getProviderModels(aliasOrId) {
 }
 
 export function getDefaultModel(aliasOrId) {
-  const models = PROVIDER_MODELS[aliasOrId];
-  return models?.[0]?.id || null;
+  const models = currentMiniMaxChoices(PROVIDER_MODELS[aliasOrId] || []);
+  return models[0]?.id || null;
 }
 
 // Providers whose registry uses dots in version numbers (e.g. "claude-sonnet-4.5").
@@ -135,7 +136,7 @@ export const PROVIDER_ID_TO_ALIAS = Object.fromEntries(
 
 export function getModelsByProviderId(providerId) {
   const alias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
-  return PROVIDER_MODELS[alias] || [];
+  return currentMiniMaxChoices(PROVIDER_MODELS[alias] || []);
 }
 
 // Get strip list for a model entry (explicit opt-in only)

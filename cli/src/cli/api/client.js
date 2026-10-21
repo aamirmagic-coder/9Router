@@ -364,10 +364,12 @@ async function deleteCombo(id) {
 /**
  * Get CLI tool settings
  * @param {string} tool - Tool name: claude | codex | droid | openclaw
+ * @param {string} [profile] - Hermes profile name (defaults to the default profile)
  * @returns {Promise<Object>} { success, data: { installed, has9Router, ... } }
  */
-async function getCliToolSettings(tool) {
-  return makeRequest("GET", `/api/cli-tools/${tool}-settings`);
+async function getCliToolSettings(tool, profile) {
+  const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+  return makeRequest("GET", `/api/cli-tools/${tool}-settings${qs}`);
 }
 
 /**
@@ -383,10 +385,20 @@ async function applyCliToolSettings(tool, body) {
 /**
  * Reset CLI tool settings (DELETE)
  * @param {string} tool - Tool name: claude | codex | droid | openclaw
+ * @param {string} [profile] - Hermes profile name (defaults to the default profile)
  * @returns {Promise<Object>} { success, data }
  */
-async function resetCliToolSettings(tool) {
-  return makeRequest("DELETE", `/api/cli-tools/${tool}-settings`);
+async function resetCliToolSettings(tool, profile) {
+  const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+  return makeRequest("DELETE", `/api/cli-tools/${tool}-settings${qs}`);
+}
+
+/**
+ * List Hermes profiles (default home + ~/.hermes/profiles/*)
+ * @returns {Promise<Object>} { success, data: { profiles: [...] } }
+ */
+async function listHermesProfiles() {
+  return makeRequest("GET", "/api/cli-tools/hermes-profiles");
 }
 
 // ============================================================================
@@ -408,6 +420,14 @@ async function getSettings() {
  */
 async function updateSettings(data) {
   return makeRequest("PATCH", "/api/settings", data);
+}
+
+/**
+ * Reset dashboard password to default (clears stored hash server-side)
+ * @returns {Promise<Object>} { success }
+ */
+async function resetPassword() {
+  return makeRequest("POST", "/api/auth/reset-password");
 }
 
 // ============================================================================
@@ -524,10 +544,12 @@ module.exports = {
   getCliToolSettings,
   applyCliToolSettings,
   resetCliToolSettings,
+  listHermesProfiles,
 
   // Settings
   getSettings,
   updateSettings,
+  resetPassword,
   
   // Tunnel
   getTunnelStatus,

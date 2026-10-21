@@ -1,3 +1,5 @@
+import { currentMiniMaxChoices } from "open-sse/providers/models/minimaxChoices.js";
+
 // Fetch and cache suggested models for providers that expose a public models API
 // Fetches via backend proxy to avoid CORS issues
 
@@ -21,7 +23,7 @@ export async function fetchSuggestedModels(fetcher) {
     const res = await fetch(`/api/providers/suggested-models?${params}`);
     if (!res.ok) return [];
     const json = await res.json();
-    const data = json.data ?? [];
+    const data = currentMiniMaxChoices(json.data ?? []);
     cache.set(fetcher.url, { data, expiresAt: Date.now() + CACHE_TTL_MS });
     return data;
   } catch {

@@ -45,6 +45,7 @@ export default function ProviderLimitCard({
       codex: "#10A37F",
       kiro: "#FF9900",
       qoder: "#EC4899",
+      "qoder-cn": "#EC4899",
       claude: "#D97757",
     };
     return colors[provider?.toLowerCase()] || "#6B7280";
@@ -165,6 +166,7 @@ export default function ProviderLimitCard({
                 percentage={percentage}
                 unlimited={unlimited}
                 resetTime={quota.resetAt}
+                recurring={quota.recurring !== false}
               />
             );
           })}

@@ -222,6 +222,21 @@ describe("buildEmbeddingsUrl", () => {
     expect(url).toBe("https://openrouter.ai/api/v1/embeddings");
   });
 
+  it("vercel-ai-gateway → https://ai-gateway.vercel.sh/v1/embeddings", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(makeProviderResponse(VALID_EMBEDDING_RESPONSE));
+
+    await handleEmbeddingsCore(makeOptions({
+      modelInfo: { provider: "vercel-ai-gateway", model: "openai/text-embedding-3-small" },
+      credentials: { apiKey: "vag-test-key" },
+    }));
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    const sent = JSON.parse(init.body);
+    expect(url).toBe("https://ai-gateway.vercel.sh/v1/embeddings");
+    expect(init.headers.Authorization).toBe("Bearer vag-test-key");
+    expect(sent.model).toBe("openai/text-embedding-3-small");
+  });
+
   it("openai-compatible-* → uses baseUrl from providerSpecificData", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(makeProviderResponse(VALID_EMBEDDING_RESPONSE));
 
@@ -335,6 +350,21 @@ describe("buildEmbeddingsHeaders", () => {
     expect(init.headers["HTTP-Referer"]).toBeDefined();
     expect(init.headers["X-Title"]).toBeDefined();
     expect(init.headers["Authorization"]).toBe("Bearer sk-or-key");
+  });
+
+  it("github → Copilot embeddings endpoint with Copilot token and IDE headers", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(makeProviderResponse(VALID_EMBEDDING_RESPONSE));
+
+    await handleEmbeddingsCore(makeOptions({
+      modelInfo: { provider: "github", model: "text-embedding-3-small" },
+      credentials: { accessToken: "gho-oauth", copilotToken: "tid=copilot" },
+    }));
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("https://api.githubcopilot.com/embeddings");
+    expect(init.headers["Authorization"]).toBe("Bearer tid=copilot");
+    expect(init.headers["copilot-integration-id"]).toBe("vscode-chat");
+    expect(init.headers["editor-version"]).toMatch(/^vscode\//);
   });
 
   it("openai-compatible-* → Authorization: Bearer only (no extra headers)", async () => {

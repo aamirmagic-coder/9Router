@@ -814,7 +814,9 @@ Read by code, but not operator-relevant configuration for the gateway itself:
 
 ## Known Architectural Notes
 
-1. `usageDb` currently stores under `~/.9router` and does not follow `DATA_DIR`.
+<!-- ch:trace row=DOC-18 spec=docs/ARCHITECTURE.md#known-architectural-notes test=none:doc-prose-no-test doc=docs/ARCHITECTURE.md prompt=/tmp/9router-DOC-18-brief.txt evidence=none:doc-only-local-grep witness=docs/ARCHITECTURE.md verdict=none:pending-foreman commit=none:pending-foreman-trace memory=none:project-record -->
+
+1. Usage history is stored by the shared SQLite adapter under `DATA_DIR/db` (or the default data directory when `DATA_DIR` is unset), via `src/lib/db/repos/usageRepo.js`.
 2. `/api/v1/route.js` returns a static model list and is not the main models source used by `/v1/models`.
 3. Request logger writes full headers/body when enabled; treat log directory as sensitive.
 4. Base URL matching depends on the configured base URL variables; federation routing uses the dedicated federation configuration described in `docs/federation-spec.md`.

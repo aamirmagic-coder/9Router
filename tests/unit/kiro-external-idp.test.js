@@ -10,7 +10,9 @@ function makeJwt(payload) {
   return `header.${encoded}.signature`;
 }
 
-describe("Kiro external_idp (CLIProxyAPI) import and refresh", () => {
+// Fresh module graph per test (vi.resetModules) is slow under full-suite load; the
+// 5s default timed out while the assertions themselves pass.
+describe("Kiro external_idp (CLIProxyAPI) import and refresh", { timeout: 20_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();

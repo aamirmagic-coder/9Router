@@ -19,6 +19,7 @@ unit/usage-stats-apikey-redaction.test.js
 unit/login-placeholder-initial-password.test.js
 # From #3499 (settings re-auth) — active once merged
 unit/settings-reauth.test.js
+unit/settings-reauth-client.test.js
 
 # Current high-WSJF hardening (active once #4286 is refreshed)
 unit/security-wsjf-hardening.test.js

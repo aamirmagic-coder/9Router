@@ -318,4 +318,5 @@ clients only while the effective `requireApiKey` is `true` (`.env.example` ships
 ## See also
 
 - [Integrations guide](integrations/README.md) — Claude Code, Cursor, and other tools.
+- [Local MCP integrations](integrations/mcp.md) — HTTP SSE bridge for local stdio MCP servers.
 - [Federation docs](FEDERATION.md) — edge/central deployment.

@@ -1,5 +1,7 @@
 # 9Router API Reference
 
+<!-- ch:trace row=DOC-24 spec=docs/api-reference.md#configuration test=none:doc-prose-no-test doc=docs/api-reference.md prompt=/tmp/9router-DOC-24-brief.txt evidence=none:doc-only-local-grep witness=docs/api-reference.md verdict=none:pending-foreman commit=none:pending-foreman-trace memory=none:project-record -->
+
 9Router exposes an **OpenAI-compatible** API surface at `/v1`, plus an
 Anthropic-compatible `POST /v1/messages`, and a set of dashboard APIs under
 `/api`.
@@ -16,7 +18,7 @@ All `/v1` endpoints accept CORS from any origin.
 ## Configuration (environment variables)
 
 The authoritative list of environment variables is
-[`.env.example`](../.env.example) (39 keys, each commented with its default
+[`.env.example`](../.env.example) (each key commented with its default
 and effect): auth secrets (`INITIAL_PASSWORD`, `JWT_SECRET`,
 `API_KEY_SECRET`), server settings (`PORT`, `HOSTNAME`, `DATA_DIR`,
 `REQUIRE_API_KEY`), and provider/API-key credentials for the routing
@@ -24,7 +26,7 @@ backends. Copy it with `cp .env.example .env` and edit before first boot.
 Federation-specific keys (`FEDERATION_MODE`, `FEDERATION_CENTRAL_URL`,
 `FEDERATION_TOKEN`, `FEDERATION_EDGE_ID`, `FEDERATION_REDACT_FIELDS`) are
 documented in [FEDERATION.md](FEDERATION.md). Test-harness-only variables
-(`RUN_E`, `RUN_REAL`) live in [`tests/`](../tests) and never affect a
+(`RUN_E2E`, `RUN_REAL`) live in [`tests/`](../tests) and never affect a
 production deployment.
 
 ## Authentication

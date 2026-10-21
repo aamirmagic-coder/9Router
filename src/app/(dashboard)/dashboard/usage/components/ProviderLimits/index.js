@@ -30,7 +30,7 @@ import {
   setQuotaCache,
   QUOTA_CACHE_KEY,
   REFRESH_INTERVAL_MS,
-  CLAUDE_REFRESH_INTERVAL_MS,
+  shouldRefreshQuota,
   DEPLETED_QUOTA_THRESHOLD,
   AUTO_REFRESH_STORAGE_KEY,
   CONNECTIONS_PAGE_SIZE,
@@ -538,9 +538,7 @@ export default function ProviderLimits() {
 
     // Throttle Claude: poll its quota every Nth auto-tick (manual force bypasses)
     const tick = (tickCountRef.current += 1);
-    const claudeEvery = Math.round(CLAUDE_REFRESH_INTERVAL_MS / REFRESH_INTERVAL_MS);
-    const shouldFetch = (conn) =>
-      force || conn.provider !== "claude" || tick % claudeEvery === 0;
+    const shouldFetch = (conn) => shouldRefreshQuota(conn.provider, tick, { force });
 
     try {
       const visibleConnections = await fetchConnections(page);

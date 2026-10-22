@@ -13,7 +13,7 @@ describe("proxy-pool fitness persistence", () => {
     const { getAdapter } = await import("@/lib/db/driver.js");
     const { markPoolUnfit, fitPoolIds } = await import("../../open-sse/services/proxyPoolFitness.js");
     const db = await getAdapter();
-    expect(db.get("SELECT value FROM _meta WHERE key = 'schemaVersion'").value).toBe("4");
+    expect(db.get("SELECT value FROM _meta WHERE key = 'schemaVersion'").value).toBe("6");
     await markPoolUnfit("pool-a", "freebuff::model-a", Date.now() + 60_000, "failure");
     expect(fitPoolIds(["pool-a"], "freebuff::model-a")).toEqual([]);
     expect(fitPoolIds(["pool-a"], "freebuff::model-b")).toEqual(["pool-a"]);

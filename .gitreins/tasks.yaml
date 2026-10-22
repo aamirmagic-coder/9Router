@@ -20,3 +20,12 @@ tasks:
   status: complete
   created_at: '2026-10-21T02:59:40.250202+00:00'
   completed_at: '2026-10-21T03:15:28.724449+00:00'
+- id: DOC-15
+  title: Document gitbook Workers/Charts deployment runbook and basePath-safe links
+  criteria:
+  - gitbook/README.md documents build, dev on port 3001, wrangler deploy to out/ project
+    9router-docs, and NEXT_PUBLIC_BASE_PATH; gitbook has no root-absolute links; existing
+    DOC-11 relative-link acceptance remains true.
+  status: complete
+  created_at: '2026-10-21T21:58:46.877373+00:00'
+  completed_at: '2026-10-22T04:56:39.744122+00:00'

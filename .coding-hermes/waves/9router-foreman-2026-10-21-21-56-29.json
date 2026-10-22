@@ -1,0 +1,16 @@
+{
+  "tick_id": "9router-foreman-2026-10-21-21-56-29",
+  "block_id": "DOC-27",
+  "mode": "serial",
+  "reason": "The selected block has one ready row (DOC-15); no second independent row exists in the block.",
+  "rows": [
+    {
+      "task_id": "DOC-15",
+      "worktree": "/home/kara/worktrees/9router-DOC-15",
+      "branch": "wt/DOC-15",
+      "brief": "/tmp/9router-foreman-2026-10-21-21-56-29-DOC-15-brief.txt"
+    }
+  ],
+  "finished_at": "2026-10-22T05:03:11Z",
+  "recovery_outcome": "DOC-15 rebased onto federation, merged 9ed937db, pushed; Tier-1 PASS after gitleaks allowlist a3f9c2e1"
+}

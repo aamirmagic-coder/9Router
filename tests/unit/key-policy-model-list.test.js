@@ -3,9 +3,11 @@ import React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import PropTypes from "prop-types";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from "node:util";
 import { describe, expect, it, beforeAll, afterEach, vi } from "vitest";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { parseSearchQuery, matchesSearch } from "@/shared/utils/modelSearchFilter.js";
 import {
   sameEntry,
@@ -14,6 +16,14 @@ import {
   applyPolicyModelSelect,
   applyPolicyModelDeselect,
 } from "@/shared/utils/policyModelList.js";
+
+// Computed once via fileURLToPath instead of `new URL(relative, import.meta.url)`
+// at each call site -- under @vitest-environment jsdom, import.meta.url-relative
+// URL resolution in this file throws ERR_INVALID_URL_SCHEME, so source files are
+// addressed by plain filesystem path instead.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoSrcDir = path.resolve(__dirname, "../../src");
+const testsRoot = path.resolve(__dirname, "..");
 
 /**
  * ModelSelectModal's "Select All" / "Deselect All" call onSelect/onDeselect once
@@ -123,12 +133,9 @@ function extractBraceBlock(src, anchorRegex) {
 describe("EndpointPageClient policy picker contract", () => {
   let code;
   beforeAll(() => {
-    const fileUrl = new URL(
-      "../../src/app/(dashboard)/dashboard/endpoint/EndpointPageClient.js",
-      import.meta.url,
-    );
+    const filePath = path.join(repoSrcDir, "app/(dashboard)/dashboard/endpoint/EndpointPageClient.js");
     code = fs
-      .readFileSync(fileUrl, "utf-8")
+      .readFileSync(filePath, "utf-8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/[^\n]*/g, "");
   });
@@ -161,8 +168,8 @@ describe("EndpointPageClient policy picker contract", () => {
 describe("ModelSelectModal policy picker membership contract", () => {
   let code;
   beforeAll(() => {
-    const fileUrl = new URL("../../src/shared/components/ModelSelectModal.js", import.meta.url);
-    code = fs.readFileSync(fileUrl, "utf-8");
+    const filePath = path.join(repoSrcDir, "shared/components/ModelSelectModal.js");
+    code = fs.readFileSync(filePath, "utf-8");
   });
 
   it("uses the opt-in comparison for selection, highlighting, and bulk deselection", () => {
@@ -183,30 +190,33 @@ const catalog = {
   "media-provider": [{ id: "match-media", name: "Match media", kind: "embedding" }],
 };
 
-async function importEsbuildWithNativeTextEncoder() {
+function compileJsxInChildProcess(source) {
   // esbuild's native binary asserts `new TextEncoder().encode("") instanceof
-  // Uint8Array` at module-load time (lib/shared/stdio_protocol.ts), before any
-  // of its exports run. jsdom (the @vitest-environment this file runs under)
-  // replaces globalThis.TextEncoder with its own implementation that fails
-  // that check, so the swap must wrap the dynamic import itself -- wrapping
-  // only the later transformSync() call is too late, since esbuild has
-  // already been evaluated under jsdom's globals by then.
-  const prevEncoder = globalThis.TextEncoder;
-  const prevDecoder = globalThis.TextDecoder;
-  globalThis.TextEncoder = NodeTextEncoder;
-  globalThis.TextDecoder = NodeTextDecoder;
-  try {
-    return await import("esbuild");
-  } finally {
-    globalThis.TextEncoder = prevEncoder;
-    globalThis.TextDecoder = prevDecoder;
-  }
+  // Uint8Array` at module-load time, and under @vitest-environment jsdom that
+  // check fails -- jsdom's Uint8Array is a different realm's constructor than
+  // the one esbuild's encoder produces, so no amount of swapping globalThis's
+  // TextEncoder/TextDecoder in *this* process fixes it. Running esbuild inside
+  // a plain `node -e` child process sidesteps jsdom's realm entirely.
+  return execFileSync(
+    process.execPath,
+    [
+      "--input-type=commonjs",
+      "-e",
+      `
+        const { transformSync } = require("esbuild");
+        const source = require("node:fs").readFileSync(0, "utf8");
+        const result = transformSync(source, { loader: "jsx", format: "cjs", jsx: "automatic" });
+        process.stdout.write(result.code);
+      `,
+    ],
+    { cwd: testsRoot, input: source, encoding: "utf8", timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
+  );
 }
 
-async function loadModalFromSource() {
-  const { transformSync } = await importEsbuildWithNativeTextEncoder();
-  const source = fs.readFileSync(new URL("../../src/shared/components/ModelSelectModal.js", import.meta.url), "utf-8");
-  const compiled = transformSync(source, { loader: "jsx", format: "cjs", jsx: "automatic" }).code;
+function loadModalFromSource() {
+  const filePath = path.join(repoSrcDir, "shared/components/ModelSelectModal.js");
+  const source = fs.readFileSync(filePath, "utf-8");
+  const compiled = compileJsxInChildProcess(source);
   const providers = {
     OAUTH_PROVIDERS: {},
     APIKEY_PROVIDERS: {
@@ -263,10 +273,7 @@ function mockCatalogRequests(comboName = "Main") {
 }
 
 describe("ModelSelectModal interactive policy picker", () => {
-  let ModelSelectModal;
-  beforeAll(async () => {
-    ModelSelectModal = await loadModalFromSource();
-  });
+  const ModelSelectModal = loadModalFromSource();
 
   afterEach(() => {
     cleanup();

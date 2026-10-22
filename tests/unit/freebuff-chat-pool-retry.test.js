@@ -93,6 +93,26 @@ describe("Freebuff proxy-pool retry", () => {
     expect(mocks.markAccountUnavailable).not.toHaveBeenCalled();
   });
 
+  it("returns a local usage-write failure without retrying another account", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      connection("pool-a", [], "connection-a"),
+      connection("pool-b", [], "connection-b"),
+    ]);
+    const failure = new Response(JSON.stringify({ error: { message: "Unable to record API key usage" } }), { status: 503 });
+    mocks.handleChatCore.mockResolvedValueOnce({ success: false, status: 503, origin: "usage_storage", error: "Unable to record API key usage", response: failure });
+    mocks.markAccountUnavailable.mockResolvedValue({ shouldFallback: true });
+
+    const response = await handleChat(new Request("http://router.test/v1/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: "freebuff/model-a", messages: [{ role: "user", content: "hello" }] }),
+    }));
+
+    expect(response).toBe(failure);
+    expect(response.status).toBe(503);
+    expect(mocks.handleChatCore).toHaveBeenCalledTimes(1);
+    expect(mocks.markAccountUnavailable).not.toHaveBeenCalled();
+  });
+
   it("retries through an eligible real alternate pool without marking the account unavailable", async () => {
     mocks.getProviderConnections.mockResolvedValue([connection("", ["pool-a", "pool-b"])]);
     mocks.handleChatCore

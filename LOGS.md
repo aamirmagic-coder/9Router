@@ -127,7 +127,7 @@
 
 ### Docs - fork→upstream contribution runbook (`docs/upstream-contribution-runbook`)
 - Added `docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md` (gitignored, local-only — matches the existing `docs/ops/` pattern): covers identifying which fork commits are general-purpose enough to send to `decolua/9router` as a PR vs fork-specific (API-key policy, combo `connectionId` binding, etc.), basing the upstream-PR branch on `decolua/master` instead of this fork's `master` to keep the diff minimal, cherry-pick/conflict-resolution guidance to avoid leaking fork-only code, re-verifying on homelab against upstream's own code state before opening the PR, and what happens to the branch after upstream merges (handled by the next `FORK_SYNC_RELEASE_RUNBOOK.md` sync, not deleted early).
-- Cross-linked both directions: `FORK_SYNC_RELEASE_RUNBOOK.md` now points to the new doc for the reverse flow; `README.md`'s Documentation and Upstream Credit sections reference it.
+- Cross-linked only within `docs/ops/` (itself gitignored, local-only): `FORK_SYNC_RELEASE_RUNBOOK.md` now points to the new doc for the reverse flow. Deliberately did NOT link it from `README.md` — that file is tracked/public, and a link into the gitignored `docs/ops/` directory would be a dead link for anyone cloning the repo fresh.
 
 ### State
 - Two open PRs at session end: #38 (`feat/consolidate-api-key-policy`@`9bee4cc5`) and #39 (`fix/ollama-balance-api-migration`@`1e1cb834`), both based on `master`@`bd5f9f11`.

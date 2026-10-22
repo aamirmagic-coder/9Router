@@ -1380,15 +1380,13 @@ For restricted keys, the model list is intentionally filtered by policy.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — request lifecycle, routing, combo fallback, OAuth/token refresh, cloud sync, and data model.
 - `docs/PRD-api-key-model-scope.md` — model policy design notes, if present in your checkout.
-- [`docs/ops/FORK_SYNC_RELEASE_RUNBOOK.md`](docs/ops/FORK_SYNC_RELEASE_RUNBOOK.md) — pulling an upstream `decolua/9router` release into this fork.
-- [`docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md`](docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md) — sending a general-purpose fork fix back to upstream `decolua/9router` as a PR.
 - Upstream README and docs remain the best source for broad provider setup and public marketing details.
 
 ## Upstream Credit
 
 This fork is based on [`decolua/9router`](https://github.com/decolua/9router). Upstream provides the core dashboard, OpenAI-compatible router, provider integrations, token savers, combo routing, translations, and broad setup documentation.
 
-Fork changes are maintained separately for local-first routing and access-control needs. When possible, upstream improvements are merged instead of reimplemented. General-purpose fixes developed in this fork are sent back upstream per [`docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md`](docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md) when they don't depend on fork-specific features.
+Fork changes are maintained separately for local-first routing and access-control needs. When possible, upstream improvements are merged instead of reimplemented.
 
 ## License
 

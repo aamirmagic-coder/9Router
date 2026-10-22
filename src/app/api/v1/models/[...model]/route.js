@@ -1,8 +1,5 @@
 import { buildModelsList } from "../route.js";
-import { getApiKeyMetadata } from "@/lib/localDb";
-import { extractApiKey } from "@/sse/services/auth";
-import { modelPatternMatches } from "@/shared/utils/modelPermissions.js";
-import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
+import { getKeyAccessContext, enforceKeyPolicy, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 
 // URL slug → service kind(s). `web` covers both webSearch and webFetch.
 const KIND_SLUG_MAP = {
@@ -36,13 +33,6 @@ function json(data, options = {}) {
   });
 }
 
-async function getAllowedModelsFilter(request) {
-  const apiKey = extractApiKey(request);
-  if (!apiKey) return null;
-  const metadata = await getApiKeyMetadata(apiKey);
-  return metadata?.allowedModels?.length > 0 ? metadata.allowedModels : null;
-}
-
 /**
  * GET /v1/models/{kind} - OpenAI-compatible models list filtered by capability.
  * GET /v1/models/{provider}/{model} - OpenAI-compatible single model lookup.
@@ -55,14 +45,11 @@ export async function GET(request, { params }) {
     const identifier = path.filter(Boolean).join("/");
     const kindFilter = path.length === 1 ? KIND_SLUG_MAP[identifier] : null;
     const keyAccess = await getKeyAccessContext(request);
-
-    const allowedModels = await getAllowedModelsFilter(request);
+    const policyError = await enforceKeyPolicy(keyAccess);
+    if (policyError) return policyError;
 
     if (kindFilter) {
-      let data = await filterModelsListForKey(keyAccess, await buildModelsList(kindFilter));
-      if (allowedModels) {
-        data = data.filter((m) => allowedModels.some((p) => modelPatternMatches(p, [m.id])));
-      }
+      const data = await filterModelsListForKey(keyAccess, await buildModelsList(kindFilter));
       return json({ object: "list", data });
     }
 
@@ -71,7 +58,7 @@ export async function GET(request, { params }) {
     const models = await filterModelsListForKey(keyAccess, await buildModelsList([LLM_KIND]));
     const matchedModel = models.find((candidate) => candidate.id === identifier);
 
-    if (!matchedModel || (allowedModels && !allowedModels.some((p) => modelPatternMatches(p, [matchedModel.id])))) {
+    if (!matchedModel) {
       return json(
         {
           error: {

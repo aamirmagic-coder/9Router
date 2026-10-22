@@ -135,3 +135,39 @@
 - Saved agentmemory lesson on the Ollama `/api/usage` → `/api/balance` migration for future recall.
 - Doc task (user request) completed this session on a separate `docs/upstream-contribution-runbook` branch, based on `origin/master`, so it doesn't pollute either open PR's diff.
 
+## 2026-10-22 (cont.) - Merged PR #38/#39/#40, fork-v0.5.105 release, nulla-lab production deploy
+
+### Merges
+- PR #38, #39, #40 all merged to `master` via `gh pr merge --admin` (branch-protection ruleset requires review+bypass for direct push; admin override is the established method for this repo). `master`: `bd5f9f11` → `c2e9fd10` (#38) → `83e1cadd` (#39) → `8fdc8893` (#40).
+- README.md mistake caught and reverted mid-session: PR #40's first commit linked the new gitignored `docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md` from the tracked README — user caught this ("docs nya keep as local, karena itu menyangkut sama ops"); reverted README to byte-identical original, fixed in `7bfd4fd9`.
+
+### Combined-state verification (homelab)
+- Homelab checkout (`/home/itsnulla/9router-build`) had drifted 103 commits behind (stale since 2026-10-01 sync); fast-forwarded to `master`@`8fdc8893` in one step, pulling in all 3 just-merged PRs plus unrelated upstream-tracking work merged earlier (Bedrock, Nous, MiniMax Code providers, Hermes profiles, etc.) that had accumulated since the last homelab sync.
+- Ran the full authoritative build+test gate (`NINEROUTER_HOMELAB_BUILD_TEST.md` §4) on this combined state for the first time — individual PRs were only tested in isolation before merge, never together: targeted suite (Ollama + key-access + key-policy tests) 181/181 passed; full-suite baseline comparison: **no regression** (82 known fails vs 134 baseline, all accounted for).
+- Fixed a gap in the runbook's own script: the disposable worktree needs `mkdir -p node_modules tests/node_modules` before the volume mounts, or Docker fails with a read-only-fs mount error on a fresh worktree that has no `node_modules` directory yet to use as a mountpoint.
+
+### Docker build + dev deploy
+- `docker build --no-cache -t 9router-dev:master` on homelab from `8fdc8893` succeeded (sha256 `96ba31d2...`).
+- Recreated `ninerouter-dev` with the new image: health `200`, `requireLogin:false` unchanged, redirect chain `/` → `307` → `/dashboard` → `200`, volume `9router-dev-data:/app/data` preserved before/after. DB auto-migrated schema 5→6 with pre-migration backup.
+
+### Production deploy (nulla-lab)
+- `docker save` (793,866,752 bytes) + SHA-256, transferred via the dedicated `9router-transfer` SFTP-only account over Tailscale (homelab → nulla-lab direct, ~5 min for 793MB).
+- Uploaded file inherited `600` perms owned by the transfer account, unreadable by the `ubuntu` operator — required one `sudo chown ubuntu:ubuntu` before checksum verification could run (same permission pattern seen on the prior `v0.5.104` transfer, so not treated as an anomaly).
+- Checksum verified OK, manifest config digest cross-checked identical to homelab's build output, `docker load` succeeded, tagged `9router:v0.5.105-local-8fdc8893`.
+- Rollback safety: tagged the then-running image as `9router:v0.5.104-local-bd5f9f11-rollback-20261022-224455`, backed up `docker-compose.yml` to the same timestamp suffix (PowerShell `$(docker ...)` subshell expansion doesn't survive the SSH hop — had to run this as a transferred `.sh` script instead of an inline command, consistent with known PowerShell/SSH quoting gotchas in these runbooks).
+- Updated only the `9router` service's image tag in compose (`sed`, not interactive `nano`), recreated with `docker compose up -d --no-deps --force-recreate 9router`. Caddy (`caddy-9router`) was never recreated, confirmed still "Up 47 hours" before and after.
+- **Critical volume check passed**: `9router_ninerouter_data:/app/data` unchanged — production data preserved, not a fresh/empty volume.
+- Public health verified `200` from two independent vantage points (Windows workstation over public Cloudflare, and from nulla-lab itself hitting its own public hostname). DB migrated schema 5→6 cleanly in production logs too, 5579 models loaded, zero startup errors.
+
+### Release
+- Per `NINEROUTER_FIX_RELEASE_RUNBOOK.md`'s hard rule ("never release ahead of production"), added the `CHANGELOG.md` v0.5.105 section on a separate `docs/changelog-v0.5.105` branch (PR #41, merged via `--admin` → `master`@`8f47f6f3`) rather than committing straight to `master`, since direct push is ruleset-blocked.
+- Tagged `fork-v0.5.105` pointing at `8fdc8893` — the exact commit baked into the production image — **not** `master`'s current tip (`8f47f6f3`, which only adds the changelog after the deploy already happened). Published via `gh release create` (had to omit `--target` once the tag already existed; passing both caused an "invalid target_commitish" 422).
+- Release: https://github.com/ibanunmangun/9router/releases/tag/fork-v0.5.105
+
+### State
+- `master` (local, origin) = `8f47f6f3`; production (`nulla-lab`) running commit `8fdc8893` via image `9router:v0.5.105-local-8fdc8893`; dev (`ninerouter-dev`) also at `8fdc8893`.
+- Fork release tag `fork-v0.5.105` → `8fdc8893`, matches deployed production commit exactly.
+- Rollback available on nulla-lab: `9router:v0.5.104-local-bd5f9f11-rollback-20261022-224455` + compose backup same timestamp.
+- Temp files intentionally retained per runbook (not a cleanup oversight): `/tmp/9router-release.tar` + checksum on homelab, `/tmp/9router-v0.5.105-8fdc8893.tar*` on nulla-lab — runbook explicitly says keep transfer archives until deployment is accepted, and prescribes no removal command.
+- No branch cleanup needed — PR branches were merged with `--delete-branch` (#41) or will be cleaned up in the next pass for #38/#39/#40's source branches (not yet deleted this session).
+

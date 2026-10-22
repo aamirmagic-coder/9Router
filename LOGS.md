@@ -106,3 +106,32 @@
 - Temp files cleaned: transferred image tarball + checksum + deploy-helper scripts removed from homelab + nulla-lab `/tmp`; stale homelab test-worktree result dirs from earlier sync test iterations removed.
 - Reminder carried over (non-blocking, deferred, not addressed this session): "CU Kenari" (custom-embedding connector named "Kenari") vs "k. test" (official `kenari` provider connection) shown as separate-looking nodes in provider topology graph — confirmed not a bug (naming ambiguity only), user has not requested a UI fix (rename or provider-type badge) yet.
 
+## 2026-10-22 - API-key policy consolidation (PR #38) + Ollama Cloud balance-API migration fix (PR #39)
+
+### PR #38 - API-key policy consolidation (`feat/consolidate-api-key-policy`)
+- Consolidated the fork's legacy `allowedModels`/`blockedModels`/`scopes` restriction system with upstream's canonical `access.{restricted,allow}` `keyAccess.js` engine into one enforcement path.
+- Fixed 7 baseline regressions surfaced by the consolidation: 1 production bug (migration 005 must self-create the `apiKeys` table defensively before altering it — same pattern already needed in migrations 003/006), 4 test-only fixes (stale canonical-source mocks, missing `requestId` field, fake-request `.url`, stale schema version string), committed as `9bee4cc5`.
+- Homelab baseline independently re-verified at `9bee4cc5`: no regression (82 fails, all within 134 known baseline).
+- Deployed to `ninerouter-dev` (image `sha256:c4f81998e3...`), health `200`, `requireLogin:false` unchanged, redirect chain `/` → `307` → `/dashboard` → `200`.
+- PR #38 opened: `base:master` ← `head:feat/consolidate-api-key-policy`@`9bee4cc5`. Still open at session end, not yet merged.
+
+### PR #39 - Ollama Cloud quota tracker: migrate to `/api/balance` (`fix/ollama-balance-api-migration`)
+- Root cause: Ollama repurposed `GET /api/usage` into pure spend-history on 2026-10-10 (no longer returns a `limits` object), so the dashboard silently fell back to "Ollama Cloud connected. No usage limits reported." for every connected account. Quota moved to a new `GET /api/balance` endpoint with a dollar-credit model now covering the Free plan too. Confirmed via `docs.ollama.com/api/balance`, `docs.ollama.com/api/cloud-usage`, and `ollama/ollama#18653`.
+- Fix (`open-sse/services/usage/misc.js`, `getOllamaUsage()`): call `/api/balance` instead of `/api/usage`; map `included.{balance_usd,allowance_usd,period.until}` to a Monthly quota row; surface an unexpired `purchased.balance_usd` top-up as a separate credit-balance row; kept a defensive fallback branch for the legacy `included.session/weekly.{remaining_percent,resets_at}` shape some un-migrated accounts may still return. Removed now-dead `nextMonthlyResetFromSignup`/`addUtcMonths` helpers (the new endpoint carries a real reset date). Fixed a pre-existing duplicate `return { plan, quotas };` line found while rewriting.
+- `ProviderLimits/utils.js`: forwarded `isCreditBalance`/`currency` for the `ollama` case so the purchased-credit row renders correctly (💰 style, not a progress bar).
+- `registry/ollama.js`: updated stale free-tier notice text (was still describing the retired 5h/weekly reset windows).
+- Rewrote `tests/unit/ollama-usage.test.js` fixtures for `/api/balance` (standard, free-plan, purchased top-up, legacy-shape fallback, no-data cases). One float-precision assertion failure caught on first homelab run (`4.9/5*100 = 98.00000000000001`) and fixed by rounding `remainingPercentage` to 2 decimals.
+- Homelab targeted test: 10/10 passed, exit code 0, after the rounding fix (first run was 9/10 due to the float issue).
+- Deployed to `ninerouter-dev` (image `sha256:c001c34ac0e7...`), health `200`, `requireLogin:false` unchanged, redirect chain `/` → `307` → `/dashboard` → `200`, volume `9router-dev-data:/app/data` preserved before/after.
+- PR #39 opened: `base:master` ← `head:fix/ollama-balance-api-migration`@`1e1cb834`. Still open at session end, not yet merged.
+
+### Docs - fork→upstream contribution runbook (`docs/upstream-contribution-runbook`)
+- Added `docs/ops/UPSTREAM_CONTRIBUTION_RUNBOOK.md` (gitignored, local-only — matches the existing `docs/ops/` pattern): covers identifying which fork commits are general-purpose enough to send to `decolua/9router` as a PR vs fork-specific (API-key policy, combo `connectionId` binding, etc.), basing the upstream-PR branch on `decolua/master` instead of this fork's `master` to keep the diff minimal, cherry-pick/conflict-resolution guidance to avoid leaking fork-only code, re-verifying on homelab against upstream's own code state before opening the PR, and what happens to the branch after upstream merges (handled by the next `FORK_SYNC_RELEASE_RUNBOOK.md` sync, not deleted early).
+- Cross-linked only within `docs/ops/` (itself gitignored, local-only): `FORK_SYNC_RELEASE_RUNBOOK.md` now points to the new doc for the reverse flow. Deliberately did NOT link it from `README.md` — that file is tracked/public, and a link into the gitignored `docs/ops/` directory would be a dead link for anyone cloning the repo fresh.
+
+### State
+- Two open PRs at session end: #38 (`feat/consolidate-api-key-policy`@`9bee4cc5`) and #39 (`fix/ollama-balance-api-migration`@`1e1cb834`), both based on `master`@`bd5f9f11`.
+- `ninerouter-dev` currently running the Ollama fix build (`1e1cb834`), which supersedes the earlier key-policy-only dev deploy from the same session — the key-policy consolidation code is NOT included in the current dev deploy since PR #39's branch was cut from `origin/master`, not from `feat/consolidate-api-key-policy`.
+- Saved agentmemory lesson on the Ollama `/api/usage` → `/api/balance` migration for future recall.
+- Doc task (user request) completed this session on a separate `docs/upstream-contribution-runbook` branch, based on `origin/master`, so it doesn't pollute either open PR's diff.
+

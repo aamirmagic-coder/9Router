@@ -304,7 +304,14 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
 
   const usage = extractUsageFromResponse(responseBody);
   appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+  try {
+    await saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestId: clientRawRequest?.usageRequestId, silent: true });
+  } catch (error) {
+    console.error(`[Usage] Non-streaming usage write failed: ${error.message}`);
+    const result = createErrorResult(HTTP_STATUS.SERVICE_UNAVAILABLE, "Unable to record API key usage");
+    result.origin = "usage_storage";
+    return result;
+  }
   if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)

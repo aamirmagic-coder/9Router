@@ -3,7 +3,7 @@ import React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import PropTypes from "prop-types";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { transformSync } from "esbuild";
+import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from "node:util";
 import { describe, expect, it, beforeAll, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import { parseSearchQuery, matchesSearch } from "@/shared/utils/modelSearchFilter.js";
@@ -183,7 +183,28 @@ const catalog = {
   "media-provider": [{ id: "match-media", name: "Match media", kind: "embedding" }],
 };
 
-function loadModalFromSource() {
+async function importEsbuildWithNativeTextEncoder() {
+  // esbuild's native binary asserts `new TextEncoder().encode("") instanceof
+  // Uint8Array` at module-load time (lib/shared/stdio_protocol.ts), before any
+  // of its exports run. jsdom (the @vitest-environment this file runs under)
+  // replaces globalThis.TextEncoder with its own implementation that fails
+  // that check, so the swap must wrap the dynamic import itself -- wrapping
+  // only the later transformSync() call is too late, since esbuild has
+  // already been evaluated under jsdom's globals by then.
+  const prevEncoder = globalThis.TextEncoder;
+  const prevDecoder = globalThis.TextDecoder;
+  globalThis.TextEncoder = NodeTextEncoder;
+  globalThis.TextDecoder = NodeTextDecoder;
+  try {
+    return await import("esbuild");
+  } finally {
+    globalThis.TextEncoder = prevEncoder;
+    globalThis.TextDecoder = prevDecoder;
+  }
+}
+
+async function loadModalFromSource() {
+  const { transformSync } = await importEsbuildWithNativeTextEncoder();
   const source = fs.readFileSync(new URL("../../src/shared/components/ModelSelectModal.js", import.meta.url), "utf-8");
   const compiled = transformSync(source, { loader: "jsx", format: "cjs", jsx: "automatic" }).code;
   const providers = {
@@ -242,7 +263,10 @@ function mockCatalogRequests(comboName = "Main") {
 }
 
 describe("ModelSelectModal interactive policy picker", () => {
-  const ModelSelectModal = loadModalFromSource();
+  let ModelSelectModal;
+  beforeAll(async () => {
+    ModelSelectModal = await loadModalFromSource();
+  });
 
   afterEach(() => {
     cleanup();

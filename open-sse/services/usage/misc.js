@@ -99,7 +99,7 @@ export async function getOllamaUsage(apiKey, providerSpecificData, proxyOptions 
         quotas.Monthly = {
           used: Math.round(used * 100) / 100,
           total: allowance,
-          remainingPercentage: Math.max(0, Math.min(100, (balance / allowance) * 100)),
+          remainingPercentage: Math.max(0, Math.min(100, Math.round((balance / allowance) * 10000) / 100)),
           resetAt: included.period?.until || null,
           unlimited: false,
         };

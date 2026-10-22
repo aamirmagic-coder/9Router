@@ -236,9 +236,15 @@ function loadModalFromSource() {
     react: React,
     "react/jsx-runtime": jsxRuntime,
     "prop-types": PropTypes,
-    "./Modal": { default: ({ children }) => React.createElement("div", null, children) },
-    "./ProviderIcon": { default: () => null },
-    "./CapacityBadges": { default: () => null },
+    // esbuild's CJS __toESM interop sets `.default` to the *whole* required
+    // module when it isn't already `__esModule`, then copies the module's own
+    // enumerable props over it -- so wrapping these in `{ default: Component }`
+    // made `.default` resolve to that wrapper object, not Component itself
+    // ("Element type is invalid ... got: object"). Mocking a bare default
+    // export as the module value itself matches plain `module.exports = X`.
+    "./Modal": ({ children }) => React.createElement("div", null, children),
+    "./ProviderIcon": () => null,
+    "./CapacityBadges": () => null,
     "@/shared/hooks/useModelCaps": { useModelCaps: () => ({ getCaps: () => ({}) }) },
     "@/shared/constants/models": { getModelsByProviderId: (id) => catalog[id] || [], getModelKind: (model) => model.kind || null },
     "@/shared/constants/providers": providers,

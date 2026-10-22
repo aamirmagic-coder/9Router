@@ -18,7 +18,8 @@ import EndpointRow from "./components/EndpointRow";
 import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
-import KeyAccessControls from "./components/KeyAccessControls";
+import { sameEntry, applyPolicyModelSelect, applyPolicyModelDeselect } from "@/shared/utils/policyModelList.js";
+
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +83,7 @@ export default function APIPageClient({ machineId }) {
   const [editForm, setEditForm] = useState({});
   const [activeProviders, setActiveProviders] = useState([]);
   const [showAllowedModelSelect, setShowAllowedModelSelect] = useState(false);
+  const [modelAliases, setModelAliases] = useState({});
 
   const [viewingUsageKey, setViewingUsageKey] = useState(null);
   const [usageDataCache, setUsageDataCache] = useState({});
@@ -735,15 +737,9 @@ export default function APIPageClient({ machineId }) {
 
   const handleUpdateKeyPolicy = async (id) => {
     try {
-      const allowedModelsArray = Array.isArray(editForm.allowedModels)
-        ? editForm.allowedModels
-        : (editForm.allowedModels || "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
+      const restricted = editForm.accessRestricted === true;
       const payload = {
-        allowedModels: allowedModelsArray,
-        blockedModels: [],
+        access: { restricted, allow: restricted ? (editForm.accessAllow || []) : [] },
         expiresAt: editForm.expiresAt ? new Date(editForm.expiresAt).toISOString() : null,
         maxRequestsPerDay: editForm.maxRequestsPerDay ? Number(editForm.maxRequestsPerDay) : null,
         maxSpendUsdPerDay: editForm.maxSpendUsdPerDay ? Number(editForm.maxSpendUsdPerDay) : null,
@@ -766,21 +762,13 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
-  const handleUpdateKeyAccess = async (id, access) => {
+  const openAllowedModelPicker = async () => {
+    setShowAllowedModelSelect(true);
     try {
-      const res = await fetch(`/api/keys/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.key) {
-        setKeys(prev => prev.map(k => k.id === id ? { ...k, access: data.key.access } : k));
-      } else {
-        console.log("Error updating key access:", data.error || res.status);
-      }
+      const res = await fetch("/api/models/alias");
+      if (res.ok) setModelAliases((await res.json()).aliases || {});
     } catch (error) {
-      console.log("Error updating key access:", error);
+      console.log("Error loading model aliases:", error);
     }
   };
 
@@ -1117,7 +1105,7 @@ export default function APIPageClient({ machineId }) {
                 <div className="flex-1 min-w-0 w-full sm:w-auto">
                   <p className="text-sm font-medium flex items-center gap-2">
                     {key.name}
-                    {Array.isArray(key.allowedModels) && key.allowedModels.length > 0 && (
+                    {key.access?.restricted === true && (
                       <Badge variant="warning" size="sm">Restricted</Badge>
                     )}
                     {(() => {
@@ -1166,18 +1154,6 @@ export default function APIPageClient({ machineId }) {
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
-                  <KeyAccessControls
-                    apiKey={key}
-                    onChange={(access) => handleUpdateKeyAccess(key.id, access)}
-                    onRequestRestrict={() => setConfirmState({
-                      title: "Restrict API Key",
-                      message: `Restrict API key "${key.name}"?\n\nIt will only be able to call the combos and models you add. Until you add one, it can call nothing.`,
-                      onConfirm: async () => {
-                        setConfirmState(null);
-                        handleUpdateKeyAccess(key.id, { restricted: true, allow: key.access?.allow || [] });
-                      }
-                    })}
-                  />
                 </div>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mt-3 sm:mt-0 w-full sm:w-auto">
                   <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end">
@@ -1197,7 +1173,8 @@ export default function APIPageClient({ machineId }) {
                       onClick={() => {
                         setEditingKey(key.id);
                         setEditForm({
-                          allowedModels: key.allowedModels || [],
+                          accessRestricted: key.access?.restricted === true,
+                          accessAllow: key.access?.allow || [],
                           expiresAt: key.expiresAt ? new Date(key.expiresAt).toISOString().split('T')[0] : "",
                           maxRequestsPerDay: key.maxRequestsPerDay ?? null,
                           maxSpendUsdPerDay: key.maxSpendUsdPerDay ?? null,
@@ -1327,39 +1304,57 @@ export default function APIPageClient({ machineId }) {
         }}
       >
         <div className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Allowed Models</label>
-            {(editForm.allowedModels || []).length === 0 ? (
-              <div className="rounded-lg border border-dashed border-black/10 bg-black/[0.01] py-4 text-center dark:border-white/10 dark:bg-white/[0.01]">
-                <span className="material-symbols-outlined mb-1 text-xl text-text-muted">layers</span>
-                <p className="text-xs text-text-muted">All models are allowed</p>
-              </div>
-            ) : (
-              <div className="flex max-h-[350px] min-w-0 flex-col gap-1 overflow-y-auto">
-                {editForm.allowedModels.map((model, index) => (
-                  <div key={model} className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/[0.02] px-2 py-1 dark:bg-white/[0.02]">
-                    <span className="w-3 shrink-0 text-center text-[10px] font-medium text-text-muted">{index + 1}</span>
-                    <code className="min-w-0 flex-1 truncate px-1.5 py-0.5 text-xs text-text-main">{model}</code>
-                    <button
-                      type="button"
-                      onClick={() => setEditForm({ ...editForm, allowedModels: editForm.allowedModels.filter((value) => value !== model) })}
-                      className="rounded p-0.5 text-text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
-                      title="Remove"
-                    >
-                      <span className="material-symbols-outlined text-[12px]">close</span>
-                    </button>
+          <div data-testid="key-policy-access">
+            <Toggle
+              size="sm"
+              label="Restrict model access"
+              description="Off: this key can call any model or combo. On: only the entries below."
+              checked={editForm.accessRestricted === true}
+              onChange={(checked) => setEditForm({ ...editForm, accessRestricted: checked })}
+            />
+            {editForm.accessRestricted === true && (
+              <div className="mt-3">
+                <label className="mb-1.5 block text-sm font-medium">Allowed Models and Combos</label>
+                {(editForm.accessAllow || []).length === 0 ? (
+                  <div
+                    role="status"
+                    data-testid="key-policy-empty-warning"
+                    className="rounded-lg border border-dashed border-orange-500/40 bg-orange-500/5 px-3 py-4 text-center"
+                  >
+                    <span className="material-symbols-outlined mb-1 text-xl text-orange-500">block</span>
+                    <p className="text-xs text-orange-600 dark:text-orange-400">
+                      No models or combos allowed. With restriction on and nothing added, this key cannot call any model or combo.
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  <ul data-testid="key-policy-allow-list" className="flex max-h-[350px] min-w-0 flex-col gap-1 overflow-y-auto">
+                    {editForm.accessAllow.map((entry, index) => (
+                      <li key={entry} className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/[0.02] px-2 py-1 dark:bg-white/[0.02]">
+                        <span className="w-3 shrink-0 text-center text-[10px] font-medium text-text-muted">{index + 1}</span>
+                        <code className="min-w-0 flex-1 break-all px-1.5 py-0.5 text-xs text-text-main">{entry}</code>
+                        <button
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, accessAllow: editForm.accessAllow.filter((value) => !sameEntry(value, entry)) })}
+                          className="rounded p-0.5 text-text-muted transition-colors hover:bg-red-500/10 hover:text-red-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                          title={`Remove ${entry}`}
+                          aria-label={`Remove ${entry}`}
+                        >
+                          <span className="material-symbols-outlined text-[12px]" aria-hidden="true">close</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  type="button"
+                  onClick={openAllowedModelPicker}
+                  className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-black/10 py-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 dark:border-white/10"
+                >
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">add</span>
+                  Add combo or model
+                </button>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setShowAllowedModelSelect(true)}
-              className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-black/10 py-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 dark:border-white/10"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Add Model
-            </button>
           </div>
           <Input
             label="Expiration Date"
@@ -1449,18 +1444,18 @@ export default function APIPageClient({ machineId }) {
         isOpen={showAllowedModelSelect}
         onClose={() => setShowAllowedModelSelect(false)}
         onSelect={(model) => {
-          const current = editForm.allowedModels || [];
-          if (!current.includes(model.value)) {
-            setEditForm({ ...editForm, allowedModels: [...current, model.value] });
-          }
+          // Functional updater: ModelSelectModal's Select All calls this once per
+          // item synchronously, so a render-time snapshot would drop all but the last.
+          setEditForm((prev) => applyPolicyModelSelect(prev, model?.value));
         }}
         onDeselect={(model) => {
-          const current = editForm.allowedModels || [];
-          setEditForm({ ...editForm, allowedModels: current.filter((value) => value !== model.value) });
+          setEditForm((prev) => applyPolicyModelDeselect(prev, model?.value));
         }}
         activeProviders={activeProviders}
-        title="Add Allowed Model to Policy"
-        addedModelValues={editForm.allowedModels || []}
+        modelAliases={modelAliases}
+        title="Add Allowed Model or Combo to Policy"
+        addedModelValues={editForm.accessAllow || []}
+        addedModelValuesCaseInsensitive
         closeOnSelect={false}
         includeMediaKinds
       />

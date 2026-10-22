@@ -256,22 +256,9 @@ export async function saveRequestUsage(entry) {
     // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
     // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
     db.transaction(() => {
-      const existing = db.get(
-        `SELECT id, endpoint FROM usageHistory
-         WHERE timestamp = ?
-           AND COALESCE(provider, '') = COALESCE(?, '')
-           AND COALESCE(model, '') = COALESCE(?, '')
-           AND COALESCE(connectionId, '') = COALESCE(?, '')
-           AND COALESCE(apiKey, '') = COALESCE(?, '')
-           AND promptTokens = ?
-           AND completionTokens = ?
-         ORDER BY id DESC LIMIT 1`,
-        [
-          entry.timestamp, entry.provider || null, entry.model || null,
-          entry.connectionId || null, entry.apiKey || null,
-          promptTokens, completionTokens,
-        ]
-      );
+      const existing = entry.requestId
+        ? db.get(`SELECT id, endpoint FROM usageHistory WHERE requestId = ?`, [entry.requestId])
+        : null;
 
       if (existing) {
         if (!existing.endpoint && entry.endpoint) {
@@ -281,9 +268,9 @@ export async function saveRequestUsage(entry) {
       }
 
       db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(requestId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          entry.timestamp, entry.provider || null, entry.model || null,
+          entry.requestId || null, entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
           stringifyJson(tokens), stringifyJson({}),
@@ -312,6 +299,7 @@ export async function saveRequestUsage(entry) {
     }
   } catch (e) {
     console.error("Failed to save usage stats:", e);
+    throw e;
   }
 }
 
@@ -897,7 +885,7 @@ export async function getDailyUsageForApiKey(apiKey) {
     return { requests, cost };
   } catch (e) {
     console.error("[usageRepo] getDailyUsageForApiKey failed:", e.message);
-    return { requests: 0, cost: 0 };
+    throw e;
   }
 }
 

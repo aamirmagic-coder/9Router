@@ -6,7 +6,6 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
-  getApiKeyPolicyError,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
@@ -30,7 +29,7 @@ import { resolveConnectionProxyConfig, getProxyBucketIdentity } from "@/lib/netw
 import { acquireAccountSlot } from "open-sse/services/accountSemaphore.js";
 import { evaluateCircuit, recordCircuitOutcome } from "open-sse/services/circuitBreaker.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
-import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
+import { getKeyAccessContext, evaluateKeyPolicy, filterAdapterModels, getUsageRequestId } from "../services/keyAccess.js";
 
 /**
  * Handle chat completion request
@@ -65,6 +64,7 @@ export async function handleChat(request, clientRawRequest = null, requestContex
       headers: Object.fromEntries(request.headers.entries())
     };
   }
+  clientRawRequest = { ...clientRawRequest, usageRequestId: getUsageRequestId(request) };
   // Claude Code marks a 1M-context request as `<model>[1m]`; the marker matches
   // no combo, alias or provider/model pair, so it must not reach resolution.
   // The capability travels in the anthropic-beta header, forwarded as-is.
@@ -103,20 +103,9 @@ export async function handleChat(request, clientRawRequest = null, requestContex
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   }
 
-  if (apiKey) {
-    const policyErr = await getApiKeyPolicyError(apiKey, modelStr);
-    if (policyErr) {
-      log.warn("AUTH", policyErr.message);
-      return errorResponse(policyErr.status, policyErr.message);
-    }
-  }
-
-  // Per-key access control: a restricted key may call only its listed combos and
-  // models. Checked once on the requested target, before bypass, combo expansion
-  // and any credential lookup; an allowed combo grants the members it routes to.
   const keyAccess = isDashboardAuthorized ? null : await getKeyAccessContext(request);
-  const keyAccessDenied = await enforceKeyAccess(keyAccess, modelStr);
-  if (keyAccessDenied) return keyAccessDenied;
+  const policyError = await evaluateKeyPolicy(keyAccess, modelStr);
+  if (policyError) return policyError;
 
   // Bypass naming/warmup requests before combo rotation to avoid wasting rotation slots
   const userAgent = request?.headers?.get("user-agent") || "";
@@ -162,10 +151,6 @@ export async function handleChat(request, clientRawRequest = null, requestContex
       models: augmentedModels,
       handleSingleModel: withCapacityAdapterStripping(
         async (b, m, modelEntry) => {
-          if (apiKey && adapterAdded.includes(m)) {
-            const policyErr = await getApiKeyPolicyError(apiKey, m);
-            if (policyErr) return errorResponse(policyErr.status, policyErr.message);
-          }
           return handleSingleModelChat(b, m, clientRawRequest, request, apiKey, { preferredConnectionId: modelEntry?.connectionId });
         },
         adapterAdded
@@ -188,10 +173,6 @@ export async function handleChat(request, clientRawRequest = null, requestContex
       models: soloAugmented,
       handleSingleModel: withCapacityAdapterStripping(
         async (b, m) => {
-          if (apiKey && adapterAdded.includes(m)) {
-            const policyErr = await getApiKeyPolicyError(apiKey, m);
-            if (policyErr) return errorResponse(policyErr.status, policyErr.message);
-          }
           return handleSingleModelChat(b, m, clientRawRequest, request, apiKey);
         },
         adapterAdded
@@ -256,10 +237,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         models: augmentedModels,
         handleSingleModel: withCapacityAdapterStripping(
           async (b, m, modelEntry) => {
-            if (apiKey && adapterAdded.includes(m)) {
-              const policyErr = await getApiKeyPolicyError(apiKey, m);
-              if (policyErr) return errorResponse(policyErr.status, policyErr.message);
-            }
             return handleSingleModelChat(b, m, clientRawRequest, request, apiKey, { preferredConnectionId: modelEntry?.connectionId });
           },
           adapterAdded
@@ -462,7 +439,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         releaseSlot = null;
       }
 
-      if (result.success) return result.response;
+      if (result.success || result.origin === "usage_storage") return result.response;
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;

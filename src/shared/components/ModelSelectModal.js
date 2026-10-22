@@ -97,6 +97,7 @@ export default function ModelSelectModal({
   kindFilter = null,
   capFilter = null,
   addedModelValues = [],
+  addedModelValuesCaseInsensitive = false,
   closeOnSelect = true,
   includeMediaKinds = false,
   allowProviderWildcard = false,
@@ -630,9 +631,18 @@ export default function ModelSelectModal({
     return result;
   }, [mediaGroupsByKind, applySearchFilter]);
 
+  // Scope boundary (intentional, not a bug): covers only filteredGroups. Combos
+  // and media-kind groups are picked individually and are excluded from Select
+  // All / Deselect All for every caller. Widening this changes bulk-action
+  // behavior for all existing consumers, not just one — extend deliberately.
   const visibleModels = useMemo(() => Object.values(filteredGroups).flatMap((group) => group.models.filter((model) => !model.isPlaceholder)), [filteredGroups]);
-  const visibleUnadded = useMemo(() => visibleModels.filter((model) => !addedModelValues.includes(model.value)), [visibleModels, addedModelValues]);
-  const visibleAdded = useMemo(() => visibleModels.filter((model) => addedModelValues.includes(model.value)), [visibleModels, addedModelValues]);
+  const isAddedModelValue = useCallback((value) => addedModelValues.some((addedValue) => (
+    addedModelValuesCaseInsensitive
+      ? String(addedValue).toLowerCase() === String(value).toLowerCase()
+      : addedValue === value
+  )), [addedModelValues, addedModelValuesCaseInsensitive]);
+  const visibleUnadded = useMemo(() => visibleModels.filter((model) => !isAddedModelValue(model.value)), [visibleModels, isAddedModelValue]);
+  const visibleAdded = useMemo(() => visibleModels.filter((model) => isAddedModelValue(model.value)), [visibleModels, isAddedModelValue]);
 
   const handleSelectAllVisible = () => {
     if (onSelectBatch) onSelectBatch(visibleUnadded);
@@ -646,7 +656,7 @@ export default function ModelSelectModal({
 
   const handleSelect = (model) => {
     const value = model?.value || model?.name || model;
-    const isAdded = addedModelValues.includes(value);
+    const isAdded = isAddedModelValue(value);
 
     if (isAdded && onDeselect) {
       onDeselect(model);
@@ -675,14 +685,14 @@ export default function ModelSelectModal({
             ? "border-dashed border-border text-text-muted hover:border-primary/50 hover:text-primary bg-surface italic"
             : isSelected
               ? "bg-primary text-white border-primary"
-              : addedModelValues.includes(model.value)
+              : isAddedModelValue(model.value)
                 ? "bg-primary border-primary text-white hover:bg-primary-hover"
                 : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
           }
         `}
       >
         <span className="flex items-center gap-1">
-          {addedModelValues.includes(model.value) && !isPlaceholder && (
+           {isAddedModelValue(model.value) && !isPlaceholder && (
             <span className="material-symbols-outlined leading-none" style={{ fontSize: "10px" }}>check</span>
           )}
           {isPlaceholder ? (
@@ -827,13 +837,13 @@ export default function ModelSelectModal({
                       px-2 py-1 rounded-xl text-xs font-medium transition-all border hover:cursor-pointer flex items-center gap-1
                       ${isSelected
                         ? "bg-primary text-white border-primary"
-                        : addedModelValues.includes(combo.name)
+                        : isAddedModelValue(combo.name)
                           ? "bg-primary border-primary text-white hover:bg-primary-hover"
                           : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
                       }
                     `}
                   >
-                    {addedModelValues.includes(combo.name) && (
+                    {isAddedModelValue(combo.name) && (
                       <span className="material-symbols-outlined leading-none" style={{ fontSize: "10px" }}>check</span>
                     )}
                     {combo.name}
@@ -949,8 +959,9 @@ ModelSelectModal.propTypes = {
   modelAliases: PropTypes.object,
   kindFilter: PropTypes.string,
   capFilter: PropTypes.string,
-  addedModelValues: PropTypes.arrayOf(PropTypes.string),
-  closeOnSelect: PropTypes.bool,
+   addedModelValues: PropTypes.arrayOf(PropTypes.string),
+   addedModelValuesCaseInsensitive: PropTypes.bool,
+   closeOnSelect: PropTypes.bool,
   includeMediaKinds: PropTypes.bool,
   allowProviderWildcard: PropTypes.bool,
 };

@@ -104,6 +104,11 @@ export async function getProviderConnections(filter = {}) {
   return list;
 }
 
+export async function getProviderConnectionProviderById(id) {
+  const db = await getAdapter();
+  return db.get(`SELECT provider FROM providerConnections WHERE id = ?`, [id])?.provider || null;
+}
+
 export async function getProviderConnectionById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);

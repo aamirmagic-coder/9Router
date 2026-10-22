@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
-import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
+import { keyAccessFromColumns, keyAccessToColumns, normalizeAllowList } from "@/shared/utils/keyAccess.js";
 import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
 function parseJsonArray(value, defaultValue) {
@@ -32,6 +32,15 @@ function rowToKey(row) {
     createdAt: row.createdAt,
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
+}
+
+function accessForWrite(data, existing = KEY_ACCESS_UNRESTRICTED) {
+  if (data.access !== undefined) return data.access;
+  if (data.allowedModels !== undefined) {
+    const allow = normalizeAllowList(data.allowedModels);
+    return { restricted: allow.length > 0, allow };
+  }
+  return existing;
 }
 
 function keyToRow(key) {
@@ -85,10 +94,10 @@ export async function createApiKey(name, machineId, extra = {}) {
     maxRequestsPerDay: extra.maxRequestsPerDay ?? null,
     maxSpendUsdPerDay: extra.maxSpendUsdPerDay ?? null,
     createdAt: new Date().toISOString(),
-    access: { restricted: false, allow: [] },
+    access: accessForWrite(extra),
   };
   const row = keyToRow(apiKey);
-  const cols = keyAccessToColumns(KEY_ACCESS_UNRESTRICTED);
+  const cols = keyAccessToColumns(apiKey.access);
   db.run(
     `INSERT INTO apiKeys(id, key, name, machineId, isActive, allowedModels, blockedModels, allowedCombos, scopes, expiresAt, lastUsedAt, maxRequestsPerDay, maxSpendUsdPerDay, createdAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [row.id, row.key, row.name, row.machineId, row.isActive, row.allowedModels, row.blockedModels, row.allowedCombos, row.scopes, row.expiresAt, row.lastUsedAt, row.maxRequestsPerDay, row.maxSpendUsdPerDay, row.createdAt, cols.accessRestricted, cols.accessAllow]
@@ -113,7 +122,7 @@ export async function updateApiKey(id, data) {
       ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
       ...(data.maxRequestsPerDay !== undefined ? { maxRequestsPerDay: data.maxRequestsPerDay } : {}),
       ...(data.maxSpendUsdPerDay !== undefined ? { maxSpendUsdPerDay: data.maxSpendUsdPerDay } : {}),
-      ...(data.access !== undefined ? { access: data.access } : {}),
+      access: accessForWrite(data, keyAccessFromColumns(row.accessRestricted, row.accessAllow)),
     };
     const r = keyToRow(merged);
     const cols = keyAccessToColumns(merged.access);

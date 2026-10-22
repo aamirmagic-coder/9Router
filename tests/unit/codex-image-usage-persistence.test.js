@@ -94,6 +94,8 @@ describe("Codex image usage persistence", () => {
       connectionId: "connection-a",
       apiKey: "client-key",
       endpoint: "/v1/images/generations",
+      // Per-request dedup id (randomUUID), not pinned to an exact value.
+      requestId: expect.any(String),
       tokens: {
         prompt_tokens: 321,
         completion_tokens: 654,

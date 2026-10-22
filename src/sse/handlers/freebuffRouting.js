@@ -88,7 +88,7 @@ export async function routeFiniteFreebuff({ provider, model, select, resolvePool
       const identity = `${key}\u0000${entry.poolId}`;
       if (excludedPoolIdentities.has(identity)) continue;
       const result = await dispatch(entry.credentials);
-      if (result.success) return { response: result.response, snapshots, excludedConnectionIds, excludedPoolIdentities };
+      if (result.success || result.origin === "usage_storage") return { response: result.response, snapshots, excludedConnectionIds, excludedPoolIdentities };
       terminal.record(result);
       if (result.poolScoped?.poolId === entry.poolId) {
         excludedPoolIdentities.add(identity);

@@ -21,6 +21,27 @@ vi.mock("@/lib/localDb", () => ({
   getApiKeyMetadata: mocks.getApiKeyMetadata,
   touchApiKey: mocks.touchApiKey,
 }));
+// chat.js's policy gate now reads the canonical key-access source
+// (apiKeysRepo.js + combosRepo.js) instead of the legacy @/lib/localDb path
+// above. Translate each test's existing legacy-shaped fixture (allowedModels)
+// into the canonical { access: { restricted, allow } } shape so S1-D's real
+// enforceKeyAccess/getAllowSets code path runs against the same fixtures.
+vi.mock("@/lib/db/repos/apiKeysRepo.js", () => ({
+  getApiKeyByKey: async (key) => {
+    const legacy = await mocks.getApiKeyMetadata(key);
+    if (!legacy) return null;
+    const allow = legacy.allowedModels || [];
+    return {
+      id: key, name: key, key,
+      access: { restricted: allow.length > 0, allow },
+      expiresAt: legacy.expiresAt ?? null,
+      maxRequestsPerDay: legacy.maxRequestsPerDay ?? null,
+      maxSpendUsdPerDay: legacy.maxSpendUsdPerDay ?? null,
+    };
+  },
+  touchApiKey: mocks.touchApiKey,
+}));
+vi.mock("@/lib/db/repos/combosRepo.js", () => ({ getCombos: async () => [] }));
 vi.mock("@/sse/services/model.js", () => ({ getModelInfo: mocks.getModelInfo, getComboModels: mocks.getComboModels }));
 vi.mock("@/sse/services/auth.js", async (importOriginal) => {
   // Real getApiKeyPolicyError/isModelAllowedForKey/checkDailyLimit/isKeyExpired run

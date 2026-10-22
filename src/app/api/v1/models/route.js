@@ -7,11 +7,9 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getApiKeyMetadata } from "@/lib/localDb";
+import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
-import { extractApiKey } from "@/sse/services/auth";
-import { modelPatternMatches } from "@/shared/utils/modelPermissions.js";
-import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
+import { getKeyAccessContext, enforceKeyPolicy, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -666,18 +664,10 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    let data = await filterModelsListForKey(
-      await getKeyAccessContext(request),
-      await buildModelsList([LLM_KIND], { skipDynamicFetch })
-    );
-
-    const apiKey = extractApiKey(request);
-    if (apiKey) {
-      const metadata = await getApiKeyMetadata(apiKey);
-      if (metadata?.allowedModels?.length > 0) {
-        data = data.filter((m) => metadata.allowedModels.some((p) => modelPatternMatches(p, [m.id])));
-      }
-    }
+    const keyAccess = await getKeyAccessContext(request);
+    const policyError = await enforceKeyPolicy(keyAccess);
+    if (policyError) return policyError;
+    const data = await filterModelsListForKey(keyAccess, await buildModelsList([LLM_KIND], { skipDynamicFetch }));
 
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },

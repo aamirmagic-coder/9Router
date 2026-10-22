@@ -4,11 +4,10 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
-  getApiKeyPolicyError,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
-import { getKeyAccessContext, enforceKeyAccessResolved } from "../services/keyAccess.js";
+import { getKeyAccessContext, evaluateKeyPolicy, getUsageRequestId } from "../services/keyAccess.js";
 import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -63,13 +62,7 @@ export async function handleSystemone(request) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   }
 
-  if (apiKey) {
-    const policyErr = await getApiKeyPolicyError(apiKey, modelStr);
-    if (policyErr) {
-      log.warn("AUTH", policyErr.message);
-      return errorResponse(policyErr.status, policyErr.message);
-    }
-  }
+  const keyAccess = await getKeyAccessContext(request);
 
   if (body.state === undefined || body.state === null) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: state");
@@ -87,8 +80,8 @@ export async function handleSystemone(request) {
   const { provider, model } = modelInfo;
 
   // Per-key access control: checked before any credential lookup.
-  const keyAccessDenied = await enforceKeyAccessResolved(await getKeyAccessContext(request), modelStr, provider, model);
-  if (keyAccessDenied) return keyAccessDenied;
+  const policyError = await evaluateKeyPolicy(keyAccess, modelStr, { kind: "resolved", provider, model });
+  if (policyError) return policyError;
 
   if (modelStr !== `${provider}/${model}`) {
     log.info("ROUTING", `${modelStr} → ${provider}/${model}`);
@@ -138,21 +131,27 @@ export async function handleSystemone(request) {
       const usage = result.usage && typeof result.usage === "object" ? result.usage : {};
       const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
       const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-      saveRequestUsage({
-        provider,
-        model,
-        connectionId: credentials.connectionId,
-        apiKey,
-        endpoint: url.pathname,
-        tokens: {
-          ...usage,
-          prompt_tokens: Number.isFinite(promptTokens) ? promptTokens : 0,
-          completion_tokens: Number.isFinite(completionTokens) ? completionTokens : 0,
-          total_tokens: (Number.isFinite(promptTokens) ? promptTokens : 0)
-            + (Number.isFinite(completionTokens) ? completionTokens : 0),
-        },
-        status: "success",
-      }).catch(() => {});
+      try {
+        await saveRequestUsage({
+          provider,
+          model,
+          connectionId: credentials.connectionId,
+          apiKey,
+          requestId: getUsageRequestId(request),
+          endpoint: url.pathname,
+          tokens: {
+            ...usage,
+            prompt_tokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+            completion_tokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+            total_tokens: (Number.isFinite(promptTokens) ? promptTokens : 0)
+              + (Number.isFinite(completionTokens) ? completionTokens : 0),
+          },
+          status: "success",
+        });
+      } catch (error) {
+        log.error("SYSTEMONE", `Failed to record usage: ${error.message}`);
+        return errorResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, "Unable to record API key usage");
+      }
       return result.response;
     }
 

@@ -4,7 +4,6 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
-  getApiKeyPolicyError,
 } from "../services/auth.js";
 import { getSettings, getCombos } from "@/lib/localDb";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
@@ -14,7 +13,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
-import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAccess.js";
+import { getKeyAccessContext, evaluateKeyPolicy, recordKeyedUsage } from "../services/keyAccess.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -65,10 +64,7 @@ export async function handleSearch(request) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: provider (or model)");
   }
 
-  if (apiKey) {
-    const policyErr = await getApiKeyPolicyError(apiKey, providerInput);
-    if (policyErr) return errorResponse(policyErr.status, policyErr.message);
-  }
+  const keyAccess = await getKeyAccessContext(request);
 
   if (!query || typeof query !== "string" || !query.trim()) {
     log.warn("SEARCH", "Missing query");
@@ -81,8 +77,8 @@ export async function handleSearch(request) {
 
   // Per-key access control: the provider IS the model here, so a
   // restricted key needs the provider id (or the combo) on its list.
-  const keyAccessDenied = await enforceKeyAccessProvider(await getKeyAccessContext(request), providerInput, comboModels);
-  if (keyAccessDenied) return keyAccessDenied;
+  const policyError = await evaluateKeyPolicy(keyAccess, providerInput, { kind: "provider", comboModels });
+  if (policyError) return policyError;
   if (comboModels) {
     const comboStrategies = settings.comboStrategies || {};
     const comboStrategy = comboStrategies[providerInput]?.fallbackStrategy || settings.comboStrategy || "fallback";
@@ -151,7 +147,11 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
       credentials: null,
       log
     });
-    if (result.success) return result.response;
+    if (result.success) {
+      const usageError = await recordKeyedUsage(request, await getKeyAccessContext(request), { provider: providerId, model: "search", endpoint: new URL(request.url).pathname, tokens: {} });
+      if (usageError) return usageError;
+      return result.response;
+    }
     return result.response;
   }
 
@@ -228,7 +228,11 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      const usageError = await recordKeyedUsage(request, await getKeyAccessContext(request), { provider: providerId, model: "search", connectionId: credentials.connectionId, endpoint: new URL(request.url).pathname, tokens: {} });
+      if (usageError) return usageError;
+      return result.response;
+    }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, credentialProviderId, searchLockKey);
 

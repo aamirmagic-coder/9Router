@@ -38,7 +38,12 @@ const STRIP_RULES = [
   // client cannot classify it and keeps re-sending the field. Measured 2026-10-13
   // against /zen/go/v1/chat/completions with one key: 12/12 structured calls 400,
   // 4/4 identical calls without the field 200.
+  // Also true on the free "opencode" (Zen) lane for its deepseek variants: oc/
+  // deepseek-v4.1-flash-free returns the same bare-model-echo 400 with
+  // response_format and 200 without (reproduced 2026-10-22 on :20127). Every
+  // other model on that lane accepts it.
   { provider: "opencode-go", match: /^deepseek/i, drop: ["response_format"] },
+  { provider: "opencode", match: /^deepseek/i, drop: ["response_format"] },
 ];
 
 // Test a rule's match (regex or predicate) against the model id.

@@ -1,3 +1,14 @@
+# v0.5.105 (2026-10-22)
+
+## Features
+- **API Keys**: consolidate all key-policy enforcement (allowedModels/blockedModels/allowedCombos, wildcards, expiry, usage caps) onto one canonical access engine shared across chat, speech, video, search, Gemini-native, and discovery routes (#4850, #38)
+
+## Fixes
+- **Usage**: migrate Ollama Cloud quota tracker from the retired `/api/usage` limits field to `/api/balance` (`included`/`purchased` balances), restoring quota display for Free and paid Ollama Cloud accounts; surface unexpired purchased credit as its own row (#4860, #39)
+- **Models**: close a policy bypass on model-discovery routes so restricted keys can no longer see blocked models via `/v1/models`
+- **Gemini**: align native-route auth extraction and usage accounting with the canonical access engine
+- **Routing**: stop fallback retry from masking a local usage-storage failure as a provider error
+
 # v0.5.104 (2026-10-15)
 
 ## Features

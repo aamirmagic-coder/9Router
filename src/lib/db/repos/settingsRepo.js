@@ -58,6 +58,9 @@ const DEFAULT_SETTINGS = {
   cavemanLevel: "full",
   ponytailEnabled: false,
   ponytailLevel: "full",
+  // User-supplied doctrine text for the Ponytail injector ("" = built-in prompts).
+  // Set it to pin a specific upstream release without waiting for a gateway release.
+  ponytailPromptOverride: "",
   pxpipeEnabled: false,
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,

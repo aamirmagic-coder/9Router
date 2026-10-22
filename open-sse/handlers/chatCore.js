@@ -60,7 +60,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerOverrides }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, ponytailPromptOverride, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerOverrides }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
   // Stable per-session color so all lines of one CLI conversation share a tag
@@ -302,10 +302,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     xf.push(`CAVEMAN:${cavemanLevel}`);
   }
 
-  // Ponytail: inject lazy-senior-dev system prompt
+  // Ponytail: inject lazy-senior-dev system prompt (a user override, when set, wins
+  // over the built-in level text — see ponytailPromptOverride in settings)
   if (tokenSaverEnabled && ponytailEnabled && ponytailLevel) {
-    injectPonytail(translatedBody, finalFormat, ponytailLevel);
-    xf.push(`PONYTAIL:${ponytailLevel}`);
+    injectPonytail(translatedBody, finalFormat, ponytailLevel, ponytailPromptOverride);
+    const custom = typeof ponytailPromptOverride === "string" && ponytailPromptOverride.trim();
+    xf.push(`PONYTAIL:${ponytailLevel}${custom ? "+custom" : ""}`);
   }
 
   // PXPIPE: image bulky context (Claude-format bodies only), last saver before dispatch

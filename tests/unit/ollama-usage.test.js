@@ -12,7 +12,7 @@ import {
 } from "../../src/shared/constants/providers.js";
 import { parseQuotaData } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js";
 
-const USAGE_URL = "https://ollama.com/api/usage";
+const BALANCE_URL = "https://ollama.com/api/balance";
 const ME_URL = "https://ollama.com/api/me";
 
 function jsonResponse(body, status = 200) {
@@ -22,66 +22,38 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-const SAMPLE_USAGE = {
-  activity: {
-    cost: "0.00000",
-    period: {
-      type: "last_4_weeks",
-      starting_at: "2026-07-01T00:00:00Z",
-      ending_at: "2026-07-29T00:00:00Z",
-    },
-    models: [],
-  },
-  limits: {
-    session: { usage: 0, models: [] },
-    weekly: {
-      usage: 1,
-      models: [
-        { name: "glm-5.2", request_count: 5967 },
-        { name: "kimi-k2.5", request_count: 2 },
-      ],
-    },
+// Real shape captured 2026-10 after Ollama's credit-model pricing migration:
+// GET /api/usage became pure spend-history and quota moved to /api/balance.
+const SAMPLE_BALANCE = {
+  included: {
+    balance_usd: 72.5,
+    allowance_usd: 100,
+    period: { from: "2026-10-01T00:00:00Z", until: "2026-11-01T00:00:00Z" },
   },
 };
 
-// Real shape captured 2026-09: Ollama replaced session/weekly with a single
-// monthly bucket.
-const SAMPLE_USAGE_MONTHLY = {
-  activity: {
-    cost: "0.00000",
-    period: {
-      type: "last_4_weeks",
-      starting_at: "2026-08-17T00:00:00Z",
-      ending_at: "2026-09-09T13:39:08Z",
-    },
-    models: [],
-  },
-  limits: {
-    monthly: {
-      usage: 0.239,
-      models: [{ name: "gpt-oss:20b", request_count: 2776 }],
-    },
+const SAMPLE_BALANCE_FREE = {
+  included: {
+    balance_usd: 4.9,
+    allowance_usd: 5,
+    period: { from: "2026-10-01T00:00:00Z", until: "2026-11-01T00:00:00Z" },
   },
 };
 
-const SAMPLE_FREE_USAGE = {
-  activity: {
-    cost: "0.00000",
-    period: {
-      type: "last_4_weeks",
-      starting_at: "2026-08-24T00:00:00Z",
-      ending_at: "2026-09-18T15:03:00Z",
-    },
-    models: [],
+const SAMPLE_BALANCE_WITH_PURCHASED = {
+  included: {
+    balance_usd: 10,
+    allowance_usd: 100,
+    period: { from: "2026-10-01T00:00:00Z", until: "2026-11-01T00:00:00Z" },
   },
-  limits: {
-    monthly: {
-      usage: 0.021,
-      models: [
-        { name: "gpt-oss:120b", request_count: 6 },
-        { name: "gemma4:31b", request_count: 6 },
-      ],
-    },
+  purchased: { balance_usd: 25 },
+};
+
+// Legacy shape still returned by accounts not yet migrated to the credit model.
+const SAMPLE_BALANCE_LEGACY = {
+  included: {
+    session: { remaining_percent: 100, resets_at: "2026-10-22T20:00:00Z" },
+    weekly: { remaining_percent: 0, resets_at: "2026-10-27T00:00:00Z" },
   },
 };
 
@@ -101,9 +73,9 @@ describe("getUsageForProvider(ollama)", () => {
     vi.clearAllMocks();
   });
 
-  it("GETs /api/usage with Bearer apiKey and POSTs /api/me for plan", async () => {
+  it("GETs /api/balance with Bearer apiKey and POSTs /api/me for plan", async () => {
     proxyAwareFetch
-      .mockResolvedValueOnce(jsonResponse(SAMPLE_USAGE))
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_BALANCE))
       .mockResolvedValueOnce(jsonResponse(SAMPLE_ME));
 
     const usage = await getUsageForProvider({
@@ -114,28 +86,22 @@ describe("getUsageForProvider(ollama)", () => {
 
     expect(usage.message).toBeUndefined();
     expect(usage.plan).toBe("Max");
-    expect(usage.quotas["Session (5h)"]).toMatchObject({
-      used: 0,
+    expect(usage.quotas.Monthly).toMatchObject({
+      used: 27.5,
       total: 100,
-      remainingPercentage: 100,
-      unlimited: false,
-    });
-    expect(usage.quotas["Weekly (7d)"]).toMatchObject({
-      used: 100,
-      total: 100,
-      remainingPercentage: 0,
+      remainingPercentage: 72.5,
+      resetAt: "2026-11-01T00:00:00Z",
       unlimited: false,
     });
     // Must not set absolute remaining — UI treats remaining as %
-    expect(usage.quotas["Session (5h)"].remaining).toBeUndefined();
-    expect(usage.quotas["Weekly (7d)"].remaining).toBeUndefined();
+    expect(usage.quotas.Monthly.remaining).toBeUndefined();
 
     expect(proxyAwareFetch).toHaveBeenCalledTimes(2);
 
-    const [usageUrl, usageOpts] = proxyAwareFetch.mock.calls[0];
-    expect(usageUrl).toBe(USAGE_URL);
-    expect(usageOpts.headers.Authorization).toBe("Bearer k");
-    expect(usageOpts.headers.Accept).toBe("application/json");
+    const [balanceUrl, balanceOpts] = proxyAwareFetch.mock.calls[0];
+    expect(balanceUrl).toBe(BALANCE_URL);
+    expect(balanceOpts.headers.Authorization).toBe("Bearer k");
+    expect(balanceOpts.headers.Accept).toBe("application/json");
 
     const [meUrl, meOpts] = proxyAwareFetch.mock.calls[1];
     expect(meUrl).toBe(ME_URL);
@@ -144,9 +110,9 @@ describe("getUsageForProvider(ollama)", () => {
     expect(meOpts.headers["Content-Length"]).toBe("0");
   });
 
-  it("maps the free plan's monthly window", async () => {
+  it("maps the free plan's monthly credit balance", async () => {
     proxyAwareFetch
-      .mockResolvedValueOnce(jsonResponse(SAMPLE_FREE_USAGE))
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_BALANCE_FREE))
       .mockResolvedValueOnce(jsonResponse({ Plan: "free" }));
 
     const usage = await getUsageForProvider({
@@ -158,72 +124,66 @@ describe("getUsageForProvider(ollama)", () => {
     expect(usage.message).toBeUndefined();
     expect(usage.plan).toBe("Free");
     expect(Object.keys(usage.quotas)).toEqual(["Monthly"]);
-    expect(usage.quotas["Monthly"]).toMatchObject({
-      used: 2,
-      total: 100,
+    expect(usage.quotas.Monthly).toMatchObject({
+      used: 0.1,
+      total: 5,
       remainingPercentage: 98,
+      resetAt: "2026-11-01T00:00:00Z",
       unlimited: false,
     });
-    expect(usage.quotas["Monthly"].remaining).toBeUndefined();
-    expect(usage.quotas["Monthly"].resetAt).toBeNull();
+    expect(usage.quotas.Monthly.remaining).toBeUndefined();
   });
 
-  describe("free plan monthly reset from signup date", () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    async function monthlyResetAt(createdAt, now) {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(now));
-      proxyAwareFetch
-        .mockResolvedValueOnce(jsonResponse(SAMPLE_FREE_USAGE))
-        .mockResolvedValueOnce(jsonResponse({ Plan: "free", CreatedAt: createdAt }));
-
-      const usage = await getUsageForProvider({
-        provider: "ollama",
-        apiKey: "k",
-        providerSpecificData: {},
-      });
-      return usage.quotas["Monthly"].resetAt;
-    }
-
-    it("uses the signup day of the next month", async () => {
-      expect(await monthlyResetAt("2025-09-06T22:15:39.871687Z", "2026-09-18T15:03:00Z"))
-        .toBe("2026-10-06T22:15:39.000Z");
-    });
-
-    it("stays in the current month when the signup day is still ahead", async () => {
-      expect(await monthlyResetAt("2026-09-18T09:50:49.514335Z", "2026-09-18T15:33:33Z"))
-        .toBe("2026-10-18T09:50:49.000Z");
-      expect(await monthlyResetAt("2025-09-25T10:00:00Z", "2026-09-18T15:33:33Z"))
-        .toBe("2026-09-25T10:00:00.000Z");
-    });
-
-    it("clamps the signup day to shorter months", async () => {
-      expect(await monthlyResetAt("2026-01-31T12:00:00Z", "2026-02-10T00:00:00Z"))
-        .toBe("2026-02-28T12:00:00.000Z");
-    });
-
-    it("skips the reset when the plan is not free", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-09-18T15:03:00Z"));
-      proxyAwareFetch
-        .mockResolvedValueOnce(jsonResponse(SAMPLE_FREE_USAGE))
-        .mockResolvedValueOnce(jsonResponse({ Plan: "pro", CreatedAt: "2025-09-06T22:15:39Z" }));
-
-      const usage = await getUsageForProvider({
-        provider: "ollama",
-        apiKey: "k",
-        providerSpecificData: {},
-      });
-      expect(usage.quotas["Monthly"].resetAt).toBeNull();
-    });
-  });
-
-  it("reports no limits when no known window is present", async () => {
+  it("surfaces an unexpired purchased top-up as a credit balance row", async () => {
     proxyAwareFetch
-      .mockResolvedValueOnce(jsonResponse({ activity: {}, limits: {} }))
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_BALANCE_WITH_PURCHASED))
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_ME));
+
+    const usage = await getUsageForProvider({
+      provider: "ollama",
+      apiKey: "k",
+      providerSpecificData: {},
+    });
+
+    expect(usage.quotas.Monthly).toBeDefined();
+    expect(usage.quotas["Purchased credit"]).toMatchObject({
+      total: 25,
+      isCreditBalance: true,
+      currency: "USD",
+    });
+  });
+
+  it("falls back to the legacy session/weekly percent shape", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_BALANCE_LEGACY))
+      .mockResolvedValueOnce(jsonResponse(SAMPLE_ME));
+
+    const usage = await getUsageForProvider({
+      provider: "ollama",
+      apiKey: "k",
+      providerSpecificData: {},
+    });
+
+    expect(usage.message).toBeUndefined();
+    expect(usage.quotas["Session (5h)"]).toMatchObject({
+      used: 0,
+      total: 100,
+      remainingPercentage: 100,
+      resetAt: "2026-10-22T20:00:00Z",
+      unlimited: false,
+    });
+    expect(usage.quotas["Weekly (7d)"]).toMatchObject({
+      used: 100,
+      total: 100,
+      remainingPercentage: 0,
+      resetAt: "2026-10-27T00:00:00Z",
+      unlimited: false,
+    });
+  });
+
+  it("reports no limits when neither included nor purchased balance is present", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(jsonResponse({}))
       .mockResolvedValueOnce(jsonResponse({ Plan: "free" }));
 
     const usage = await getUsageForProvider({
@@ -258,43 +218,6 @@ describe("getUsageForProvider(ollama)", () => {
 
     expect(usage.message).toMatch(/api key/i);
     expect(proxyAwareFetch).not.toHaveBeenCalled();
-  });
-
-  it("parses the monthly-only limits shape (2026-09 upstream change)", async () => {
-    proxyAwareFetch
-      .mockResolvedValueOnce(jsonResponse(SAMPLE_USAGE_MONTHLY))
-      .mockResolvedValueOnce(jsonResponse(SAMPLE_ME));
-
-    const usage = await getUsageForProvider({
-      provider: "ollama",
-      apiKey: "k",
-      providerSpecificData: {},
-    });
-
-    expect(usage.message).toBeUndefined();
-    expect(usage.quotas["Session (5h)"]).toBeUndefined();
-    expect(usage.quotas["Weekly (7d)"]).toBeUndefined();
-    expect(usage.quotas.Monthly).toMatchObject({
-      used: 24,
-      total: 100,
-      remainingPercentage: 76,
-      unlimited: false,
-    });
-  });
-
-  it("still reports 'no usage limits' when neither old nor new fields are present", async () => {
-    proxyAwareFetch
-      .mockResolvedValueOnce(jsonResponse({ activity: {}, limits: {} }))
-      .mockResolvedValueOnce(jsonResponse(SAMPLE_ME));
-
-    const usage = await getUsageForProvider({
-      provider: "ollama",
-      apiKey: "k",
-      providerSpecificData: {},
-    });
-
-    expect(usage.message).toMatch(/no usage limits reported/i);
-    expect(usage.quotas).toEqual({});
   });
 });
 

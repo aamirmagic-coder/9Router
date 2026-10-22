@@ -255,7 +255,7 @@ function isGeminiSuccessPayload(payload) {
         ? typeof candidate.finishReason === "string"
         : candidate.content && typeof candidate.content === "object" && !Array.isArray(candidate.content)
           && Array.isArray(candidate.content.parts) && candidate.content.parts.every((part) =>
-            part && typeof part === "object" && !Array.isArray(part)))) return false;
+            part && typeof part === "object" && !Array.isArray(part))))) return false;
     return true;
   }
   const usage = payload.usageMetadata;

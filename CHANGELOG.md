@@ -140,7 +140,7 @@
 - **Xiaomi MiMo**: server-assisted desktop login for headless/Docker deployments, five account clusters (cn/sgp/ams/ru/in), and v2.6 pro/flash/pro-ultraspeed models with dual-route (account service vs. cloud API)
 - **Claude**: add Claude Opus 5.5 support
 - **i18n**: translate React text rewrites via characterData mutation observer
-- **Sync (Fork)**: Merged upstream v0.5.86 preserving Testing Studio, proxy pool fitness, freebuff, kenari, and all resilience features.
+- **Sync (Fork)**: Merged upstream v0.5.86 preserving Testing Studio, proxy pool fitness, freebuff, and kenari.
 
 ## Fixes
 - **Proxy Pools**: keep request headers intact through Vercel/Cloudflare/Deno relays (spreading a `Headers` instance yielded `{}`, dropping auth and content-type)

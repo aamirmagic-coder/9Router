@@ -4,7 +4,7 @@
 // "failure-usage coverage" gap. Only the DB layer is real here; the chatCore
 // call sites that invoke saveRequestUsage(status:"error") on failure are
 // covered separately in chat-dispatch-resilience.test.js and
-// chat-public-dispatch-lifecycle.test.js S1-D real-policy cases.
+// chat-public-dispatch-lifecycle.test.js.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

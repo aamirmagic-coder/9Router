@@ -122,7 +122,6 @@ describe("OpenCode guarded live SSE streams", () => {
       },
     }), { headers: { "content-type": "text/event-stream" } });
     const onRequestSuccess = vi.fn();
-    const onResilienceEvent = vi.fn();
     const streamController = createStreamController({ provider: "opencode", model: "test" });
 
     const result = await handleStreamingResponse({
@@ -140,14 +139,11 @@ describe("OpenCode guarded live SSE streams", () => {
       toolNameMap: fingerprintMetadata(),
       streamController,
       onRequestSuccess,
-      onResilienceEvent,
     });
     const output = await result.response.text();
 
     expect(output).toContain('"code":"upstream_undeclared_tool"');
     expect(onRequestSuccess).not.toHaveBeenCalled();
-    expect(onResilienceEvent).toHaveBeenCalledWith("STREAM_FAILED", expect.objectContaining({ origin: "processing" }));
-    expect(onResilienceEvent).not.toHaveBeenCalledWith("STREAM_COMPLETED", expect.anything());
   });
 
   it("fails explicitly with a bounded-buffer code once held tool output exceeds the safety limit", async () => {
@@ -191,7 +187,7 @@ describe("OpenCode guarded live SSE streams", () => {
     expect(failures).toEqual([]);
   });
 
-  it("commits STREAM_FAILED before a concurrent client disconnect can record CLIENT_ABORTED", async () => {
+  it("does not record request success after a guard rejection and client disconnect", async () => {
     const providerResponse = new Response(new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(chatTool("shell", "tool_calls")));
@@ -199,7 +195,7 @@ describe("OpenCode guarded live SSE streams", () => {
         controller.close();
       },
     }), { headers: { "content-type": "text/event-stream" } });
-    const onResilienceEvent = vi.fn();
+    const onRequestSuccess = vi.fn();
     const streamController = createStreamController({ provider: "opencode", model: "test" });
 
     const result = await handleStreamingResponse({
@@ -216,20 +212,13 @@ describe("OpenCode guarded live SSE streams", () => {
       connectionId: "connection_2",
       toolNameMap: fingerprintMetadata(),
       streamController,
-      onRequestSuccess: vi.fn(),
-      onResilienceEvent,
+      onRequestSuccess,
     });
 
-    // Read the guard-rejection bytes through so captureSemanticFailure/onGuardFailure
-    // settle STREAM_FAILED, then cancel the client-facing body — the real
-    // disconnect path (createDisconnectAwareStream's cancel() -> the wrapped
-    // controller pipeWithDisconnect builds around streamController, not
-    // streamController itself) — to prove settlement already won the race.
     const reader = result.response.body.getReader();
     await reader.read();
     await reader.cancel("client_closed");
 
-    expect(onResilienceEvent).toHaveBeenCalledWith("STREAM_FAILED", expect.objectContaining({ origin: "processing" }));
-    expect(onResilienceEvent).not.toHaveBeenCalledWith("CLIENT_ABORTED", expect.anything());
+    expect(onRequestSuccess).not.toHaveBeenCalled();
   });
 });

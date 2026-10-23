@@ -1,7 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
-import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
-import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
+import { keyAccessFromColumns, keyAccessToColumns, resolveKeyAccessInput } from "@/shared/utils/keyAccess.js";
 import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
 function rowToKey(row) {
@@ -14,7 +13,6 @@ function rowToKey(row) {
     isActive: row.isActive === 1 || row.isActive === true,
     tokenLimit: row.tokenLimit != null ? Number(row.tokenLimit) : 0,
     usedTokens: row.usedTokens != null ? Number(row.usedTokens) : 0,
-    allowedModels: row.allowedModels ? parseJson(row.allowedModels, null) : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt || null,
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
@@ -48,10 +46,9 @@ export async function createApiKey(name, machineId, options = {}) {
   const result = generateApiKeyWithMachine(machineId);
   const now = new Date().toISOString();
   const tokenLimit = options.tokenLimit != null ? Math.max(0, Number(options.tokenLimit) || 0) : 0;
-  const allowedModels = Array.isArray(options.allowedModels) && options.allowedModels.length > 0
-    ? options.allowedModels.map((m) => String(m).trim()).filter(Boolean)
-    : null;
-  const access = options.access || { restricted: false, allow: [] };
+  const checked = resolveKeyAccessInput(options);
+  if (!checked.ok) throw new Error(checked.error);
+  const access = checked.value;
   const apiKey = {
     id: uuidv4(),
     name,
@@ -60,14 +57,13 @@ export async function createApiKey(name, machineId, options = {}) {
     isActive: true,
     tokenLimit,
     usedTokens: 0,
-    allowedModels,
     createdAt: now,
     updatedAt: now,
     access,
   };
-  const cols = keyAccessToColumns(access || KEY_ACCESS_UNRESTRICTED);
+  const cols = keyAccessToColumns(access);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, allowedModels, createdAt, updatedAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, createdAt, updatedAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -76,7 +72,6 @@ export async function createApiKey(name, machineId, options = {}) {
       1,
       apiKey.tokenLimit,
       0,
-      allowedModels ? stringifyJson(allowedModels) : null,
       apiKey.createdAt,
       apiKey.updatedAt,
       cols.accessRestricted,
@@ -94,20 +89,16 @@ export async function updateApiKey(id, data) {
     if (!row) return;
     const current = rowToKey(row);
     const merged = { ...current, ...data, updatedAt: new Date().toISOString() };
+    if (data.access !== undefined || data.allowedModels !== undefined) {
+      const checked = resolveKeyAccessInput(data);
+      if (!checked.ok) throw new Error(checked.error);
+      merged.access = checked.value;
+    }
     const tokenLimit = merged.tokenLimit != null ? Math.max(0, Number(merged.tokenLimit) || 0) : 0;
     const usedTokens = merged.usedTokens != null ? Math.max(0, Number(merged.usedTokens) || 0) : 0;
-    let allowedModels = Array.isArray(merged.allowedModels)
-      ? (merged.allowedModels.length > 0 ? merged.allowedModels.map((m) => String(m).trim()).filter(Boolean) : null)
-      : null;
-    let access = merged.access || KEY_ACCESS_UNRESTRICTED;
-    if (data.allowedModels !== undefined && data.access === undefined) {
-      access = allowedModels ? { restricted: true, allow: allowedModels } : { restricted: false, allow: [] };
-    } else if (data.access !== undefined && data.allowedModels === undefined) {
-      allowedModels = access?.restricted && Array.isArray(access?.allow) ? access.allow : null;
-    }
-    const cols = keyAccessToColumns(access);
+    const cols = keyAccessToColumns(merged.access || KEY_ACCESS_UNRESTRICTED);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, allowedModels = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -115,7 +106,6 @@ export async function updateApiKey(id, data) {
         merged.isActive ? 1 : 0,
         tokenLimit,
         usedTokens,
-        allowedModels ? stringifyJson(allowedModels) : null,
         merged.updatedAt,
         cols.accessRestricted,
         cols.accessAllow,

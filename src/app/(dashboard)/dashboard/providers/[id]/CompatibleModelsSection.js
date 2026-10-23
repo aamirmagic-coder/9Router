@@ -162,7 +162,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     }
   };
 
-  const handleSaveSelectedModels = async (toAdd, toRemove) => {
+  const handleSaveSelectedModels = async (toAdd, toRemove, selectedIds) => {
     setSavingImport(true);
     try {
       for (const modelId of toAdd) {
@@ -177,6 +177,15 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
             await onDeleteAlias(existing.alias);
           }
         }
+      }
+      const connection = connections.find((conn) => conn.isActive !== false);
+      if (connection) {
+        const res = await fetch(`/api/providers/${connection.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ providerSpecificData: { ...connection.providerSpecificData, enabledModels: selectedIds } }),
+        });
+        if (!res.ok) throw new Error("Failed to save model selection");
       }
       setShowSelectModal(false);
     } catch (error) {

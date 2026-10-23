@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiKeys, createApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { resolveKeyAccessInput } from "@/shared/utils/keyAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -19,17 +20,23 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, tokenLimit, allowedModels } = body;
+    const { name, tokenLimit } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    }
+
+    const checked = resolveKeyAccessInput(body);
+    if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
+    if (tokenLimit !== undefined && (!Number.isSafeInteger(tokenLimit) || tokenLimit < 0)) {
+      return NextResponse.json({ error: "tokenLimit must be a non-negative integer" }, { status: 400 });
     }
 
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
     const apiKey = await createApiKey(name, machineId, {
       tokenLimit,
-      allowedModels,
+      access: checked.value,
     });
 
     return NextResponse.json({
@@ -39,7 +46,7 @@ export async function POST(request) {
       machineId: apiKey.machineId,
       tokenLimit: apiKey.tokenLimit,
       usedTokens: apiKey.usedTokens,
-      allowedModels: apiKey.allowedModels,
+      access: apiKey.access,
       createdAt: apiKey.createdAt,
     }, { status: 201 });
   } catch (error) {

@@ -456,7 +456,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       const providerModels = PROVIDER_MODELS[staticAlias] || [];
       const enabledModels = conn?.providerSpecificData?.enabledModels;
       const hasExplicitEnabledModels =
-        Array.isArray(enabledModels) && enabledModels.length > 0;
+        Array.isArray(enabledModels);
       const isCompatibleProvider =
         isOpenAICompatibleProvider(providerId) || isAnthropicCompatibleProvider(providerId);
 
@@ -670,21 +670,11 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    let data = await filterModelsListForKey(
+    const data = await filterModelsListForKey(
       await getKeyAccessContext(request),
       await buildModelsList([LLM_KIND], { skipDynamicFetch })
     );
 
-    // If API key is provided, filter models by its allowedModels configuration
-    const { extractApiKey, isModelAllowedForKey } = await import("@/sse/services/auth.js");
-    const apiKey = extractApiKey(request);
-    if (apiKey) {
-      const { getApiKeyByKey } = await import("@/lib/db/repos/apiKeysRepo.js");
-      const keyRecord = await getApiKeyByKey(apiKey);
-      if (keyRecord && Array.isArray(keyRecord.allowedModels) && keyRecord.allowedModels.length > 0) {
-        data = data.filter((m) => isModelAllowedForKey(m.id, keyRecord.allowedModels));
-      }
-    }
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

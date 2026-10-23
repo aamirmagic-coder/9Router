@@ -290,12 +290,10 @@ export async function saveRequestUsage(entry) {
         ]
       );
 
-      // Increment usedTokens on apiKey if request used a key
-      if (entry.apiKey && typeof entry.apiKey === "string") {
-        const cleanKey = entry.apiKey.trim();
-        const totalTokens = (promptTokens || 0) + (completionTokens || 0);
+      if (typeof entry.apiKey === "string") {
+        const totalTokens = promptTokens + completionTokens;
         if (totalTokens > 0) {
-          db.run(`UPDATE apiKeys SET usedTokens = COALESCE(usedTokens, 0) + ? WHERE key = ?`, [totalTokens, cleanKey]);
+          db.run(`UPDATE apiKeys SET usedTokens = COALESCE(usedTokens, 0) + ? WHERE key = ?`, [totalTokens, entry.apiKey.trim()]);
         }
       }
 
@@ -513,7 +511,7 @@ export async function getUsageStats(period = "all") {
         if (dateKey > (stats.byAccount[accountKey].lastUsed || "")) stats.byAccount[accountKey].lastUsed = dateKey;
       }
 
-      for (const [akRawKey, ak] of Object.entries(day.byApiKey || {})) {
+      for (const [akKey, ak] of Object.entries(day.byApiKey || {})) {
         const rawModel = ak.rawModel || "";
         const provider = ak.provider || "";
         const providerDisplayName = providerNodeNameMap[provider] || provider;
@@ -522,7 +520,6 @@ export async function getUsageStats(period = "all") {
         const apiKeyMasked = maskApiKey(apiKeyVal);
         const keyName = keyInfo?.name || (apiKeyVal ? (apiKeyMasked || apiKeyVal.slice(0, 8) + "...") : "Local (No API Key)");
         const apiKeyKey = apiKeyMasked || "local-no-key";
-        const akKey = apiKeyMasked ? `${apiKeyMasked}|${rawModel}|${provider || "unknown"}` : "local-no-key";
         if (!stats.byApiKey[akKey]) {
           stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey, lastUsed: dateKey };
         }
@@ -575,9 +572,8 @@ export async function getUsageStats(period = "all") {
         if (stats.byAccount[accountKey] && new Date(ts) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = ts;
       }
 
-      const apiKeyMasked = maskApiKey(e.apiKey);
-      const apiKeyKey = apiKeyMasked
-        ? `${apiKeyMasked}|${e.model}|${e.provider || "unknown"}`
+      const apiKeyKey = (e.apiKey && typeof e.apiKey === "string")
+        ? `${e.apiKey}|${e.model}|${e.provider || "unknown"}`
         : "local-no-key";
       if (stats.byApiKey[apiKeyKey] && new Date(ts) > new Date(stats.byApiKey[apiKeyKey].lastUsed)) stats.byApiKey[apiKeyKey].lastUsed = ts;
 
@@ -602,9 +598,9 @@ export async function getUsageStats(period = "all") {
 
     for (const r of filtered) {
       const tokens = parseJson(r.tokens, {}) || {};
-      const promptTokens = tokens.prompt_tokens ?? tokens.input_tokens ?? r.promptTokens ?? 0;
-      const completionTokens = tokens.completion_tokens ?? tokens.output_tokens ?? r.completionTokens ?? 0;
-      const cachedTokens = tokens.cached_tokens ?? tokens.cache_read_input_tokens ?? 0;
+      const promptTokens = tokens.prompt_tokens || tokens.input_tokens || r.promptTokens || 0;
+      const completionTokens = tokens.completion_tokens || tokens.output_tokens || r.completionTokens || 0;
+      const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
       const entryCost = r.cost || 0;
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
 
@@ -648,8 +644,8 @@ export async function getUsageStats(period = "all") {
       if (r.apiKey && typeof r.apiKey === "string") {
         const apiKeyVal = r.apiKey.trim();
         const keyInfo = apiKeyMap[apiKeyVal];
-        const apiKeyMasked = maskApiKey(r.apiKey);
-        const keyName = keyInfo?.name || (apiKeyMasked || r.apiKey.slice(0, 8) + "...");
+        const apiKeyMasked = maskApiKey(apiKeyVal);
+        const keyName = keyInfo?.name || apiKeyMasked || r.apiKey.slice(0, 8) + "...";
         // Key by the FULL api key (same as the daily rollup + lastUsed overlay)
         // — masking here collided all keys sharing a prefix into one bucket.
         const akKey = `${r.apiKey}|${r.model}|${r.provider || "unknown"}`;

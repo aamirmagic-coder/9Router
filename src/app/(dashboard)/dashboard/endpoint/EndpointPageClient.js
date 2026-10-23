@@ -35,6 +35,7 @@ export default function APIPageClient({ machineId }) {
   const [editKeyName, setEditKeyName] = useState("");
   const [editKeyTokenLimit, setEditKeyTokenLimit] = useState("");
   const [editKeyUsedTokens, setEditKeyUsedTokens] = useState(0);
+  const [resetKeyUsage, setResetKeyUsage] = useState(false);
   const [editKeyModelMode, setEditKeyModelMode] = useState("all");
   const [editKeyAllowedModels, setEditKeyAllowedModels] = useState([]);
   const [editKeyCustomPattern, setEditKeyCustomPattern] = useState("");
@@ -656,7 +657,6 @@ export default function APIPageClient({ machineId }) {
 
     try {
       const tokenLimit = newKeyTokenLimit ? Math.max(0, parseInt(newKeyTokenLimit, 10) || 0) : 0;
-      const allowedModels = newKeyModelMode === "custom" ? newKeyAllowedModels : null;
       const access = {
         restricted: newKeyModelMode === "custom",
         allow: newKeyModelMode === "custom" ? newKeyAllowedModels : [],
@@ -668,7 +668,6 @@ export default function APIPageClient({ machineId }) {
         body: JSON.stringify({
           name: newKeyName.trim(),
           tokenLimit,
-          allowedModels,
           access,
         }),
       });
@@ -693,6 +692,7 @@ export default function APIPageClient({ machineId }) {
     setEditKeyName(key.name || "");
     setEditKeyTokenLimit(key.tokenLimit ? String(key.tokenLimit) : "");
     setEditKeyUsedTokens(key.usedTokens || 0);
+    setResetKeyUsage(false);
     const hasRestrictions = (Array.isArray(key.allowedModels) && key.allowedModels.length > 0) || (key.access?.restricted);
     setEditKeyModelMode(hasRestrictions ? "custom" : "all");
     const initialModels = Array.isArray(key.allowedModels) && key.allowedModels.length > 0
@@ -707,7 +707,6 @@ export default function APIPageClient({ machineId }) {
     setSavingEdit(true);
     try {
       const tokenLimit = editKeyTokenLimit ? Math.max(0, parseInt(editKeyTokenLimit, 10) || 0) : 0;
-      const allowedModels = editKeyModelMode === "custom" ? editKeyAllowedModels : null;
       const access = {
         restricted: editKeyModelMode === "custom",
         allow: editKeyModelMode === "custom" ? editKeyAllowedModels : [],
@@ -719,8 +718,7 @@ export default function APIPageClient({ machineId }) {
         body: JSON.stringify({
           name: editKeyName.trim() || editingKey.name,
           tokenLimit,
-          usedTokens: editKeyUsedTokens,
-          allowedModels,
+          ...(resetKeyUsage ? { usedTokens: 0 } : {}),
           access,
         }),
       });
@@ -742,6 +740,7 @@ export default function APIPageClient({ machineId }) {
       onConfirm: async () => {
         setConfirmState(null);
         setEditKeyUsedTokens(0);
+        setResetKeyUsage(true);
       }
     });
   };
@@ -1745,7 +1744,7 @@ export default function APIPageClient({ machineId }) {
               Save this key now!
             </p>
             <p className="text-sm text-yellow-700 dark:text-yellow-300">
-              This is the only time you will see this key. Store it securely.
+              Store this key securely. You can view or copy it later from the API Keys list.
             </p>
           </div>
           <div className="flex gap-2">

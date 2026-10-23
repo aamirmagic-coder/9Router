@@ -1,6 +1,6 @@
 import {
-  extractApiKey, isValidApiKey, validateApiKeyWithRules,
-  getProviderCredentials, markAccountUnavailable,
+  extractApiKey, checkApiKeyQuota,
+  getProviderCredentials, markAccountUnavailable, clearAccountError,
 } from "../services/auth.js";
 import { getSettings, getCustomModels } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
@@ -10,6 +10,8 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
+import { checkAndRefreshToken } from "../services/tokenRefresh.js";
+import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy.js";
 
 // Providers requiring credentials for STT
 const CREDENTIALED_PROVIDERS = new Set(
@@ -48,14 +50,8 @@ export async function handleStt(request) {
 
   const settings = await getSettings();
   const apiKey = extractApiKey(request);
-  if (apiKey) {
-    const keyCheck = await validateApiKeyWithRules(apiKey, modelStr);
-    if (!keyCheck.valid) {
-      return errorResponse(keyCheck.status || HTTP_STATUS.UNAUTHORIZED, keyCheck.error);
-    }
-  } else if (settings.requireApiKey) {
-    return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-  }
+  const quotaError = await checkApiKeyQuota(apiKey, settings.requireApiKey);
+  if (quotaError) return errorResponse(quotaError.status, quotaError.error);
 
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   if (!formData.get("file")) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: file");
@@ -64,6 +60,7 @@ export async function handleStt(request) {
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
   const { provider, model } = modelInfo;
+  if (provider === "codex" && model !== "transcribe") return errorResponse(400, "Use model cx/transcribe for Codex STT");
 
   // Per-key access control: checked before any credential lookup.
   const keyAccessDenied = await enforceKeyAccessResolved(await getKeyAccessContext(request), modelStr, provider, model);
@@ -86,40 +83,55 @@ export async function handleStt(request) {
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    let credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
     if (!credentials || credentials.allRateLimited) {
       if (credentials?.allRateLimited) {
-        const errorMsg = lastError || credentials.lastError || "Unavailable";
-        return unavailableResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        const msg = lastError || credentials.lastError || "Unavailable";
+        const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
+        return unavailableResponse(status, `[${provider}/${model}] ${msg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
-      if (excludeConnectionIds.size === 0) {
-        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
-      }
+      if (excludeConnectionIds.size === 0) return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
-    const result = await handleSttCore({
-      provider, model, formData,
-      credentials,
-      sttConfig: AI_PROVIDERS[provider]?.sttConfig,
-      transport: modelTransport,
-      log,
-    });
+    let result;
+    try {
+      const isCodex = provider === "codex";
+      if (isCodex) credentials = await checkAndRefreshToken(provider, credentials);
+      const proxyOptions = isCodex
+        ? await resolveConnectionProxyConfig(credentials._connection?.providerSpecificData || credentials.providerSpecificData)
+        : undefined;
+      const args = { provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport, signal: request.signal, proxyOptions };
+      result = await handleSttCore(args);
+      if (isCodex && result.status === 401 && credentials.refreshToken && !request.signal.aborted) {
+        const previous = credentials.accessToken;
+        credentials = await checkAndRefreshToken(provider, credentials, { force: true });
+        if (credentials.accessToken !== previous) result = await handleSttCore({ ...args, credentials });
+      }
+      if (result.success) {
+        if (isCodex) await clearAccountError(credentials.connectionId, credentials, model);
+        return result.response;
+      }
+    } catch {
+      return errorResponse(HTTP_STATUS.BAD_GATEWAY, "STT credential or transport failure");
+    }
 
-    if (result.success) return result.response;
+    if (request.signal.aborted) return errorResponse(504, "Transcription cancelled");
+    // Bad audio / unsupported parameters are client errors, not broken accounts.
+    if (provider === "codex" && [400, 413, 504].includes(result.status)) {
+      return result.response || errorResponse(result.status, result.error);
+    }
 
-    const cooldown = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
-    if (cooldown.shouldFallback) {
-      log.warn("FALLBACK", `Account unavailable (${result.status}) -> trying next account`);
+    const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
+    if (shouldFallback) {
       excludeConnectionIds.add(credentials.connectionId);
       lastError = result.error;
       lastStatus = result.status;
       continue;
     }
-
-    return result.response;
+    return result.response || errorResponse(result.status, result.error);
   }
 }

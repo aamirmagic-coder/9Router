@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createPassthrough: vi.fn(() => { throw new Error("transform construction failed"); }),
-  onResilienceEvent: vi.fn(),
   handleError: vi.fn(),
   cancel: vi.fn(async () => {}),
   buildRequestDetail: vi.fn((detail) => detail),
@@ -35,19 +34,17 @@ describe("S2-E streaming setup abandonment", () => {
       },
       provider: "groq", model: "test", sourceFormat: FORMATS.OPENAI, targetFormat: FORMATS.OPENAI,
       body: { stream: true }, stream: true, requestStartTime: Date.now(), connectionId: "connection-a",
-      onResilienceEvent: mocks.onResilienceEvent, streamController: { handleError: mocks.handleError },
+      streamController: { handleError: mocks.handleError },
     });
 
     expect(result.success).toBe(false);
     expect(result.response.status).toBe(502);
     expect(mocks.cancel).toHaveBeenCalledOnce();
-    expect(mocks.onResilienceEvent).toHaveBeenCalledWith("STREAM_FAILED", expect.objectContaining({ origin: "processing" }));
     expect(mocks.handleError).toHaveBeenCalledOnce();
   });
 
   it("cancels the locked upstream body when request-detail setup throws after pipe ownership", async () => {
     mocks.cancel.mockClear();
-    mocks.onResilienceEvent.mockClear();
     mocks.handleError.mockClear();
     mocks.abort.mockClear();
     mocks.createPassthrough.mockImplementationOnce(() => new TransformStream());
@@ -61,7 +58,6 @@ describe("S2-E streaming setup abandonment", () => {
       providerResponse: { status: 200, headers: new Headers({ "content-type": "text/event-stream" }), body: upstream },
       provider: "groq", model: "test", sourceFormat: FORMATS.OPENAI, targetFormat: FORMATS.OPENAI,
       body: { stream: true }, stream: true, requestStartTime: Date.now(), connectionId: "connection-after-pipe",
-      onResilienceEvent: mocks.onResilienceEvent,
       streamController: { isConnected: () => true, handleError: mocks.handleError, abort: mocks.abort },
     });
 
@@ -70,7 +66,6 @@ describe("S2-E streaming setup abandonment", () => {
     await Promise.resolve();
     expect(upstreamCancelled).toBe(1);
     expect(mocks.abort).toHaveBeenCalledOnce();
-    expect(mocks.onResilienceEvent).toHaveBeenCalledWith("STREAM_FAILED", expect.objectContaining({ origin: "processing" }));
     expect(mocks.handleError).toHaveBeenCalledOnce();
   });
 });

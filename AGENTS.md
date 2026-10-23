@@ -60,6 +60,7 @@ The suite is not expected to be all-green on a plain checkout (~938 pass, ~64 fa
 - Never suppress type/lint errors to force a green build.
 - Security-sensitive env: `JWT_SECRET`, `INITIAL_PASSWORD` (default `123456` — must override in any real deployment), `API_KEY_SECRET`, `MACHINE_ID_SALT`. Full contract in `.env.example` / `docs/ARCHITECTURE.md`.
 - Binary/protobuf upstreams (kiro EventStream, cursor protobuf, commandcode NDJSON) don't round-trip through the OpenAI translator bridge — handle them inside their own executor.
+- **After every fork release, update `README.md`'s "Current Base" section** (`decolua/9router` version synced from, and the current `fork-vX.Y.Z` tag) to match what was just tagged. This went stale for 3+ release cycles before being caught (2026-10-22: README still said `v0.5.55`/`fork-v0.5.55` while the actual release was `fork-v0.5.105`) — check and fix it as part of the release step itself, not as an afterthought.
 
 ## Gotchas
 

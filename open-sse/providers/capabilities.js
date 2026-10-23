@@ -810,7 +810,7 @@ export function getCapabilitiesForModel(provider, model) {
       thinkingEffortSupported: true,
       vision: !isCommandCodeTextOnly(model),
       contextWindow: 1000000,
-      maxOutput: 384000,
+      maxOutput: 65536,
     };
   }
 

@@ -1,14 +1,4 @@
 tasks:
-- id: DF-9ROUTER-61
-  title: Normalize non-stream thinking model reasoning to reasoning_content key
-  criteria:
-  - 'Non-stream thinking models surface reasoning under TWO different message keys
-    (reasoning_content vs nonstandard). Fix must normalize ALL response paths to use
-    reasoning_content key for thinking model reasoning blocks. Accept: reasoning_content
-    key on all thinking model responses regardless of provider route, vitest regression
-    gate green, lint:gate green.'
-  status: in_progress
-  created_at: '2026-10-19T21:07:34.461566+00:00'
 - id: SUP-DEPS-20261020-9R
   title: Refresh 5 outdated Node packages (safe minor/patch bumps)
   criteria:

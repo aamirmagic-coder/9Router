@@ -127,22 +127,38 @@ export async function POST(request) {
     if (!existing.providers) existing.providers = {};
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
+    const existingProvider = existing.providers["9router"] || {};
+    const existingModels = Array.isArray(existingProvider.models)
+      ? existingProvider.models
+      : [];
+    const mergeModel = (incoming) => {
+      const prev = existingModels.find((m) => m && m.id === incoming.id);
+      if (!prev) return incoming;
+      // Preserve hand-tuned metadata (contextWindow, maxTokens, input,
+      // thinkingLevelMap, compat, cost…). Only fill gaps from the incoming
+      // entry so generic UI defaults never clobber real values.
+      const filled = { ...incoming };
+      for (const key of ["name", "contextWindow", "maxTokens"]) {
+        if (prev[key] !== undefined) filled[key] = prev[key];
+      }
+      return { ...prev, ...filled };
+    };
     let modelList = [];
     if (Array.isArray(rawBody.models) && rawBody.models.length > 0) {
       modelList = rawBody.models.map((m) => {
         if (typeof m === "string") {
-          return { id: m, name: m, contextWindow: 128000, maxTokens: 16384 };
+          return mergeModel({ id: m, name: m, contextWindow: 128000, maxTokens: 16384 });
         }
-        return {
+        return mergeModel({
           id: m.id || "provider/model-id",
           name: m.name || m.id || "provider/model-id",
           contextWindow: m.contextWindow || 128000,
           maxTokens: m.maxTokens || 16384,
-        };
+        });
       });
     } else {
       const modelId = model || "provider/model-id";
-      modelList = [{ id: modelId, name: modelId, contextWindow: 128000, maxTokens: 16384 }];
+      modelList = [mergeModel({ id: modelId, name: modelId, contextWindow: 128000, maxTokens: 16384 })];
     }
 
     const existingProvider = existing.providers["9router"] || {};

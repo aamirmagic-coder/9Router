@@ -27,6 +27,7 @@ in this fork** and 404 on `decolua/9router`.
 | Federation (edge → central proxying, replication, failover) **(fork-only)** | https://raw.githubusercontent.com/totalwindupflightsystems/9router/refs/heads/federation/skills/9router-federation-usage/SKILL.md |
 | Deploy with docker compose — standalone, local build, federation stacks **(fork-only)** | https://raw.githubusercontent.com/totalwindupflightsystems/9router/refs/heads/federation/skills/9router-compose/SKILL.md |
 | Token saving (RTK) + combo fallback + usage accounting **(fork-only)** | https://raw.githubusercontent.com/totalwindupflightsystems/9router/refs/heads/federation/skills/9router-token-saving-and-accounting-usage/SKILL.md |
+| Model combos (chains, round-robin, nesting, per-key restriction) | https://raw.githubusercontent.com/totalwindupflightsystems/9router/refs/heads/federation/skills/9router-combos/SKILL.md |
 
 ## How to use
 

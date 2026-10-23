@@ -612,3 +612,58 @@ Board rows: DF-9ROUTER-55-R2 (P1 recurrence, chained glued-SSE),
 DF-9ROUTER-63 (P2 node-connection snapshot + prefix/id contract),
 DF-9ROUTER-64 (P2 silent headless death), DF-9ROUTER-62 (P1, sibling's,
 extended with this run's wire-shape evidence as its upstream twin).
+
+## 18. Run 17 (2026-10-23, live central 0.5.99): combos work as advertised; the ledger next to them does not count what was served
+
+**How the thing is built.** A combo is a row in `combos` (`src/lib/db/localDb.js`
+`createCombo/getComboByName/getComboModels`) plus a per-combo strategy in the
+`settings.comboStrategies` map keyed by combo NAME. A request naming a combo as
+`model` is caught in `src/sse/handlers/chat.js:235` (`getComboModels`) *after*
+per-key access control (`chat.js:221` `enforceKeyAccess`) and before any
+credential lookup, which is why "an allowed combo grants its members" holds.
+Expansion then goes to `open-sse/services/combo.js`: `reorderByCapabilities()`
+stably reorders seats by the request's hard/soft capabilities (never dropping a
+seat, so fallback stays intact), `handleComboChat` walks them, and
+`resetComboRotation` is called from the `[id]` route whenever a combo's
+models/strategy/name change so stale round-robin state can't survive an edit.
+Combos are advertised to clients by `/v1/models` with `owned_by:"combo"`
+(`src/app/api/v1/models/route.js:346` `comboMatchesKinds`, plus
+`comboSeatLimits` for the synthesized context window).
+
+**The right way to drive it (verified this run).** `POST /api/combos
+{name, models[]}` → the name becomes a model id → `POST /v1/chat/completions
+{model:"<combo-name>"}`; strategies are per-combo via the dashboard `<select>`
+(persisted into `settings.comboStrategies`) or the global `comboStrategy`
+default. Nested combos work: a combo name is a valid seat of another combo.
+Locked-out seats are skipped instantly, so the *first* request after a lane dies
+pays the probe (7.6s here) and later ones do not (0.9s).
+
+**Error class hit this run (not a product bug).** `bunker-qa.sh` derives the
+agent SSH port from a two-entry table (`mvp|bunker-mvp) 22 ;; *) 2223`). On
+2026-10-23 `bunker-mvp` was down and the live hosts (`bunker-las-02`,
+`cube-las-00`, `dedi-2`) answer agents on **22**, so `launch` died with
+`repo sync failed: ssh: connect to host … port 2223: Connection refused` and
+`collect` reported `unreachable-agent` even though `bunker info` showed the
+agent running and a manual `ssh` on 22 worked. Workaround: export
+`BUNKER_QA_SSH_PORT=22` for BOTH `launch` and `collect` (the documented
+override). `cube-las-00` additionally refused spawn outright
+("deterministic reachability error") while its port was open; `dedi-2` spawned
+an agent whose ssh was refused, so the battery ran on `bunker-las-02`.
+
+**Why the ledger disagrees with the response.** `extractUsageFromResponse`
+(`open-sse/handlers/chatCore/requestDetail.js:24`) only understands an
+OpenAI-shaped `usage`. Gemini's raw body carries `usageMetadata` and is
+translated to OpenAI shape AFTER the point where the usage is harvested
+(`nonStreamingHandler.js:421` extract → `:431` persist → `:436` translate), so
+the persisted value falls back to `estimateUsage()` over the CLIENT body while
+the client is served the upstream's count. Measured on one request in the same
+second: served `prompt_tokens: 2002`, ledger `2`. Constant ~2000-token delta
+across models. This is the same family as DF-9ROUTER-39 (whose fix only
+persisted the `estimated` flag) — the gemini-format hole was never covered.
+`translator/concerns/usage.js:24` `USAGE_EXTRACTORS.gemini` already maps
+`promptTokenCount` faithfully once translation happens; the harvest step simply
+runs too early.
+
+**Rows filed:** DF-9ROUTER-39-R2 (P1, the ledger), DF-9ROUTER-65 (P3, all-seats
+fail names only the last seat), DF-9ROUTER-66 (P3, per-key access control
+undocumented + `code=insufficient_quota` on a permission denial).

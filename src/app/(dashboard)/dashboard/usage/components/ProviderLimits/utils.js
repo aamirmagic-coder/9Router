@@ -650,6 +650,21 @@ export function parseQuotaData(provider, data) {
               resetAt: quota.resetAt || null,
               recurring: quota.recurring !== false,
             });
+            });
+          }
+          break;
+
+      case "freebuff":
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([modelKey, quota]) => {
+            normalizedQuotas.push({
+              name: quota.displayName || modelKey,
+              modelKey,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              resetAt: quota.resetAt || null,
+              recurring: quota.recurring !== false,
+            });
           });
         }
         break;
@@ -735,8 +750,11 @@ export function parseQuotaData(provider, data) {
         break;
 
       case "ollama":
-        // Session (5h) / Weekly (7d) / Monthly usage % from ollama.com/api/usage.
-        // remainingPercentage only — no absolute remaining (UI treats remaining as %).
+        // Monthly credit balance (or legacy Session/Weekly %) from
+        // ollama.com/api/balance. remainingPercentage only — no absolute
+        // remaining (UI treats remaining as %). Forward isCreditBalance/
+        // currency so an optional "Purchased credit" top-up row renders as
+        // a 💰 balance (QuotaTable) instead of a used/total progress bar.
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
             normalizedQuotas.push({
@@ -745,6 +763,8 @@ export function parseQuotaData(provider, data) {
               total: quota.total || 0,
               resetAt: quota.resetAt || null,
               remainingPercentage: quota.remainingPercentage,
+              isCreditBalance: quota.isCreditBalance,
+              currency: quota.currency,
             });
           });
         }

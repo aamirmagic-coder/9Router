@@ -39,6 +39,8 @@ const STRIP_RULES = [
   // against /zen/go/v1/chat/completions with one key: 12/12 structured calls 400,
   // 4/4 identical calls without the field 200.
   { provider: "opencode-go", match: /^deepseek/i, drop: ["response_format"] },
+  // NVIDIA API: text parameter not supported (uses OpenAI messages format)
+  { provider: "nvidia", drop: ["text"] },
 ];
 
 // Test a rule's match (regex or predicate) against the model id.

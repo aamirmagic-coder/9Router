@@ -100,7 +100,6 @@ export function createSSEStream(options = {}) {
   let finalized = false;
   let completionFlushTimer = null;
 
-<<<<<<< HEAD
   // Terminal-outcome state machine, separate from `finalized`: a valid success
   // terminal is claimed ("established") BEFORE the terminal bytes are awaited for
   // delivery, so the generic disconnect/error callbacks can see completion already
@@ -114,13 +113,12 @@ export function createSSEStream(options = {}) {
     terminalEstablished = true;
     return true;
   };
-=======
+
   // Lane quirk: upstream streams thinking under the OpenRouter aliases
   // (`reasoning` / `reasoning_details[]`) instead of reasoning_content — OpenCode
   // Free's MiMo route does. Lift it on every passthrough delta so OpenAI-shaped
   // clients, the thinking accumulation below and usage accounting see the text.
   const liftAliases = mode === STREAM_MODE.PASSTHROUGH && !!PROVIDERS[provider]?.quirks?.reasoningAliasFields;
->>>>>>> master
 
   // Usage/logging tail, callable from transform() as well as flush(): a client that
   // closes right after the terminal event cancels the reader, and flush() never runs.
@@ -770,11 +768,7 @@ export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, p
   });
 }
 
-<<<<<<< HEAD
-export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, targetFormat = null, sourceFormat = null) {
-=======
-export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, toolNameMap = null) {
->>>>>>> master
+export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, toolNameMap = null, targetFormat = null, sourceFormat = null) {
   return createSSEStream({
     mode: STREAM_MODE.PASSTHROUGH,
     targetFormat,

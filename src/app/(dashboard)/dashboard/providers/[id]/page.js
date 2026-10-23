@@ -18,6 +18,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
+import ExportKeysModal from "./ExportKeysModal";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
@@ -54,6 +55,7 @@ export default function ProviderDetailPage() {
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
+  const [showExportKeys, setShowExportKeys] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
@@ -1482,6 +1484,15 @@ export default function ProviderDetailPage() {
               </Button>
               <Button
                 size="sm"
+                icon="download"
+                variant="secondary"
+                onClick={() => setShowExportKeys(true)}
+                className="w-full sm:w-auto"
+              >
+                Export Keys
+              </Button>
+              <Button
+                size="sm"
                 variant="secondary"
                 icon="edit"
                 onClick={() => setShowEditNodeModal(true)}
@@ -1724,6 +1735,17 @@ export default function ProviderDetailPage() {
                       {translate("Bulk Add")}
                     </Button>
                   )}
+                  {connections.length > 0 && (
+                    <Button
+                      size="sm"
+                      icon="download"
+                      variant="secondary"
+                      onClick={() => setShowExportKeys(true)}
+                      className="w-full sm:w-auto"
+                    >
+                      Export Keys
+                    </Button>
+                  )}
                   {hasDualAuthModes ? (
                     <>
                       <Button
@@ -1912,6 +1934,12 @@ export default function ProviderDetailPage() {
           setAddConnectionError("");
           setShowAddApiKeyModal(false);
         }}
+      />
+      <ExportKeysModal
+        isOpen={showExportKeys}
+        providerId={providerId}
+        providerName={providerInfo.name}
+        onClose={() => setShowExportKeys(false)}
       />
       <EditConnectionModal
         isOpen={showEditModal}

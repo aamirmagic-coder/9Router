@@ -63,6 +63,9 @@ export function createSSEStream(options = {}) {
 
   let buffer = "";
   let usage = null;
+  // Estimate injected into the client-facing finish chunk. Held apart from
+  // `usage` so accounting prefers the provider's authoritative numbers (#5056).
+  let estimatedUsage = null;
 
   // Tool-call ids already sent to the client, keyed by the tool-call index.
   // A late fragment that opens a NEW index without an id must not reach the
@@ -114,6 +117,12 @@ export function createSSEStream(options = {}) {
 
     const isPassthrough = mode === STREAM_MODE.PASSTHROUGH;
     let finalUsage = isPassthrough ? usage : state?.usage;
+
+    // A stream that ended on an injected estimate falls back to that estimate,
+    // but only when the provider never reported authoritative usage (#5056).
+    if (!hasValidUsage(finalUsage)) {
+      finalUsage = (isPassthrough ? estimatedUsage : state?.estimatedUsage) || null;
+    }
 
     if (!hasValidUsage(finalUsage) && totalContentLength > 0) {
       finalUsage = estimateUsage(body, totalContentLength, isPassthrough ? FORMATS.OPENAI : sourceFormat);
@@ -280,7 +289,10 @@ export function createSSEStream(options = {}) {
                 const estimated = estimateUsage(body, totalContentLength, FORMATS.OPENAI);
                 parsed.usage = filterUsageForFormat(estimated, FORMATS.OPENAI);
                 output = `data: ${JSON.stringify(parsed)}\n`;
-                usage = estimated;
+                // Keep the estimate out of the accounting accumulator: an estimate
+                // must never win mergeUsage()'s max against the provider's real
+                // usage that arrives in a trailing chunk (#5056).
+                estimatedUsage = estimated;
                 injectedUsage = true;
               } else if (isFinishChunk && usage) {
                 const buffered = addBufferToUsage(usage);
@@ -440,7 +452,8 @@ export function createSSEStream(options = {}) {
             if (state.finishReason && isFinishChunk && !hasValidUsage(item.usage) && totalContentLength > 0) {
               const estimated = estimateUsage(body, totalContentLength, sourceFormat);
               item.usage = filterUsageForFormat(estimated, sourceFormat); // Filter + already has buffer
-              state.usage = estimated;
+              // Estimates stay out of the accounting accumulator (#5056).
+              state.estimatedUsage = estimated;
             } else if (state.finishReason && isFinishChunk && state.usage) {
               // Add buffer and filter usage for client (but keep original in state.usage for logging)
               const buffered = addBufferToUsage(state.usage);

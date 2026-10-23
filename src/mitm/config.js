@@ -37,13 +37,20 @@ const URL_PATTERNS = {
  * Kiro Runtime moved GenerateAssistantResponse from path `/generateAssistantResponse`
  * to `POST /` + `x-amz-target: KiroRuntimeService.GenerateAssistantResponse`
  * (verified via live mitmproxy capture of Kiro IDE 1.0.228).
+ *
+ * Kiro 1.x+ also sends the main agentic chat turn as a POST /v1/responses request
+ * (OpenAI Responses API format, no x-amz-target header). This is the large-body
+ * request (~100 KB+) that contains the full conversation and should be intercepted
+ * in addition to the legacy CodeWhisperer path.
  */
 function isChatRequest(tool, req) {
   const patterns = URL_PATTERNS[tool] || [];
   if (patterns.some((p) => (req.url || "").includes(p))) return true;
   if (tool === "kiro") {
     const target = String(req.headers?.["x-amz-target"] || "");
-    return target.includes("GenerateAssistantResponse");
+    if (target.includes("GenerateAssistantResponse")) return true;
+    // New Responses API path (Kiro 1.x+): OpenAI-compatible, no x-amz-target
+    if ((req.url || "") === "/v1/responses") return true;
   }
   return false;
 }

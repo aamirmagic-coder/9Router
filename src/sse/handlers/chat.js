@@ -25,9 +25,6 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { routeFiniteFreebuff } from "./freebuffRouting.js";
-import { resolveConnectionProxyConfig, getProxyBucketIdentity } from "@/lib/network/connectionProxy";
-import { acquireAccountSlot } from "open-sse/services/accountSemaphore.js";
-import { evaluateCircuit, recordCircuitOutcome } from "open-sse/services/circuitBreaker.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { getKeyAccessContext, evaluateKeyPolicy, filterAdapterModels, getUsageRequestId } from "../services/keyAccess.js";
 
@@ -323,33 +320,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     }
 
-    const resolvedProxy = await resolveConnectionProxyConfig(refreshedCredentials.providerSpecificData || {}, credentials.connectionId);
-    const bucket = getProxyBucketIdentity(resolvedProxy);
-    if (!bucket) {
-      excludeConnectionIds.add(credentials.connectionId);
-      lastError = "Unable to resolve connection egress bucket";
-      lastStatus = HTTP_STATUS.SERVICE_UNAVAILABLE;
-      continue;
-    }
-    const gate = evaluateCircuit(provider, bucket);
-    if (!gate.allowed) {
-      excludeConnectionIds.add(credentials.connectionId);
-      lastError = "Selected provider route is cooling down";
-      lastStatus = HTTP_STATUS.SERVICE_UNAVAILABLE;
-      continue;
-    }
-    let releaseSlot = null;
-    let resilienceTerminalEvent = null;
-    try {
-      releaseSlot = await acquireAccountSlot({ provider, connectionId: credentials.connectionId, bucket, maxConcurrency: refreshedCredentials.providerSpecificData?.maxConcurrency, warn: (message) => log.warn("RESILIENCE", message) });
-    } catch (error) {
-      log.warn("RESILIENCE", `${provider}/${model} account capacity unavailable; trying next account`);
-      excludeConnectionIds.add(credentials.connectionId);
-      lastError = error.message;
-      lastStatus = HTTP_STATUS.SERVICE_UNAVAILABLE;
-      continue;
-    }
-
     // Use shared chatCore
     let result;
     try {
@@ -398,46 +368,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         // "Consecutive" strikes: a success clears the breaker for this pair.
         clearAntigravityStrikes(credentials.connectionId, model);
       },
-      onResilienceEvent: (event, details) => {
-          if (["DISPATCH_FAILED", "STREAM_COMPLETED", "STREAM_FAILED", "CLIENT_ABORTED", "NON_STREAM_COMPLETED"].includes(event)) {
-            if (resilienceTerminalEvent) return;
-            resilienceTerminalEvent = event;
-            releaseSlot?.();
-            releaseSlot = null;
-            recordCircuitOutcome({ provider, bucket, outcome: event, ...details });
-            return;
-          }
-          recordCircuitOutcome({ provider, bucket, outcome: event, ...details });
-       }
       });
     } catch (error) {
-      if (!resilienceTerminalEvent) {
-        resilienceTerminalEvent = "DISPATCH_FAILED";
-        recordCircuitOutcome({ provider, bucket, outcome: "DISPATCH_FAILED", status: HTTP_STATUS.BAD_GATEWAY, origin: "processing" });
-      }
-      releaseSlot?.();
-      releaseSlot = null;
       return errorResponse(HTTP_STATUS.BAD_GATEWAY, error?.message || "Chat dispatch failed");
     }
-
-      if (!result.success && !resilienceTerminalEvent) {
-        resilienceTerminalEvent = "DISPATCH_FAILED";
-        recordCircuitOutcome({
-          provider,
-          bucket,
-          outcome: "DISPATCH_FAILED",
-          status: result.status || result.response?.status || HTTP_STATUS.BAD_GATEWAY,
-          origin: "processing",
-        });
-      }
-      if (result.success && !result.streaming && !resilienceTerminalEvent) {
-        resilienceTerminalEvent = "NON_STREAM_COMPLETED";
-        recordCircuitOutcome({ provider, bucket, outcome: resilienceTerminalEvent });
-      }
-      if ((!result.success || !result.streaming) && releaseSlot) {
-        releaseSlot();
-        releaseSlot = null;
-      }
 
       if (result.success || result.origin === "usage_storage") return result.response;
 
@@ -473,32 +407,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
 async function dispatchChatAttempt({ body, provider, model, credentials, log, clientRawRequest, request, apiKey, userAgent }) {
   const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
-  const proxyData = refreshedCredentials.providerSpecificData || {};
-  const resolvedProxy = proxyData.proxyPoolId || proxyData.connectionProxyPoolId
-    ? { source: proxyData.vercelRelayUrl ? "vercel" : "pool", proxyPoolId: proxyData.proxyPoolId || proxyData.connectionProxyPoolId }
-    : await resolveConnectionProxyConfig(proxyData, credentials.connectionId);
-  const bucket = getProxyBucketIdentity(resolvedProxy);
-  if (!bucket) return { success: false, status: HTTP_STATUS.SERVICE_UNAVAILABLE, error: "Unable to resolve Freebuff proxy bucket", poolScoped: { poolId: credentials.providerSpecificData?.proxyPoolId } };
-  const gate = evaluateCircuit(provider, bucket);
-  if (!gate.allowed) return { success: false, status: HTTP_STATUS.SERVICE_UNAVAILABLE, error: "Freebuff proxy pool circuit is cooling down", poolScoped: { poolId: credentials.providerSpecificData?.proxyPoolId } };
-  let releaseSlot;
-  try {
-    releaseSlot = await acquireAccountSlot({ provider, connectionId: credentials.connectionId, bucket, maxConcurrency: refreshedCredentials.providerSpecificData?.maxConcurrency, warn: (message) => log.warn("RESILIENCE", message) });
-  } catch (error) {
-    return { success: false, status: HTTP_STATUS.SERVICE_UNAVAILABLE, error: error.message, poolScoped: { poolId: credentials.providerSpecificData?.proxyPoolId } };
-  }
-  let terminalEvent = null;
-  const onResilienceEvent = (event, details) => {
-    if (["DISPATCH_FAILED", "STREAM_COMPLETED", "STREAM_FAILED", "CLIENT_ABORTED", "NON_STREAM_COMPLETED"].includes(event)) {
-      if (terminalEvent) return;
-      terminalEvent = event;
-      releaseSlot?.();
-      releaseSlot = null;
-      recordCircuitOutcome({ provider, bucket, outcome: event, ...details });
-      return;
-    }
-    recordCircuitOutcome({ provider, bucket, outcome: event, ...details });
-  };
   let result;
   try {
     const chatSettings = await getSettings();
@@ -518,34 +426,9 @@ async function dispatchChatAttempt({ body, provider, model, credentials, log, cl
     ensureOpenAIDone: dashboardAuthorizedRequests.has(request),
     onCredentialsRefreshed: async (newCreds) => updateProviderCredentials(credentials.connectionId, { ...newCreds, existingProviderSpecificData: credentials.providerSpecificData, testStatus: "active" }),
      onRequestSuccess: async () => clearAccountError(credentials.connectionId, credentials, model),
-    onResilienceEvent,
     });
   } catch (error) {
-    if (!terminalEvent) {
-      terminalEvent = "DISPATCH_FAILED";
-      recordCircuitOutcome({ provider, bucket, outcome: "DISPATCH_FAILED", status: HTTP_STATUS.BAD_GATEWAY, origin: "processing" });
-    }
-    releaseSlot?.();
-    releaseSlot = null;
     return { success: false, status: HTTP_STATUS.BAD_GATEWAY, error: error?.message || "Chat dispatch failed" };
-  }
-  if (!result.success && !terminalEvent) {
-    terminalEvent = "DISPATCH_FAILED";
-    recordCircuitOutcome({
-      provider,
-      bucket,
-      outcome: terminalEvent,
-      status: result.status || result.response?.status || HTTP_STATUS.BAD_GATEWAY,
-      origin: "processing",
-    });
-  }
-  if (result.success && !result.streaming && !terminalEvent) {
-    terminalEvent = "NON_STREAM_COMPLETED";
-    recordCircuitOutcome({ provider, bucket, outcome: terminalEvent });
-  }
-  if ((!result.success || !result.streaming) && releaseSlot) {
-    releaseSlot();
-    releaseSlot = null;
   }
   return result;
 }

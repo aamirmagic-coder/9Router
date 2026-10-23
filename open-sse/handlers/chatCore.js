@@ -60,10 +60,9 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, onResilienceEvent, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, ensureOpenAIDone, providerThinking, providerOverrides }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, ensureOpenAIDone, providerThinking, providerOverrides }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
-  onResilienceEvent?.("DISPATCH_START", { provider, model, connectionId });
   // Stable per-session color so all lines of one CLI conversation share a tag
   const sessionSeed = (() => {
     try {
@@ -431,11 +430,6 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       ? error.resetsAtMs
       : undefined;
     const isAborted = error.name === "AbortError";
-    const thrownOrigin = isAborted ? "client_abort"
-      : error?.poolScoped ? "proxy_pool"
-      : (error?.name === "TypeError" && !upstreamStatus) ? "local_router"
-      : "upstream_http";
-    onResilienceEvent?.("DISPATCH_FAILED", { provider, model, connectionId, status: isAborted ? 499 : upstreamStatus, origin: thrownOrigin });
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${isAborted ? 499 : upstreamStatus}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
@@ -539,11 +533,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);
     }
     reqLogger.logError(new Error(message), finalBody || translatedBody);
-    onResilienceEvent?.("DISPATCH_FAILED", { provider, model, connectionId, status: statusCode, origin: "upstream_http" });
     return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
   }
 
-  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, onResilienceEvent, pxpipe: pxpipeSummary, reqTag, log };
+  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
   const notifyRequestSuccess = async () => {
@@ -560,10 +553,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     if (result) {
       if (result.success) {
         await notifyRequestSuccess();
-        onResilienceEvent?.("NON_STREAM_COMPLETED", { provider, model, connectionId });
         streamController.handleComplete();
       } else {
-        onResilienceEvent?.("DISPATCH_FAILED", { provider, model, connectionId, status: result.response?.status || HTTP_STATUS.BAD_GATEWAY, origin: result.origin || "processing" });
         streamController.handleError(new Error(result.error || "Non-stream response failed"));
       }
       return result;
@@ -575,10 +566,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     const result = await handleNonStreamingResponse({ ...sharedCtx, providerResponse, sourceFormat, targetFormat: providerResponseFormat, reqLogger, toolNameMap: toolResponseMetadata || toolNameMap, customToolNames, trackDone, appendLog });
     if (result.success) {
       await notifyRequestSuccess();
-      onResilienceEvent?.("NON_STREAM_COMPLETED", { provider, model, connectionId });
       streamController.handleComplete();
     } else {
-      onResilienceEvent?.("DISPATCH_FAILED", { provider, model, connectionId, status: result.response?.status || HTTP_STATUS.BAD_GATEWAY, origin: result.origin || "processing" });
       streamController.handleError(new Error(result.error || "Non-stream response failed"));
     }
     return result;

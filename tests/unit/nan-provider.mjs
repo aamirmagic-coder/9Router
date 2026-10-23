@@ -4,8 +4,12 @@ import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.j
 import { parseUpstreamError } from "../../open-sse/utils/error.js";
 import { formatNanUsage } from "../../open-sse/services/usage/nan.js";
 
-for (const id of ["nan", "tinyfish", "v1m", "muse", "minimax-code", "minimax-code-global", "bedrock", "bedrock-xai"]) {
+assert.equal(new Set(REGISTRY.map((item) => item.id)).size, REGISTRY.length, "provider IDs must be unique");
+for (const id of ["nan", "tinyfish", "v1m", "muse", "minimax-code", "minimax-code-global", "bedrock", "bedrock-xai", "sensenova", "deepseek-web", "gemini-web", "muse-web", "chatgpt-web", "veoaifree-web", "uc-web"]) {
   assert.equal(REGISTRY.filter((item) => item.id === id).length, 1, `${id} must be registered once`);
+}
+for (const id of ["trae", "devin-cli", "windsurf"]) {
+  assert.equal(REGISTRY.some((item) => item.id === id), false, `${id} must remain disabled`);
 }
 const nan = REGISTRY.find((item) => item.id === "nan");
 assert(nan);

@@ -249,7 +249,7 @@ Default URLs:
 
 ## 🛠️ Supported CLI Tools
 
-9Router works seamlessly with all major AI coding tools:
+The dashboard can configure the CLI and IDE integrations listed below. It is not an exhaustive list of every AI coding tool, and a tool is only listed here when 9Router ships a working config path for it.
 
 <div align="center">
   <table>
@@ -331,14 +331,62 @@ Default URLs:
         <b>Qwen Code</b>
       </td>
     </tr>
+    <tr>
+      <td align="center" width="120">
+        <img src="./public/providers/kiro.png" width="60" alt="Kiro"/><br/>
+        <b>Kiro</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/claude.png" width="60" alt="Claude Cowork"/><br/>
+        <b>Claude Cowork</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/hermes.png" width="60" alt="Hermes Agent"/><br/>
+        <b>Hermes Agent</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/amp.png" width="60" alt="Amp CLI"/><br/>
+        <b>Amp CLI</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/pi.svg" width="60" alt="Pi"/><br/>
+        <b>Pi</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/omp.png" width="60" alt="Oh My Pi"/><br/>
+        <b>Oh My Pi</b>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" width="120">
+        <img src="./public/providers/crush.png" width="60" alt="Crush"/><br/>
+        <b>Crush</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/forge.png" width="60" alt="ForgeCode"/><br/>
+        <b>ForgeCode</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/smelt.svg" width="60" alt="Smelt"/><br/>
+        <b>Smelt</b>
+      </td>
+      <td align="center" width="120">
+        <img src="./public/providers/codewhale.svg" width="60" alt="CodeWhale"/><br/>
+        <b>CodeWhale</b>
+      </td>
+    </tr>
   </table>
 </div>
+
+> **Note on Devin CLI:** Devin CLI appears in the dashboard as a local dependency of the Devin provider, not as a routed CLI integration. The Devin provider spawns the `devin` binary locally, so the binary must be installed and authenticated on the same machine as 9Router.
 
 ---
 
 ## 🌐 Supported Providers
 
 ### 🔐 OAuth Providers
+
+The dashboard supports active OAuth flows for 20+ providers. The six shown below are a selected list of examples, not the full set.
 
 <div align="center">
   <table>
@@ -373,35 +421,55 @@ Default URLs:
 
 ### 🆓 Free Providers
 
+These are examples of free and free-tier offerings that 9Router can connect to. Availability, model lists, and limits are controlled by each provider and can change at any time.
+
 <div align="center">
   <table>
     <tr>
       <td align="center" width="150">
         <img src="./public/providers/kiro.png" width="70" alt="Kiro"/><br/>
         <b>Kiro AI</b><br/>
-        <sub>Claude 4.5 + GLM-5 + MiniMax<br/>50 credits/month free</sub>
+        <sub>Claude 4.5 + GLM-5 + MiniMax<br/>50 credits/month free (capped)</sub>
       </td>
       <td align="center" width="150">
         <img src="./public/providers/opencode.png" width="70" alt="OpenCode Free"/><br/>
         <b>OpenCode Free</b><br/>
-        <sub>No auth • Auto-fetch models<br/>Free (model list varies)</sub>
+        <sub>No auth • Auto-fetch models<br/>Free models vary over time</sub>
       </td>
       <td align="center" width="150">
         <img src="./public/providers/gemini.png" width="70" alt="Vertex AI"/><br/>
         <b>Vertex AI</b><br/>
-        <sub>Gemini 3 Pro + GLM-5 + DeepSeek<br/>$300 credits free</sub>
+        <sub>Gemini models via Vertex<br/>$300 new-account credits (provider terms)</sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" width="150">
+        <img src="./public/providers/freebuff.png" width="70" alt="Freebuff"/><br/>
+        <b>Freebuff</b><br/>
+        <sub>Ad-supported free tier<br/>Region and session limited</sub>
+      </td>
+      <td align="center" width="150">
+        <img src="./public/providers/nous.png" width="70" alt="Nous Research"/><br/>
+        <b>Nous Research</b><br/>
+        <sub>Free tier via OAuth device code<br/>or portal API key</sub>
+      </td>
+      <td align="center" width="150">
+        <img src="./public/providers/ollama.png" width="70" alt="Ollama Cloud"/><br/>
+        <b>Ollama Cloud</b><br/>
+        <sub>Monthly included usage credit<br/>1 cloud model at a time</sub>
       </td>
     </tr>
   </table>
 </div>
 
-> **Note:** iFlow, Qwen Code and Gemini CLI free tiers were discontinued in 2026. Use Kiro / OpenCode Free / Vertex instead.
+> **Note:** iFlow, Qwen Code and Gemini CLI free tiers were discontinued in 2026. Kiro, OpenCode Free and Vertex are current examples, not a promise of permanent availability.
 >
-> **Kiro AI** moved to a paid model in Sep 2025 — the free tier is now capped at **50 credits/month** (plus 500 trial credits for new accounts in the first 30 days). Paid tiers: Pro $20/mo (1,000 credits), Pro+ $40/mo (2,000), Pro Max $100/mo (5,000), Power $200/mo (10,000).
-> **OpenCode Free** model list fluctuates over time (some models free only for limited promos) — subject to change without notice.
-> **Vertex AI**: the $300 free credit for new GCP accounts is still valid, but since Mar 2026 the **Gemini API endpoint no longer consumes these credits** — call the **Vertex AI Studio** endpoint instead.
+> **Kiro AI** moved to a paid model in Sep 2025. The free tier is now capped at **50 credits/month** (plus 500 trial credits for new accounts in the first 30 days). Paid tiers: Pro $20/mo (1,000 credits), Pro+ $40/mo (2,000), Pro Max $100/mo (5,000), Power $200/mo (10,000).
+> **OpenCode Free** model list fluctuates over time (some models free only for limited promos) and is subject to change without notice.
+> **Vertex AI**: new Google Cloud accounts receive $300 credits under Google's own terms. Vertex AI and Vertex Partner are separate integrations in 9Router; check Google's current terms to determine which requests, models, and locations are eligible for any credit.
+> **Freebuff**, **Nous Research** and **Ollama Cloud** are free-tier or included-credit offerings governed by each provider's terms; 9Router does not add, extend, or guarantee those quotas.
 
-### 🔑 API Key Providers (40+)
+### 🔑 API Key Providers (80+)
 
 <div align="center">
   <table>
@@ -484,7 +552,7 @@ Default URLs:
       </td>
     </tr>
   </table>
-  <p><i>...and 20+ more providers including Nebius, Chutes, Hyperbolic, and custom OpenAI/Anthropic compatible endpoints</i></p>
+  <p><i>The table above shows examples. The dashboard ships 80+ API-key providers, including 60+ more such as Nebius, Chutes, Hyperbolic, and custom OpenAI/Anthropic compatible endpoints.</i></p>
 </div>
 
 ### 🏠 Self-hosted Providers
@@ -620,7 +688,7 @@ Create combos with automatic fallback:
 Combo: "my-coding-stack"
   1. cc/claude-opus-4-6        (your subscription)
   2. glm/glm-4.7               (cheap backup, $0.6/1M)
-  3. if/kimi-k2-thinking       (free fallback)
+  3. kr/claude-sonnet-4.5      (Kiro free-tier fallback, subject to its credit cap)
 
 → Auto switches when quota runs out or errors occur
 ```
@@ -722,11 +790,13 @@ Seamless translation between formats:
 | **💰 CHEAP**        | GLM-5.1 / GLM-4.7     | $0.6/1M      | Daily 10AM       | Budget backup                           |
 |                     | MiniMax M2.7          | $0.2/1M      | 5-hour rolling   | Cheapest option                         |
 |                     | Kimi K2.5             | $9/mo flat   | 10M tokens/mo    | Predictable cost                        |
- | **🆓 FREE**         | Kiro AI               | $0           | 50 credits/mo    | Claude 4.5 + GLM-5 + MiniMax free (paid tiers above) |
+ | **🆓 FREE**         | Kiro AI               | $0 within cap | 50 credits/mo    | Claude 4.5 + GLM-5 + MiniMax free tier (capped; paid tiers above) |
  |                     | OpenCode Free         | $0           | Varies*          | No auth, auto-fetch models (list changes over time) |
- |                     | Vertex AI             | $300 credits | New GCP accounts | Gemini 3 Pro + DeepSeek + GLM-5 (use Vertex AI Studio endpoint for free credits) |
+ |                     | Vertex AI             | $300 new-account credits | New GCP accounts | Gemini models through Vertex (use the Vertex AI Studio endpoint for free credits); partner models are priced separately |
 
-**💡 Pro Tip:** RTK + Kiro AI + OpenCode Free combo = **$0 cost + 20-40% token savings**!
+**💡 Pro Tip:** RTK + Kiro AI + OpenCode Free combo can run at **$0 within the free-tier limits**, plus 20-40% token savings.
+
+> Free-tier costs, credits, and model availability are set by each provider and can change. 9Router does not bill you and does not guarantee any free tier stays free.
 
 ---
 
@@ -737,7 +807,7 @@ Seamless translation between formats:
 ✅ **9Router software = FREE forever** (open source, never charges)
 ✅ **Dashboard "costs" = Display/tracking only** (not actual bills)
 ✅ **You pay providers directly** (subscriptions or API fees)
-✅ **FREE providers stay FREE** (Kiro ~50 credits/mo, OpenCode Free, Vertex $300 credits = $0 within free-tier limits) — note iFlow/Qwen/Gemini CLI free tiers were discontinued in 2026
+✅ **Free tiers are provider-controlled** (Kiro, OpenCode Free, Vertex and similar offerings are subject to each provider's limits, and those limits can change). Note that the iFlow/Qwen/Gemini CLI free tiers were discontinued in 2026.
 ❌ **9Router never sends invoices** or charges your card
 
 **How Cost Display Works:**
@@ -762,7 +832,7 @@ Reality Check:
 
 - **Subscription providers** (Claude Code, Codex): Pay them directly via their websites
 - **Cheap providers** (GLM, MiniMax): Pay them directly, 9Router just routes
-- **FREE providers** (iFlow, Kiro, Qwen): Genuinely free forever, no hidden charges
+- **FREE providers** (Kiro, OpenCode Free, Vertex): free-tier offerings with provider-set limits, not a guarantee of unlimited or permanent free access
 - **9Router**: Never charges anything, ever
 
 ---
@@ -779,7 +849,7 @@ Reality Check:
 Combo: "maximize-claude"
   1. cc/claude-opus-4-7        (use subscription fully)
   2. glm/glm-5.1               (cheap backup when quota out)
-  3. kr/claude-sonnet-4.5      (free emergency fallback)
+  3. kr/claude-sonnet-4.5      (Kiro free-tier emergency fallback)
 
 Monthly cost: $20 (subscription) + ~$5 (backup) = $25 total
 vs. $20 + hitting limits = frustration
@@ -797,9 +867,11 @@ Combo: "free-forever"
   2. kr/glm-5                  (GLM-5 free via Kiro)
   3. oc/<auto>                 (OpenCode Free, no auth)
 
-Monthly cost: $0
+Monthly cost: $0 while the free-tier limits hold
 Quality: Production-ready models + RTK saves 20-40% tokens
 ```
+
+The combo name is just a label. Kiro's credits, OpenCode's free model list, and any other free tier are set by those providers and can change, so treat this as a cost-minimizing example rather than a permanent guarantee.
 
 ### Case 3: "I need 24/7 coding, no interruptions"
 
@@ -813,27 +885,29 @@ Combo: "always-on"
   2. cx/gpt-5.5                (second subscription)
   3. glm/glm-5.1               (cheap, resets daily)
   4. minimax/MiniMax-M2.7      (cheapest, 5h reset)
-  5. kr/claude-sonnet-4.5      (free via Kiro, ~50 credits/mo)
+  5. kr/claude-sonnet-4.5      (Kiro free tier, ~50 credits/mo)
 
 Result: 5 layers of fallback = zero downtime
 Monthly cost: $20-200 (subscriptions) + $10-20 (backup)
 ```
 
-### Case 4: "I want FREE AI in OpenClaw"
+### Case 4: "I want free-tier AI in OpenClaw"
 
-**Problem:** Need AI assistant in messaging apps (WhatsApp, Telegram, Slack...), completely free
+**Problem:** Need an AI assistant in messaging apps (WhatsApp, Telegram, Slack...) while staying inside free-tier limits
 
 **Solution:**
 
 ```
 Combo: "openclaw-free"
-  1. kr/claude-sonnet-4.5      (Claude 4.5 free)
-  2. kr/glm-5                  (GLM-5 free)
-  3. kr/MiniMax-M2.5           (MiniMax free)
+  1. kr/claude-sonnet-4.5      (Claude 4.5 on Kiro's free tier)
+  2. kr/glm-5                  (GLM-5 on Kiro's free tier)
+  3. kr/MiniMax-M2.5           (MiniMax on Kiro's free tier)
 
-Monthly cost: $0
+Cost: $0 while Kiro's monthly credit cap lasts
 Access via: WhatsApp, Telegram, Slack, Discord, iMessage, Signal...
 ```
+
+All three entries above draw on the same Kiro account, so they share one monthly credit cap rather than giving three independent free quotas. Free-tier availability and limits are controlled by the provider.
 
 ---
 
@@ -873,21 +947,21 @@ The cost display is a "savings tracker" to help you understand your usage patter
 <details>
 <summary><b>🆓 Are FREE providers really unlimited?</b></summary>
 
-**Mostly!** The current FREE providers (Kiro, OpenCode Free, Vertex) are genuinely free, but free tiers have limits:
+**No.** Free tiers are subject to provider limits, and those limits can change without notice. Kiro, OpenCode Free and Vertex are current examples of free or free-tier offerings, not unlimited plans.
 
-These are free services offered by those respective companies:
+These are services offered by those respective companies:
 
-- **Kiro AI**: ~50 credits/month free (plus 500 trial credits for new accounts in the first 30 days) via AWS Builder ID / Google / GitHub OAuth. Paid tiers available above that.
-- **OpenCode Free**: No-auth passthrough proxy, models auto-fetched from `opencode.ai/zen/v1/models`. The free model list fluctuates over time (some models free only for limited promos) — subject to change without notice.
-- **Vertex AI**: $300 free credits for new Google Cloud accounts (90 days). Since Mar 2026 the Gemini API endpoint no longer consumes these credits — use the **Vertex AI Studio** endpoint instead.
+- **Kiro AI**: ~50 credits/month free (plus 500 trial credits for new accounts in the first 30 days) via AWS Builder ID / Google / GitHub OAuth. Paid tiers available above that cap.
+- **OpenCode Free**: No-auth passthrough proxy, models auto-fetched from `opencode.ai/zen/v1/models`. Which models are available free varies over time (some are free only for limited promos) and is subject to change without notice.
+- **Vertex AI**: new Google Cloud accounts receive $300 credits under Google's own terms. Vertex AI and Vertex Partner are separate integrations in 9Router; check Google's current terms to determine which requests, models, and locations are eligible for any credit.
 
-9Router just routes your requests to them - there's no "catch" or future billing from 9Router itself. They're truly free services, and 9Router makes them easy to use with fallback support.
+9Router does not bill you and does not add, extend, or guarantee any provider's free quota. It routes your requests to the provider you configured, and the provider's limits apply.
 
 **Discontinued free tiers (no longer recommended):**
 
 - ❌ **iFlow**: Was free unlimited, now changed to paid (2026)
 - ❌ **Qwen Code**: Free OAuth tier fully discontinued by Alibaba on 2026-04-15
-- ❌ **Gemini CLI**: Service fully shut down by Google on 2026-06-18 (replaced by the closed-source Antigravity CLI). Discontinued — do not use.
+- ❌ **Gemini CLI**: Service fully shut down by Google on 2026-06-18 (replaced by the closed-source Antigravity CLI). Discontinued, do not use.
 
 </details>
 
@@ -896,15 +970,15 @@ These are free services offered by those respective companies:
 
 **Free-First Strategy:**
 
-1. **Start with 100% free combo:**
+1. **Start with an all-free-tier combo:**
 
    ```
-   1. kr/glm-5 (GLM-5 free via Kiro, ~50 credits/mo)
+   1. kr/glm-5 (GLM-5 via Kiro's free tier, ~50 credits/mo)
    2. OpenCode Free models (no auth, auto-fetched)
-   3. Vertex AI Gemini 3 Pro (using the Vertex AI Studio endpoint with $300 credits)
+   3. Vertex AI Gemini model (Vertex AI Studio endpoint with new-account credits)
    ```
 
-   **Cost: $0/month** (within Kiro's free credit cap; OpenCode/Vertex subject to their free-tier limits)
+   **Cost: $0 within each provider's free-tier limits** (Kiro's credit cap, OpenCode's available free models, and Vertex's new-account credits all apply)
 
 2. **Add cheap backup** only if you need it:
 
@@ -918,7 +992,7 @@ These are free services offered by those respective companies:
    - Only if you already have them
    - 9Router helps maximize their value through quota tracking
 
-**Result:** Most users can operate at $0/month using only free tiers!
+**Result:** A free-tier-only setup can reach $0/month while those free tiers are available, but the quotas are set by the providers and can change.
 
 </details>
 
@@ -1049,14 +1123,14 @@ Models:
 </details>
 
 <details>
-<summary><b>🆓 FREE Providers (Recommended)</b></summary>
+<summary><b>🆓 Free-Tier Providers (Examples)</b></summary>
 
-### Kiro AI (Claude 4.5 + GLM-5 + MiniMax FREE)
+### Kiro AI (Claude 4.5 + GLM-5 + MiniMax free tier)
 
 ```bash
 Dashboard → Connect Kiro
 → AWS Builder ID, AWS IAM Identity Center, Google, or GitHub
-→ Unlimited usage
+→ Free tier capped at 50 credits/month
 
 Models:
   kr/claude-sonnet-4.5
@@ -1067,7 +1141,7 @@ Models:
   kr/deepseek-3.2
 ```
 
-**Pro Tip:** Best free option for Claude. No API key, no payment, fully unlimited.
+**Pro Tip:** Best free-tier option for Claude. No API key and no payment method required, but usage stays inside Kiro's monthly credit cap (50 credits/month, plus 500 trial credits for new accounts in the first 30 days).
 
 ### OpenCode Free (No auth, auto-fetch models)
 
@@ -1115,7 +1189,7 @@ the projectless endpoint. Gemini 4 Argon supports `global`, `us`, and `eu`,
 not regional locations such as `europe-west1`; see
 [Google's supported locations](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/4-argon).
 
-**Pro Tip:** New Google Cloud accounts get $300 credits free for 90 days. Plenty for daily coding.
+**Pro Tip:** New Google Cloud accounts receive $300 credits under Google's own terms. Credit eligibility, duration, and usage are determined by Google, not by 9Router.
 
 </details>
 
@@ -1142,17 +1216,19 @@ Monthly cost example (100M tokens):
   Total: $10 + your subscription
 ```
 
-### Example 2: Free-Only (Zero Cost)
+### Example 2: Free-Tier Only
 
 ```
 Name: free-combo
 Models:
-  1. kr/claude-sonnet-4.5 (Claude 4.5 free via Kiro, ~50 credits/mo)
-  2. kr/glm-5 (GLM-5 free via Kiro)
-  3. vertex/gemini-3.1-pro-preview ($300 free credits)
+  1. kr/claude-sonnet-4.5 (Claude 4.5 via Kiro's free tier, ~50 credits/mo)
+  2. kr/glm-5 (GLM-5 via Kiro's free tier)
+  3. vertex/gemini-3.1-pro-preview (new-account credits, Vertex AI Studio endpoint)
 
-Cost: $0 forever (+ 20-40% token savings via RTK)!
+Cost: $0 within the providers' free-tier limits (+ 20-40% token savings via RTK)
 ```
+
+Kiro's monthly credit cap and Vertex's credit terms are set by those providers. This example minimizes cost; it is not a guarantee of permanent free access.
 
 </details>
 

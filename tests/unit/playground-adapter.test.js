@@ -10,9 +10,6 @@ const mocks = vi.hoisted(() => ({
   getProviderCredentials: vi.fn(),
   checkAndRefreshToken: vi.fn(),
   resolveConnectionProxyConfig: vi.fn(),
-  getProxyBucketIdentity: vi.fn(),
-  acquireAccountSlot: vi.fn(),
-  evaluateCircuit: vi.fn(),
   routeFiniteFreebuff: vi.fn(),
 }));
 
@@ -34,10 +31,7 @@ vi.mock("@/sse/services/auth.js", () => ({
 }));
 vi.mock("@/lib/network/connectionProxy", () => ({
   resolveConnectionProxyConfig: mocks.resolveConnectionProxyConfig,
-  getProxyBucketIdentity: mocks.getProxyBucketIdentity,
 }));
-vi.mock("open-sse/services/accountSemaphore.js", () => ({ acquireAccountSlot: mocks.acquireAccountSlot }));
-vi.mock("open-sse/services/circuitBreaker.js", () => ({ evaluateCircuit: mocks.evaluateCircuit, recordCircuitOutcome: vi.fn() }));
 vi.mock("@/sse/handlers/freebuffRouting.js", () => ({ routeFiniteFreebuff: mocks.routeFiniteFreebuff }));
 vi.mock("open-sse/services/combo.js", () => ({
   handleComboChat: vi.fn(),
@@ -78,9 +72,6 @@ describe("dashboard playground chat adapter", () => {
     mocks.getProviderCredentials.mockResolvedValue({ connectionId: "connection", providerSpecificData: {} });
     mocks.checkAndRefreshToken.mockImplementation(async (credentials) => credentials);
     mocks.resolveConnectionProxyConfig.mockResolvedValue({});
-    mocks.getProxyBucketIdentity.mockReturnValue("direct:test");
-    mocks.evaluateCircuit.mockReturnValue({ allowed: true });
-    mocks.acquireAccountSlot.mockResolvedValue(vi.fn());
     mocks.handleChatCore.mockResolvedValue({ success: true, response: new Response("ok") });
   });
 

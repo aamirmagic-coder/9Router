@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../src/lib/usageDb.js", () => ({ saveRequestDetail: vi.fn(async () => {}) }));
 
 import { handleStreamingResponse } from "../../open-sse/handlers/chatCore/streamingHandler.js";
-import { createDisconnectAwareStream, pipeWithDisconnect, createStreamController } from "../../open-sse/utils/streamHandler.js";
+import { createDisconnectAwareStream, pipeWithDisconnect, createStreamController, STREAM_STALL_TIMEOUT } from "../../open-sse/utils/streamHandler.js";
 import { buildAbortedResponsesTerminalBytes } from "../../open-sse/utils/responsesStreamHelpers.js";
 import { buildStreamErrorBytes } from "../../open-sse/utils/streamHelpers.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
@@ -198,6 +198,80 @@ describe("pipeWithDisconnect owned resource cleanup", () => {
       await out.cleanup("duplicate cleanup");
       expect(upstreamCancelled).toBe(1);
       expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("stream controller operator logging", () => {
+  function makeLog() {
+    const lines = [];
+    return { lines, log: { errorLine: (...args) => lines.push(args) } };
+  }
+
+  function watchdogError(stallTimeoutMs) {
+    const error = new Error("stream stall timeout");
+    error.code = STREAM_STALL_TIMEOUT;
+    error.stallTimeoutMs = stallTimeoutMs;
+    return error;
+  }
+
+  it("renders a watchdog timeout as one friendly line with metadata and no stack", () => {
+    const { lines, log } = makeLog();
+    const onError = vi.fn();
+    const ctrl = createStreamController({ onError, log, provider: "codex", model: "gpt-5", reqTag: "T" });
+
+    ctrl.handleError(watchdogError(360_000));
+
+    expect(lines).toHaveLength(1);
+    const [, , message] = lines[0];
+    expect(message).toContain("Codex stopped sending a response for 6 minutes.");
+    expect(message).toContain("The request was ended so it would not stay stuck.");
+    expect(message).toMatch(/ · codex\/gpt-5 · \d+ms$/);
+    expect(message).not.toContain("\n");
+    expect(message).not.toContain("stream stall timeout");
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0].message).toBe("stream stall timeout");
+  });
+
+  it("uses singular and sub-minute durations", () => {
+    const { lines, log } = makeLog();
+    const ctrl = createStreamController({ log, provider: "codex", model: "gpt-5" });
+    ctrl.handleError(watchdogError(60_000));
+    expect(lines[0][2]).toContain("for 1 minute.");
+    const second = createStreamController({ log, provider: "codex", model: "gpt-5" });
+    second.handleError(watchdogError(30_000));
+    expect(lines[1][2]).toContain("for 30 seconds.");
+  });
+
+  it("logs only ERROR: <message> for an ordinary error, never the stack", () => {
+    const { lines, log } = makeLog();
+    const ctrl = createStreamController({ log, provider: "codex", model: "gpt-5" });
+    const error = new Error("upstream disconnected");
+    error.stack = "Error: upstream disconnected\n    at /app/.next/server/chunk.js:1:1";
+
+    ctrl.handleError(error);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0][2]).toContain("ERROR: upstream disconnected");
+    expect(lines[0][2]).not.toContain("at /app");
+    expect(lines[0][2]).not.toContain("\n");
+  });
+
+  it("keeps client cancel a disconnect rather than an error line", async () => {
+    vi.useFakeTimers();
+    try {
+      const { lines, log } = makeLog();
+      const ctrl = createStreamController({ log, provider: "codex", model: "gpt-5" });
+      const upstream = new ReadableStream({ pull() {} });
+      const out = pipeWithDisconnect({ body: upstream }, new TransformStream(), ctrl, null, 60_000);
+
+      await out.getReader().cancel("client closed");
+      vi.advanceTimersByTime(500);
+
+      expect(lines).toHaveLength(0);
+      expect(ctrl.isConnected()).toBe(false);
     } finally {
       vi.useRealTimers();
     }

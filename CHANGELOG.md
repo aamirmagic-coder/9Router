@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **GLM**: omit the redundant thinking enable block for always-on reasoning models, preventing Anthropic-wire validation errors while preserving reasoning effort (#4771)
+
 # v0.5.109 (2026-10-23)
 
 ## Features
@@ -42,6 +47,7 @@
 - **Search**: reset regex state between model matches in search filters (#5853a88)
 - **Pi Settings**: declare `existingProvider` before use in POST handler to prevent ReferenceError 500 (#342ecb0)
 - **Tests**: triage master test suite (GLM-5.2 effort, gpt-6.1-sol codex capabilities, image SSRF mocks, refresh known-fails) (#b6a9ca4)
+
 
 # v0.5.104 (2026-10-15)
 

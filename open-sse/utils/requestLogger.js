@@ -69,25 +69,37 @@ function writeJsonFile(sessionPath, filename, data) {
   }
 }
 
-// Mask sensitive data in headers (DISABLED - keep full token for testing)
-function maskSensitiveHeaders(headers) {
+// Provider credentials must never reach disk in clear text: request logs are
+// written to the data dir and shared when debugging (#4808).
+// Full values require the explicit opt-in REQUEST_LOG_RAW_HEADERS=1.
+const SENSITIVE_HEADER_RE = /(authorization|api[-_]?key|cookie|token|secret|password)/i;
+const RAW_HEADERS_OPT_IN = () => process.env.REQUEST_LOG_RAW_HEADERS === "1";
+
+function maskHeaderValue(value) {
+  const text = String(value);
+  // Short values would be recoverable from a first/last slice: mask entirely.
+  if (text.length <= 16) return "***";
+  return `${text.slice(0, 6)}...${text.slice(-4)}`;
+}
+
+export function maskSensitiveHeaders(headers) {
   if (!headers) return {};
-  return { ...headers };
-  
-  // Old masking code (disabled):
-  // const masked = { ...headers };
-  // const sensitiveKeys = ["authorization", "x-api-key", "cookie", "token"];
-  // 
-  // for (const key of Object.keys(masked)) {
-  //   const lowerKey = key.toLowerCase();
-  //   if (sensitiveKeys.some(sk => lowerKey.includes(sk))) {
-  //     const value = masked[key];
-  //     if (value && value.length > 20) {
-  //       masked[key] = value.slice(0, 10) + "..." + value.slice(-5);
-  //     }
-  //   }
-  // }
-  // return masked;
+  if (RAW_HEADERS_OPT_IN()) return { ...headers };
+
+  const masked = { ...headers };
+  for (const key of Object.keys(masked)) {
+    if (!SENSITIVE_HEADER_RE.test(key)) continue;
+    if (masked[key]) masked[key] = maskHeaderValue(masked[key]);
+  }
+  return masked;
+}
+
+/** Provider response headers as a plain object, with credentials masked. */
+export function normalizeResponseHeaders(headers) {
+  const plain = headers
+    ? (typeof headers.entries === "function" ? Object.fromEntries(headers.entries()) : headers)
+    : {};
+  return maskSensitiveHeaders(plain);
 }
 
 // No-op logger when logging is disabled
@@ -170,7 +182,7 @@ export async function createRequestLogger(sourceFormat, targetFormat, model) {
         timestamp: new Date().toISOString(),
         status,
         statusText,
-        headers: headers ? (typeof headers.entries === "function" ? Object.fromEntries(headers.entries()) : headers) : {},
+        headers: normalizeResponseHeaders(headers),
         body
       });
     },

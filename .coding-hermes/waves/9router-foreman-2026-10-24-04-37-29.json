@@ -1,0 +1,61 @@
+{
+  "tick_id": "9router-foreman-2026-10-24-04-37-29",
+  "block_id": "DF-9ROUTER-70",
+  "block_progress": "66/73 (90%)",
+  "wave_size": 5,
+  "slots_available": 5,
+  "host_load": "16 cores, loadavg 10.74",
+  "rows": [
+    {
+      "id": "DF-9ROUTER-39-R2",
+      "priority": "P1",
+      "title": "usage ledger under-reports Gemini prompt tokens ~1000x",
+      "worktree": "9router-wt-39-r2",
+      "branch": "wt/df-9router-39-r2",
+      "brief_file": "/tmp/brief-df-9router-39-r2.txt"
+    },
+    {
+      "id": "DF-9ROUTER-67",
+      "priority": "P2",
+      "title": "fresh-machine build fails on oauth page-data",
+      "worktree": "9router-wt-67",
+      "branch": "wt/df-9router-67",
+      "brief_file": "/tmp/brief-df-9router-67.txt"
+    },
+    {
+      "id": "DF-9ROUTER-68",
+      "priority": "P2",
+      "title": "launcher offers npm install -g replacing fork",
+      "worktree": "9router-wt-68",
+      "branch": "wt/df-9router-68",
+      "brief_file": "/tmp/brief-df-9router-68.txt"
+    },
+    {
+      "id": "DF-9ROUTER-70",
+      "priority": "P2",
+      "title": "CI red on cli-no-tray-headless test",
+      "worktree": "9router-wt-70",
+      "branch": "wt/df-9router-70",
+      "brief_file": "/tmp/brief-df-9router-70.txt"
+    },
+    {
+      "id": "DF-9ROUTER-65",
+      "priority": "P3",
+      "title": "combo all-seats-fail 503 only shows last seat",
+      "worktree": "9router-wt-65",
+      "branch": "wt/df-9router-65",
+      "brief_file": "/tmp/brief-df-9router-65.txt"
+    }
+  ],
+  "deferred_to_next_tick": [
+    "DF-9ROUTER-66",
+    "DF-9ROUTER-69"
+  ],
+  "finished_at": "2026-10-24T14:12:00-05:00",
+  "recovery": {
+    "status": "complete",
+    "worker_count": 0,
+    "evidence": "Manifest recorded zero workers; no worker branch/worktree was attributable to this wave.",
+    "normal_work_unblocked": true
+  }
+}

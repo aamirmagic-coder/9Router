@@ -2,9 +2,25 @@
 import { STREAM_STALL_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
 
+export const STREAM_STALL_TIMEOUT = "stream_stall_timeout";
+
 // Get HH:MM:SS timestamp
 function getTimeString() {
   return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function readableProvider(provider) {
+  const id = typeof provider === "string" ? provider.trim() : "";
+  if (!id) return "Provider";
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+function formatStallDuration(ms) {
+  const raw = Number(ms);
+  const seconds = Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.round(raw / 1000)) : 60;
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
 /**
@@ -79,7 +95,13 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
         return;
       }
 
-      logStream("✗", `ERROR: ${error.message}${error.stack ? `\n    ${error.stack}` : ""}`, true);
+      if (error.code === STREAM_STALL_TIMEOUT) {
+        const stall = `${readableProvider(provider)} stopped sending a response for ${formatStallDuration(error.stallTimeoutMs)}. The request was ended so it would not stay stuck.`;
+        logStream("✗", stall, true);
+      } else {
+        logStream("✗", `ERROR: ${error.message}`, true);
+      }
+      if (error.stack) dbg("CTRL", `${provider}/${model} | ${error.message} | ${error.stack}`);
       onError?.(error);
     },
 
@@ -249,6 +271,8 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   let cleanupOwned = null;
   const failWatchdog = () => {
     const error = new Error("stream stall timeout");
+    error.code = STREAM_STALL_TIMEOUT;
+    error.stallTimeoutMs = stallTimeoutMs;
     wrappedController.handleError(error);
     wrappedController.abort();
     cleanupOwned?.(error).catch(error => console.warn(`[STREAM] watchdog cleanup failed: ${error?.message || "unknown error"}`));

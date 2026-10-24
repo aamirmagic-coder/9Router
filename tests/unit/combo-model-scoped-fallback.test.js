@@ -156,7 +156,14 @@ describe("combo model-scoped fallback (DF-9ROUTER-34)", () => {
     expect(result.ok).toBe(false);
     // lastStatus is preserved (the 400 is the honest answer to the client).
     expect(result.status).toBe(400);
-    expect((await result.json()).error.message).toBe('Invalid model identifier "two"');
+    const payload = await result.json();
+    expect(payload.error.message).toContain('p/one (400): Invalid model identifier "one"');
+    expect(payload.error.message).toContain('p/two (400): Invalid model identifier "two"');
+    expect(payload.error.type).toBe("server_error");
+    expect(payload.error.attempts).toEqual([
+      { seat_id: "p/one", status: 400, error_message: 'Invalid model identifier "one"' },
+      { seat_id: "p/two", status: 400, error_message: 'Invalid model identifier "two"' },
+    ]);
   });
 
   /**

@@ -336,6 +336,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
+  const attempts = [];
 
   for (let i = 0; i < rotatedModels.length; i++) {
     const modelStr = rotatedModels[i];
@@ -356,6 +357,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
                 log.warn("COMBO", `Model ${modelStr} returned HTTP 200 with zero usable content, falling back to next model`);
                 lastError = "Zero usable content";
                 lastStatus = 200;
+                attempts.push({ seat_id: modelStr, status: 200, error_message: lastError });
                 continue;
               }
             } catch {
@@ -388,6 +390,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       if (typeof errorText !== "string") {
         try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
       }
+      attempts.push({ seat_id: modelStr, status: result.status, error_message: errorText });
 
       // Check if should fallback to next model.
       // MODEL-level rule (not the account rule): a combo walks an ordered list of
@@ -417,6 +420,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues
       lastError = error.message || String(error);
+      attempts.push({ seat_id: modelStr, status: 500, error_message: lastError });
       if (!lastStatus) lastStatus = 500;
       log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
     }
@@ -428,17 +432,19 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   // or have no active credentials. 503 is more accurate and retryable by clients.
   const allDisabled = lastError && lastError.toLowerCase().includes("no credentials");
   const status = allDisabled ? 503 : (lastStatus || 503);
-  const msg = lastError || "All combo models unavailable";
+  const msg = attempts.length > 0
+    ? attempts.map(({ seat_id, status: attemptStatus, error_message }) => `${seat_id} (${attemptStatus}): ${error_message}`).join("; ")
+    : (lastError || "All combo models unavailable");
 
   if (earliestRetryAfter) {
     const retryHuman = formatRetryAfter(earliestRetryAfter);
     log.warn("COMBO", `All models failed | ${msg} (${retryHuman})`);
-    return unavailableResponse(status, msg, earliestRetryAfter, retryHuman);
+    return unavailableResponse(status, msg, earliestRetryAfter, retryHuman, null, attempts);
   }
 
   log.warn("COMBO", `All models failed | ${msg}`);
   return new Response(
-    JSON.stringify({ error: { message: msg } }),
+    JSON.stringify({ error: { message: msg, type: "server_error", attempts } }),
     { status, headers: { "Content-Type": "application/json" } }
   );
 }

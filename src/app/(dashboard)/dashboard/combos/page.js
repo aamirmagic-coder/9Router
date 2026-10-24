@@ -8,7 +8,7 @@ import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifi
 import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, Badge, SmartPolicyModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
-import { aggregateComboCapabilities, comboWindowSetting } from "open-sse/providers/capabilities.js";
+import { aggregateComboCapabilities, comboSeatLimits, comboWindowSetting } from "open-sse/providers/capabilities.js";
 import { resolveProviderId, AI_PROVIDERS } from "@/shared/constants/providers";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
@@ -639,6 +639,7 @@ export default function CombosPage() {
                   combo={combo}
                   getCaps={getCaps}
                   comboByName={comboByName}
+                  comboStrategies={comboStrategies}
                   activeProviders={activeProviders}
                   copied={copied}
                   onCopy={copy}
@@ -736,7 +737,7 @@ function getRouterModelStatus(routerModel, activeProviders) {
   return { ready: false, label: "Not configured", providerId };
 }
 
-function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy, selected = false, onToggleSelect }) {
+function ComboCard({ combo, getCaps, comboByName = {}, comboStrategies = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy, selected = false, onToggleSelect }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const [showRouterSelect, setShowRouterSelect] = useState(false);
   const [showPolicyModal, setShowPolicyModal] = useState(false);
@@ -748,7 +749,16 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
   // The synced catalog is server-only, so resolving here would fall back to the
   // generic patterns and under-report the limits. getCaps carries the server's
   // answer for /api/models.
-  const comboCaps = aggregateComboCapabilities(combo.models, comboByName, getCaps);
+  //
+  // The badge must show what /v1/models publishes for this combo, so it goes through
+  // the same resolver: this combo's own window override applied, nested combos
+  // contributing what they publish for themselves.
+  const comboLimits = comboSeatLimits(
+    combo,
+    (name) => (comboByName[name] ? { name, models: comboByName[name] } : null),
+    (seat) => aggregateComboCapabilities([seat], comboByName, getCaps),
+    comboStrategies,
+  );
 
 
   return (
@@ -789,11 +799,11 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
               )}
             </div>
-            {comboCaps && (
+            {(comboLimits.contextWindow || comboLimits.maxOutput) && (
               <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
-                <span>ctx {fmtK(comboCaps.contextWindow)}</span>
+                <span>ctx {fmtK(comboLimits.contextWindow)}</span>
                 <span className="opacity-40">·</span>
-                <span>max {fmtK(comboCaps.maxOutput)}</span>
+                <span>max {fmtK(comboLimits.maxOutput)}</span>
               </div>
             )}
             {/* Fusion: judge picker (Auto = first model) */}

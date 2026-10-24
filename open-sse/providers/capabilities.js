@@ -736,6 +736,58 @@ export function comboWindowSetting(comboStrategy) {
 }
 
 /**
+ * Resolve the limits a combo publishes for itself: the context window it advertises
+ * (its own override applied) and the tightest output limit across its seats.
+ *
+ * A nested combo is one seat and contributes the window it publishes for itself, so
+ * its own override is already applied; this combo's `comboWindowSetting` then decides
+ * min, max or the explicit number. Cycle-guarded.
+ *
+ * @param {{name?: string, models?: string[]}} combo
+ * @param {(name: string) => object|null|undefined} getCombo nested combo lookup
+ * @param {(seat: string) => object|undefined} resolveSeatCaps capabilities for a seat
+ * @param {object} [comboStrategies] settings.comboStrategies, for nested overrides
+ * @param {Set<string>} [visiting]
+ * @returns {{contextWindow: number|undefined, maxOutput: number|undefined}}
+ */
+export function comboSeatLimits(combo, getCombo, resolveSeatCaps, comboStrategies = {}, visiting = new Set()) {
+  const name = typeof combo?.name === "string" ? combo.name : null;
+  if (name) {
+    if (visiting.has(name)) return { contextWindow: undefined, maxOutput: undefined };
+    visiting.add(name);
+  }
+
+  const seatWindows = [];
+  let maxOutput = Infinity;
+  try {
+    for (const seat of Array.isArray(combo?.models) ? combo.models : []) {
+      if (typeof seat !== "string") continue;
+      // A no-slash seat may be a nested combo name; anything else is a literal model.
+      const nested = seat.indexOf("/") <= 0 ? getCombo?.(seat) : null;
+      if (nested) {
+        const nestedLimits = comboSeatLimits(nested, getCombo, resolveSeatCaps, comboStrategies, visiting);
+        if (Number.isFinite(nestedLimits.contextWindow)) seatWindows.push(nestedLimits.contextWindow);
+        if (Number.isFinite(nestedLimits.maxOutput)) maxOutput = Math.min(maxOutput, nestedLimits.maxOutput);
+        continue;
+      }
+      const caps = resolveSeatCaps?.(seat);
+      if (Number.isFinite(caps?.contextWindow)) seatWindows.push(caps.contextWindow);
+      if (Number.isFinite(caps?.maxOutput)) maxOutput = Math.min(maxOutput, caps.maxOutput);
+    }
+  } finally {
+    if (name) visiting.delete(name);
+  }
+
+  // What the combo promises is its own decision: min (every seat), max (the chain via
+  // rollover), or an explicit number. See comboContextWindow.
+  const { mode, custom } = comboWindowSetting(comboStrategies?.[name]);
+  return {
+    contextWindow: comboContextWindow(seatWindows, mode, custom),
+    maxOutput: Number.isFinite(maxOutput) ? maxOutput : undefined,
+  };
+}
+
+/**
  * Resolve capabilities for a model using the 4-step fallback chain,
  * merged over DEFAULT_CAPABILITIES so the result is always complete.
  *

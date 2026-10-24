@@ -11,7 +11,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { getWritableDataDir } from "../utils/writableDataDir.js";
 
@@ -44,6 +43,14 @@ function npmInstall(pkg, version) {
   });
 }
 
+// Loaded at runtime on purpose: with a static `createRequire` import webpack
+// rewrites `createRequire(...).resolve(x)` into `(void 0).resolve(x)` and the
+// packed build throws "Cannot read properties of undefined (reading 'resolve')".
+async function runtimeRequireFor(dir) {
+  const { createRequire } = await import(/* webpackIgnore: true */ "node:module");
+  return createRequire(path.join(dir, "package.json"));
+}
+
 const inflight = new Map();
 
 async function load(pkg) {
@@ -54,7 +61,7 @@ async function load(pkg) {
     if (!isModuleMissing(error)) throw error;
   }
   // 2) Already present in the runtime dir from a previous install.
-  const runtimeRequire = createRequire(path.join(getRuntimeDir(), "package.json"));
+  const runtimeRequire = await runtimeRequireFor(getRuntimeDir());
   try {
     return await import(pathToFileURL(runtimeRequire.resolve(pkg)).href);
   } catch (error) {
@@ -71,7 +78,7 @@ async function load(pkg) {
       `install it manually: cd "${dir}" && npm install ${pkg}@${version}`
     );
   }
-  return import(pathToFileURL(createRequire(path.join(dir, "package.json")).resolve(pkg)).href);
+  return import(pathToFileURL((await runtimeRequireFor(dir)).resolve(pkg)).href);
 }
 
 export function loadRuntimeDep(pkg) {

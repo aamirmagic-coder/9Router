@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,23 @@ describe("lazyRuntime", () => {
     const { loadRuntimeDep } = await import("../../open-sse/services/lazyRuntime.js");
     const mod = await loadRuntimeDep("fake-lazy-pkg");
     expect((mod.default || mod).marker).toBe("from-runtime-dir");
+  });
+
+  // Callers destructure named exports (`const { chromium } = ...`), but a CJS
+  // package imported by file path only exposes them on `default` under real
+  // Node ESM. vitest papers over that, so run the loader in a plain node.
+  it("exposes a CJS package's exports by name under real Node ESM", () => {
+    const script = `
+      import { loadRuntimeDep } from ${JSON.stringify(SRC)};
+      const { marker } = await loadRuntimeDep("fake-lazy-pkg");
+      console.log(marker);
+    `;
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+      env: { ...process.env, DATA_DIR: dataDir },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    expect(out.trim()).toBe("from-runtime-dir");
   });
 
   // webpack rewrites `createRequire(...).resolve(x)` into `(void 0).resolve(x)`

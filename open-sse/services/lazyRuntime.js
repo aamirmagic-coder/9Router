@@ -51,6 +51,13 @@ async function runtimeRequireFor(dir) {
   return createRequire(path.join(dir, "package.json"));
 }
 
+// A CJS package imported by file path (steps 2/3 below) exposes its exports
+// only on `default`; callers destructure by name (`const { chromium } = ...`).
+function withNamedExports(mod) {
+  const exported = mod?.default;
+  return exported && typeof exported === "object" ? { ...exported, ...mod } : mod;
+}
+
 const inflight = new Map();
 
 async function load(pkg) {
@@ -83,7 +90,7 @@ async function load(pkg) {
 
 export function loadRuntimeDep(pkg) {
   if (!inflight.has(pkg)) {
-    inflight.set(pkg, load(pkg).finally(() => inflight.delete(pkg)));
+    inflight.set(pkg, load(pkg).then(withNamedExports).finally(() => inflight.delete(pkg)));
   }
   return inflight.get(pkg);
 }

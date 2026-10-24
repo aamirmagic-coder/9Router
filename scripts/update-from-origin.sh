@@ -60,8 +60,14 @@ fi
 
 BEHIND="$(git rev-list --count "HEAD..origin/$BRANCH")"
 if [[ "$BEHIND" == "0" ]]; then
-  ok "Already up to date ($OLD_VER @ $OLD_HEAD). Nothing to do."
-  exit 0
+  # Source being current doesn't mean the build is (previous run may have
+  # pulled but failed/skipped build+restart).
+  BUILD_VER="$(grep -m1 '"version"' .next/standalone/package.json 2>/dev/null | sed 's/[^0-9.]//g' || true)"
+  if [[ "$BUILD_VER" == "$OLD_VER" ]]; then
+    ok "Already up to date ($OLD_VER @ $OLD_HEAD, build matches). Nothing to do."
+    exit 0
+  fi
+  warn "Source is v$OLD_VER but build is v${BUILD_VER:-missing} — rebuilding (no pull needed)."
 fi
 ok "Origin has $BEHIND new commit(s). Current: v$OLD_VER @ $OLD_HEAD"
 

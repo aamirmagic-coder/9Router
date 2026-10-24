@@ -8,7 +8,7 @@ import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifi
 import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, Badge, SmartPolicyModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
-import { aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import { aggregateComboCapabilities, comboWindowSetting } from "open-sse/providers/capabilities.js";
 import { resolveProviderId, AI_PROVIDERS } from "@/shared/constants/providers";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
@@ -85,7 +85,7 @@ function shortModelName(id) {
 }
 
 // One option per distinct seat window, labelled with the seats that have it.
-function contextWindowOptions(seatEntries, seatMin, customValue) {
+function contextWindowOptions(seatEntries, seatMin, seatMax) {
   const opts = [{ value: "min", label: `min — ${formatWindow(seatMin)} (dynamic)` }];
   const groups = new Map();
   for (const { model, window } of seatEntries) {
@@ -97,8 +97,8 @@ function contextWindowOptions(seatEntries, seatMin, customValue) {
     const suffix = names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0];
     opts.push({ value: `w:${window}`, label: `${formatWindow(window)} — ${suffix}` });
   }
-  if (Number.isFinite(customValue) && customValue > 0 && !groups.has(customValue)) {
-    opts.push({ value: `w:${customValue}`, label: `${formatWindow(customValue)} — pinned` });
+  if (Number.isFinite(seatMax) && seatMax > seatMin) {
+    opts.push({ value: "max", label: `max — ${formatWindow(seatMax)} (dynamic, rollover)` });
   }
   opts.push({ value: "custom", label: "custom…" });
   return opts;
@@ -271,9 +271,13 @@ export default function CombosPage() {
     const entry = { ...(source || {}) };
     if (prevName && prevName !== name) delete updated[prevName];
 
-    if (mode === "custom" && Number(value) > 0) {
+    const numeric = Number(value);
+    if (mode === "max") {
+      entry.contextWindowMode = "max";
+      delete entry.contextWindow;
+    } else if (mode === "custom" && Number.isFinite(numeric) && numeric > 0) {
       entry.contextWindowMode = "custom";
-      entry.contextWindow = Number(value);
+      entry.contextWindow = numeric;
     } else {
       delete entry.contextWindowMode;
       delete entry.contextWindow;
@@ -1267,10 +1271,19 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
 
   // Advertised context window. Persisted in settings.comboStrategies[name], not on
   // the combo row, so switching it never rewrites the combo itself.
-  const initialWindow = Number(strategy.contextWindow);
-  const hasPinnedWindow = strategy.contextWindowMode === "custom" && Number.isFinite(initialWindow) && initialWindow > 0;
-  const [windowChoice, setWindowChoice] = useState(hasPinnedWindow ? `w:${initialWindow}` : "min");
-  const [windowInput, setWindowInput] = useState(hasPinnedWindow ? String(initialWindow) : "");
+  //
+  // The saved mode is the truth, never the number: a pinned value is not one of the
+  // seat options, so opening on `w:<value>` either matched a seat (and showed that
+  // seat's label, as if the pin had been lost) or matched nothing and let the
+  // browser fall through to "min" — which then overwrote the pin on the next save.
+  // A custom value always opens as "custom…" with the box holding the number.
+  // comboWindowSetting() is the same normalisation /v1/models resolves through, so
+  // the dialog and the published window cannot disagree.
+  const savedWindow = comboWindowSetting(strategy);
+  const initialChoice = savedWindow.mode === "custom" && !savedWindow.custom ? "min" : savedWindow.mode;
+  const [windowChoice, setWindowChoice] = useState(initialChoice);
+  const [windowInput, setWindowInput] = useState(savedWindow.custom ? String(savedWindow.custom) : "");
+  const [windowError, setWindowError] = useState("");
 
   // Seat windows follow the model list as it is edited, so the choices offered are
   // always the windows this combo can actually reach.
@@ -1279,6 +1292,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     .filter((e) => Number.isFinite(e.window) && e.window > 0);
   const seatWindows = seatEntries.map((e) => e.window);
   const seatMin = seatWindows.length ? Math.min(...seatWindows) : undefined;
+  const seatMax = seatWindows.length ? Math.max(...seatWindows) : undefined;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1364,12 +1378,19 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
 
   const handleSave = async () => {
     if (!validateName(name)) return;
+    // A "custom…" choice with no usable number used to save "min" silently, which
+    // dropped the setting and reverted the combo to its smallest seat.
+    const customWindow = Number(windowInput);
+    if (windowChoice === "custom" && !(Number.isFinite(customWindow) && customWindow > 0)) {
+      setWindowError("Enter the context window to advertise, in tokens.");
+      return;
+    }
     setSaving(true);
     await onSave({
       name: name.trim(),
       models,
-      contextWindowMode: windowChoice === "min" ? "min" : "custom",
-      contextWindow: windowChoice === "min" ? null : (Number(windowInput) > 0 ? Number(windowInput) : null),
+      contextWindowMode: windowChoice === "max" ? "max" : windowChoice === "min" ? "min" : "custom",
+      contextWindow: windowChoice === "custom" ? customWindow : null,
     });
     setSaving(false);
   };
@@ -1448,12 +1469,13 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
           <div>
             <label className="text-sm font-medium mb-1.5 block">Context Window</label>
             <Select
-              options={contextWindowOptions(seatEntries, seatMin, NaN)}
+              options={contextWindowOptions(seatEntries, seatMin, seatMax)}
               value={windowChoice}
               onChange={(e) => {
                 const v = e.target.value;
                 setWindowChoice(v);
-                // A seat value carries its own number; "min" tracks the smallest seat;
+                setWindowError("");
+                // A seat value carries its own number; "min"/"max" track the seats;
                 // "custom…" clears the box so the value can be typed.
                 setWindowInput(v.startsWith("w:") ? v.slice(2) : "");
               }}
@@ -1466,17 +1488,25 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
                 step="1000"
                 value={windowInput}
                 placeholder={seatMin ? String(seatMin) : "tokens"}
-                onChange={(e) => setWindowInput(e.target.value)}
+                onChange={(e) => {
+                  setWindowInput(e.target.value);
+                  setWindowError("");
+                }}
                 className="mt-2 w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-xs dark:border-white/15"
                 aria-label="Advertised context window"
               />
             )}
+            {windowError && (
+              <p className="text-[10px] text-red-500 mt-1" role="alert">{windowError}</p>
+            )}
             <p className="text-[10px] text-text-muted mt-1">
               {windowChoice === "min"
                 ? `Advertises ${formatWindow(seatMin)} — the smallest seat, tracked as seats change.`
-                : windowChoice === "custom"
-                  ? "Advertises the number above."
-                  : `Advertises ${formatWindow(Number(windowInput))} — that seat's own window.`}
+                : windowChoice === "max"
+                  ? `Advertises ${formatWindow(seatMax)} — the largest seat, reached by rollover.`
+                  : windowChoice === "custom"
+                    ? "Advertises the number above."
+                    : `Advertises ${formatWindow(Number(windowInput))} — that seat's own window.`}
             </p>
           </div>
 

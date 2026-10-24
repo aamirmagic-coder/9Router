@@ -63,7 +63,7 @@ async function load(pkg) {
   // 2) Already present in the runtime dir from a previous install.
   const runtimeRequire = await runtimeRequireFor(getRuntimeDir());
   try {
-    return await import(pathToFileURL(runtimeRequire.resolve(pkg)).href);
+    return await import(/* webpackIgnore: true */ pathToFileURL(runtimeRequire.resolve(pkg)).href);
   } catch (error) {
     if (!isModuleMissing(error)) throw error;
   }
@@ -78,7 +78,7 @@ async function load(pkg) {
       `install it manually: cd "${dir}" && npm install ${pkg}@${version}`
     );
   }
-  return import(pathToFileURL((await runtimeRequireFor(dir)).resolve(pkg)).href);
+  return import(/* webpackIgnore: true */ pathToFileURL((await runtimeRequireFor(dir)).resolve(pkg)).href);
 }
 
 export function loadRuntimeDep(pkg) {

@@ -38,4 +38,13 @@ describe("lazyRuntime", () => {
     const source = fs.readFileSync(SRC, "utf8");
     expect(source).not.toMatch(/import\s*\{[^}]*createRequire[^}]*\}\s*from\s*["'](node:)?module["']/);
   });
+
+  // An un-annotated import(<expr>) compiles to webpack's empty context module,
+  // which always rejects with MODULE_NOT_FOUND in the packed build.
+  it("marks every dynamic import() webpackIgnore so the packed build keeps it native", () => {
+    const source = fs.readFileSync(SRC, "utf8");
+    const calls = source.split("\n").filter((line) => /\bimport\(/.test(line) && !/^\s*\/\//.test(line));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const line of calls) expect(line).toContain("webpackIgnore: true");
+  });
 });

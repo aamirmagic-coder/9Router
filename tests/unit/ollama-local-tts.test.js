@@ -145,7 +145,12 @@ describe("Ollama Local TTS", () => {
     expect(modelIds).toContain("phonon:40m-pt");
 
     const englishVoices = getTtsVoicesForModel("ollama-local", "phonon:40m-en");
-    expect(englishVoices.map((v) => v.id)).toEqual(["default", "Zoey", "Easton", "Freya"]);
+    expect(englishVoices.length).toBe(38);
+    expect(englishVoices.map((v) => v.id)).toContain("default");
+    expect(englishVoices.map((v) => v.id)).toContain("Zoey");
+    expect(englishVoices.map((v) => v.id)).toContain("Easton");
+    expect(englishVoices.map((v) => v.id)).toContain("Freya");
+    expect(englishVoices.map((v) => v.id)).toContain("Azgorath");
 
     const deVoices = getTtsVoicesForModel("ollama-local", "phonon:de");
     expect(deVoices.map((v) => v.id)).toEqual(["default"]);
@@ -164,5 +169,10 @@ describe("Ollama Local TTS", () => {
     expect(TTS_PROVIDER_CONFIG["ollama-local"].hasVoiceIdInput).toBe(true);
     expect(TTS_PROVIDER_CONFIG["ollama-local"].defaultVoiceId).toBe("default");
     expect(TTS_PROVIDER_CONFIG["ollama-local"].voicesPerModel).toBe(true);
+    expect(TTS_PROVIDER_CONFIG["ollama-local"].defaultFormat).toBe("wav");
+    expect(TTS_PROVIDER_CONFIG["ollama-local"].formatOptions).toEqual([
+      { value: "wav", label: "WAV (Binary)" },
+      { value: "pcm", label: "PCM (Raw)" },
+    ]);
   });
 });

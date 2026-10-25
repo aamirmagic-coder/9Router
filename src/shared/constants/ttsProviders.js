@@ -64,6 +64,11 @@ export const TTS_PROVIDER_CONFIG = {
     voiceKey: "ollama-local-tts-voices",
     voicesPerModel: true,
     defaultVoiceId: "default",
+    defaultFormat: "wav",
+    formatOptions: [
+      { value: "wav", label: "WAV (Binary)" },
+      { value: "pcm", label: "PCM (Raw)" },
+    ],
   },
   // ── Config-driven providers (load models from providers.js → ttsConfig.models) ──
   "nvidia": {

@@ -714,23 +714,6 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const valid = res.status !== 401 && res.status !== 403;
         return { valid, error: valid ? null : "Invalid API key" };
       }
-      case "alicode":
-      case "alicode-intl":
-      case "alims-intl": {
-        // Aliyun Coding Plan uses OpenAI-compatible API; alims-intl uses Model Studio compatible-mode
-        const aliBaseUrl = connection.provider === "alicode-intl"
-          ? "https://coding-intl.dashscope.aliyuncs.com/v1/chat/completions"
-          : connection.provider === "alims-intl"
-          ? "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
-          : "https://coding.dashscope.aliyuncs.com/v1/chat/completions";
-        const res = await fetchWithConnectionProxy(aliBaseUrl, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${connection.apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ model: getDefaultModel(connection.provider), max_tokens: 1, messages: [{ role: "user", content: "test" }] }),
-        }, effectiveProxy);
-        const valid = res.status !== 401 && res.status !== 403;
-        return { valid, error: valid ? null : "Invalid API key" };
-      }
       case "volcengine-ark":
       case "byteplus": {
         const res = await fetchWithConnectionProxy(PROVIDERS[connection.provider]?.baseUrl, {
@@ -797,7 +780,6 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       case "dahl":
       case "atria":
       case "agnes":
-      case "bai":
       case "muse": {
         const cfg = PROVIDERS[connection.provider];
         const res = await fetchWithConnectionProxy(cfg.validateUrl, { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
@@ -920,7 +902,7 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         );
         return { valid: exRes.ok, error: exRes.ok ? null : "Invalid Personal Access Token" };
       }
-case "llm7": {
+      case "llm7": {
         const baseUrl = connection.providerSpecificData?.baseUrl || "https://api.llm7.io/v1";
         const res = await fetchWithConnectionProxy(`${baseUrl.replace(/\/$/, "")}/models`, {
           headers: { Authorization: `Bearer ${connection.apiKey}` },
@@ -958,8 +940,20 @@ case "llm7": {
         }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key", refreshed: false };
       }
-      default:
+      default: {
+        // Fallback: any provider with baseUrl in PROVIDERS config can be tested
+        const cfg = PROVIDERS[connection.provider];
+        if (cfg?.baseUrl) {
+          const modelsUrl = cfg.validateUrl ? cfg.validateUrl : cfg.baseUrl.replace(/\/chat\/completions$/, "/models").replace(/\/chatbot$/, "/models").replace(/\/messages$/, "/models");
+		      // Build auth headers based on cfg.authHeader (default: bearer)
+          const headers = { "Content-Type": "application/json", ...(cfg.headers || {}) };
+		      if (cfg.authHeader === "x-api-key") headers["X-API-Key"] = connection.apiKey;
+          else headers["Authorization"] = `Bearer ${connection.apiKey}`;
+          const res = await fetchWithConnectionProxy(modelsUrl, {headers}, effectiveProxy);
+		      return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+        }
         return { valid: false, error: "Provider test not supported" };
+      }
     }
   } catch (err) {
     return { valid: false, error: err.message };

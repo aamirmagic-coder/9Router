@@ -1,7 +1,7 @@
 import { resolveOllamaLocalHost } from "../../config/providers.js";
 import { responseToBase64, throwUpstreamError } from "./_base.js";
 
-const DEFAULT_MODEL = "phonon";
+const DEFAULT_MODEL = "phonon:multilingual";
 const DEFAULT_VOICE = "default";
 const KNOWN_PHONON_VOICES = new Set(["default", "zoey", "easton", "freya"]);
 
@@ -23,14 +23,13 @@ export default {
         voice = parts.slice(1).join("/");
       } else if (parts.length === 1) {
         const val = parts[0];
-        if (KNOWN_PHONON_VOICES.has(val.toLowerCase())) {
-          ttsModel = DEFAULT_MODEL;
-          voice = val;
-        } else if (val.toLowerCase() === "phonon") {
-          ttsModel = "phonon";
+        if (val.startsWith("phonon")) {
+          ttsModel = val;
           voice = DEFAULT_VOICE;
         } else {
-          ttsModel = val;
+          // If val does not start with phonon, treat it as a voice name with default model
+          ttsModel = DEFAULT_MODEL;
+          voice = val;
         }
       }
     }

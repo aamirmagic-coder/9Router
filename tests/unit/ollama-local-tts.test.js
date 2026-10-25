@@ -80,7 +80,7 @@ describe("Ollama Local TTS", () => {
     });
 
     const sent = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(sent.model).toBe("phonon");
+    expect(sent.model).toBe("phonon:multilingual");
     expect(sent.voice).toBe("Zoey");
     expect(sent.response_format).toBe("wav");
   });

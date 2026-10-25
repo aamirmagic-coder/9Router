@@ -208,6 +208,11 @@ export function TtsExampleCard({ providerId }) {
       const voice = activeVoiceId.trim();
       return model ? `${providerAlias}/${model}${voice ? `/${voice}` : ""}` : "";
     }
+    if (providerId === "ollama-local") {
+      const model = (selectedModel || "phonon:multilingual").trim();
+      const voice = activeVoiceId.trim();
+      return `${providerAlias}/${model}${voice && voice !== "default" ? `/${voice}` : ""}`;
+    }
     if (config.hasModelSelector && selectedModel && activeVoiceId) return `${providerAlias}/${selectedModel}/${activeVoiceId}`;
     if (config.hasModelSelector && selectedModel) return `${providerAlias}/${selectedModel}`;
     if (activeVoiceId) return `${providerAlias}/${activeVoiceId}`;

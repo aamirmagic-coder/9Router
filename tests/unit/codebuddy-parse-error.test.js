@@ -47,4 +47,18 @@ describe("CodeBuddy parseError", () => {
     expect(parsed.message).toBe(bodyText);
     expect(parsed.resetsAtMs).toBeUndefined();
   });
+
+  it("parses code 11128 conversation id missing into channel verification on codebuddy-cn", () => {
+    const executor = new CodeBuddyExecutor();
+    const bodyText = JSON.stringify({
+      code: 11128,
+      msg: "conversation id missing",
+      displayTips: { en: "failed channel verification" },
+    });
+
+    const parsed = executor.parseError({ status: 400 }, bodyText);
+    expect(parsed.status).toBe(400);
+    expect(parsed.message).toContain("channel verification");
+    expect(parsed.message).toContain("X-Conversation");
+  });
 });

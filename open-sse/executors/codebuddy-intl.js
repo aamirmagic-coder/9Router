@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { DefaultExecutor } from "./default.js";
 
 /**
@@ -8,9 +9,116 @@ import { DefaultExecutor } from "./default.js";
  * request carries the IDE's OpenAI-style reasoning params. Force stream and
  * mirror reasoning_summary exactly like CodeBuddyExecutor.
  */
+
+// Deterministic RFC-4122-v5-shaped UUID derived from a session key, mirroring
+// the official client's per-conversation id (uuid5 over the session key).
+function stableUuidFrom(key) {
+  const hash = createHash("sha1").update(key).digest("hex");
+  const timeHigh = ((parseInt(hash.slice(12, 16), 16) & 0x0fff) | 0x5000)
+    .toString(16)
+    .padStart(4, "0");
+  const clockSeq = ((parseInt(hash.slice(16, 20), 16) & 0x3fff) | 0x8000)
+    .toString(16)
+    .padStart(4, "0");
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    timeHigh,
+    clockSeq,
+    hash.slice(20, 32),
+  ].join("-");
+}
+
+function readHeader(headers, name) {
+  if (typeof headers?.get === "function") {
+    const value = headers.get(name);
+    return typeof value === "string" ? value.trim() : "";
+  }
+  if (!headers || typeof headers !== "object") return "";
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === name.toLowerCase());
+  const value = key ? headers[key] : undefined;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function writeHeader(headers, name, value) {
+  if (typeof headers?.set === "function") {
+    headers.set(name, value);
+    return;
+  }
+  if (!headers || typeof headers !== "object") return;
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === name.toLowerCase());
+  headers[key || name] = value;
+}
+
+/**
+ * Attach the conversation-correlation family the gateway's channel verification
+ * demands (HTTP 400 code 11128 "conversation id missing" without it). Values
+ * that already exist and are non-empty are preserved, so a caller tracking its
+ * own conversation keeps it; blank values count as absent.
+ */
+export function withConversationHeaders(headers, body = null) {
+  const sessionKey =
+    (typeof body?.session_id === "string" && body.session_id) ||
+    (typeof body?.prompt_cache_key === "string" && body.prompt_cache_key) ||
+    (typeof body?.conversation_id === "string" && body.conversation_id) ||
+    null;
+  const firstUser = Array.isArray(body?.messages)
+    ? body.messages.find((m) => m?.role === "user")
+    : null;
+  const userText =
+    typeof firstUser?.content === "string"
+      ? firstUser.content
+      : Array.isArray(firstUser?.content)
+        ? firstUser.content
+            .map((b) => (b && typeof b.text === "string" ? b.text : ""))
+            .join("\n")
+        : "";
+  const conversationKey = sessionKey || (userText ? `cb:${userText}` : null);
+
+  if (!readHeader(headers, "X-Conversation-ID")) {
+    writeHeader(
+      headers,
+      "X-Conversation-ID",
+      conversationKey ? stableUuidFrom(conversationKey) : randomUUID(),
+    );
+  }
+  const reqId = readHeader(headers, "X-Conversation-Request-ID") || randomUUID();
+  if (!readHeader(headers, "X-Conversation-Request-ID")) {
+    writeHeader(headers, "X-Conversation-Request-ID", reqId);
+  }
+  if (!readHeader(headers, "X-Root-Request-ID")) {
+    writeHeader(headers, "X-Root-Request-ID", reqId);
+  }
+  const messageId =
+    readHeader(headers, "X-Conversation-Message-ID") ||
+    readHeader(headers, "X-Request-ID") ||
+    randomUUID();
+  if (!readHeader(headers, "X-Conversation-Message-ID")) {
+    writeHeader(headers, "X-Conversation-Message-ID", messageId);
+  }
+  if (!readHeader(headers, "X-Request-ID")) {
+    writeHeader(headers, "X-Request-ID", messageId);
+  }
+
+  return headers;
+}
+
 export class CodeBuddyIntlExecutor extends DefaultExecutor {
   constructor() {
     super("codebuddy-intl");
+  }
+
+  buildHeaders(credentials, stream = true, url, model, body = null) {
+    const headers = super.buildHeaders(credentials, stream, url, model, body);
+    try {
+      return withConversationHeaders(headers, body);
+    } catch (error) {
+      throw new Error(
+        `CodeBuddy channel verification: could not attach the X-Conversation-* family `
+        + `(${error?.message || error}). The intl gateway rejects any request without it `
+        + `(HTTP 400 code 11128 "conversation id missing"), so this request cannot succeed.`,
+      );
+    }
   }
 
   transformRequest(model, body, stream, credentials) {
@@ -60,6 +168,18 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
             status: 429,
             message: msg || "CodeBuddy frequency limit (6004)",
             resetsAtMs,
+          };
+        }
+        if (data?.code === 11128 && /conversation id missing/i.test(msg)) {
+          const tip = data?.displayTips?.en || data?.displayMsg?.en || "";
+          return {
+            status: 400,
+            message:
+              "CodeBuddy channel verification failed (11128 \"conversation id missing\"): "
+              + "the upstream gateway requires the X-Conversation-* header family the official "
+              + "IDE sends, supplied by CodeBuddyIntlExecutor.buildHeaders(). If this appears, "
+              + "the gate likely changed (e.g. a new required header)."
+              + (tip ? ` Upstream said: ${tip}` : ""),
           };
         }
       } catch {}

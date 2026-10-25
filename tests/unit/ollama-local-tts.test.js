@@ -69,6 +69,22 @@ describe("Ollama Local TTS", () => {
     expect(sent.response_format).toBe("wav");
   });
 
+  it("maps standalone voice name to phonon model when phonon prefix is omitted", async () => {
+    mockOllamaAudioResponse();
+
+    await handleTtsCore({
+      provider: "ollama-local",
+      model: "Zoey",
+      input: "Testing standalone voice",
+      responseFormat: "wav",
+    });
+
+    const sent = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(sent.model).toBe("phonon");
+    expect(sent.voice).toBe("Zoey");
+    expect(sent.response_format).toBe("wav");
+  });
+
   it("resolves custom baseUrl from credentials when configured", async () => {
     mockOllamaAudioResponse();
 

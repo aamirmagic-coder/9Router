@@ -3,6 +3,7 @@ import { responseToBase64, throwUpstreamError } from "./_base.js";
 
 const DEFAULT_MODEL = "phonon";
 const DEFAULT_VOICE = "default";
+const KNOWN_PHONON_VOICES = new Set(["default", "zoey", "easton", "freya"]);
 
 export default {
   async synthesize(text, model, credentials, responseFormat = "mp3") {
@@ -21,7 +22,16 @@ export default {
         ttsModel = parts[0];
         voice = parts.slice(1).join("/");
       } else if (parts.length === 1) {
-        ttsModel = parts[0];
+        const val = parts[0];
+        if (KNOWN_PHONON_VOICES.has(val.toLowerCase())) {
+          ttsModel = DEFAULT_MODEL;
+          voice = val;
+        } else if (val.toLowerCase() === "phonon") {
+          ttsModel = "phonon";
+          voice = DEFAULT_VOICE;
+        } else {
+          ttsModel = val;
+        }
       }
     }
 

@@ -81,11 +81,26 @@ export function TtsExampleCard({ providerId }) {
       .then((d) => { if (d.publicUrl) setTunnelEndpoint(d.publicUrl); })
       .catch(() => {});
 
+    // Re-initialize model and voice state when providerId changes
+    const initialModel = (() => {
+      const cfgModels = AI_PROVIDERS[providerId]?.ttsConfig?.models;
+      if (cfgModels?.length) return cfgModels[0].id;
+      if (config.hasModelSelector && config.modelKey) {
+        const models = getModelsByProviderId(config.modelKey);
+        return models?.[0]?.id || "";
+      }
+      return "";
+    })();
+    setSelectedModel(initialModel);
+    setVoiceId(config.defaultVoiceId || "");
+    setSelectedVoice(config.defaultVoiceId || "");
+    setSelectedVoiceName("");
+    setCountryVoices([]);
+    setSelectedLang("");
+
     // Pre-select default voice based on provider config
     if (config.voiceSource === "hardcoded") {
-      const defaultModel = config.hasModelSelector && config.modelKey
-        ? (getModelsByProviderId(config.modelKey)?.[0]?.id || "")
-        : "";
+      const defaultModel = initialModel;
       // Use per-model voices if available, else flat list
       const voices = (config.voicesPerModel && defaultModel)
         ? (getTtsVoicesForModel(providerId, defaultModel) || [])
@@ -103,6 +118,7 @@ export function TtsExampleCard({ providerId }) {
           setCountryVoices(voices);
           setSelectedVoice(voices[0].id);
           setSelectedVoiceName(voices[0].name || voices[0].id);
+          if (config.hasVoiceIdInput) setVoiceId(voices[0].id);
         }
       }
     }
@@ -208,7 +224,7 @@ export function TtsExampleCard({ providerId }) {
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer ${apiKey || "YOUR_KEY"}" \\
   -d '${JSON.stringify(ttsBody)}' \\
-  ${responseFormat === "json" ? "" : "--output speech.mp3"}`;
+  ${responseFormat === "json" ? "" : `--output speech.${providerId === "ollama-local" ? "wav" : "mp3"}`}`;
 
   const handleRun = async () => {
     if (!input.trim() || !modelFull) return;

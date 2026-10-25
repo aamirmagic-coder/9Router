@@ -61,9 +61,23 @@ export default {
         body: JSON.stringify(payload),
       });
 
-      // If "phonon" 404s, seamlessly try "phonon:multilingual" (or vice-versa)
-      if (!res.ok && res.status === 404) {
-        const altModel = ttsModel === "phonon" ? "phonon:multilingual" : ttsModel === "phonon:multilingual" ? "phonon" : null;
+      // If requested phonon model 404s, discover installed phonon tags or fallback
+      if (!res.ok && res.status === 404 && ttsModel.startsWith("phonon")) {
+        let altModel = null;
+        try {
+          const tagsRes = await fetch(`${host}/api/tags`).catch(() => null);
+          if (tagsRes && tagsRes.ok) {
+            const data = await tagsRes.json().catch(() => ({}));
+            const installedModels = (data.models || []).map((m) => m.name || m.model).filter(Boolean);
+            const found = installedModels.find((m) => m.startsWith("phonon") && m !== ttsModel);
+            if (found) altModel = found;
+          }
+        } catch {}
+
+        if (!altModel) {
+          altModel = ttsModel === "phonon" ? "phonon:multilingual" : ttsModel === "phonon:multilingual" ? "phonon:latest" : null;
+        }
+
         if (altModel) {
           const retryModelRes = await fetch(`${host}/v1/audio/speech`, {
             method: "POST",
@@ -73,7 +87,7 @@ export default {
           if (retryModelRes.ok) {
             return responseToBase64(retryModelRes, responseFormat || "wav");
           }
-          // If altModel gave a 400 (e.g. voice mismatch), continue to voice fallback below using retryModelRes
+          // If altModel gave a 400 (e.g. voice mismatch), continue to voice fallback below
           res = retryModelRes;
           ttsModel = altModel;
         }

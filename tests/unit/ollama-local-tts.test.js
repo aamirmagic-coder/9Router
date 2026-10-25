@@ -127,13 +127,28 @@ describe("Ollama Local TTS", () => {
   it("exposes Phonon TTS models + preset voices in the TTS catalog", () => {
     const entries = buildTtsProviderModels();
 
-    expect(entries["ollama-local-tts-models"].map((model) => model.id)).toEqual([
-      "phonon:multilingual",
-      "phonon",
-    ]);
+    const modelIds = entries["ollama-local-tts-models"].map((model) => model.id);
+    expect(modelIds).toContain("phonon:latest");
+    expect(modelIds).toContain("phonon");
+    expect(modelIds).toContain("phonon:multilingual");
+    expect(modelIds).toContain("phonon:40m-multilingual");
+    expect(modelIds).toContain("phonon:en");
+    expect(modelIds).toContain("phonon:31m-en");
+    expect(modelIds).toContain("phonon:40m-en");
+    expect(modelIds).toContain("phonon:de");
+    expect(modelIds).toContain("phonon:40m-de");
+    expect(modelIds).toContain("phonon:es");
+    expect(modelIds).toContain("phonon:40m-es");
+    expect(modelIds).toContain("phonon:fr");
+    expect(modelIds).toContain("phonon:40m-fr");
+    expect(modelIds).toContain("phonon:pt");
+    expect(modelIds).toContain("phonon:40m-pt");
 
-    const voices = getTtsVoicesForModel("ollama-local", "phonon");
-    expect(voices.map((v) => v.id)).toEqual(["default", "Zoey", "Easton", "Freya"]);
+    const englishVoices = getTtsVoicesForModel("ollama-local", "phonon:40m-en");
+    expect(englishVoices.map((v) => v.id)).toEqual(["default", "Zoey", "Easton", "Freya"]);
+
+    const deVoices = getTtsVoicesForModel("ollama-local", "phonon:de");
+    expect(deVoices.map((v) => v.id)).toEqual(["default"]);
   });
 
   it("wires ollama-local into media-providers TTS (serviceKind, adapter, UI config)", () => {

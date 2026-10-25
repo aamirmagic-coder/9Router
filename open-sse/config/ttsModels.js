@@ -132,18 +132,82 @@ export const TTS_MODELS_CONFIG = {
   },
   "ollama-local": {
     models: [
-      { id: "phonon:multilingual", name: "Phonon Multilingual", type: "tts" },
-      { id: "phonon",              name: "Phonon",              type: "tts" },
+      { id: "phonon:latest",           name: "Phonon (Latest)",         type: "tts" },
+      { id: "phonon",                  name: "Phonon",                  type: "tts" },
+      { id: "phonon:multilingual",     name: "Phonon Multilingual",     type: "tts" },
+      { id: "phonon:40m-multilingual", name: "Phonon 40M Multilingual", type: "tts" },
+      { id: "phonon:en",               name: "Phonon English",          type: "tts" },
+      { id: "phonon:31m-en",           name: "Phonon 31M English",      type: "tts" },
+      { id: "phonon:40m-en",           name: "Phonon 40M English",      type: "tts" },
+      { id: "phonon:de",               name: "Phonon German",           type: "tts" },
+      { id: "phonon:40m-de",           name: "Phonon 40M German",       type: "tts" },
+      { id: "phonon:es",               name: "Phonon Spanish",          type: "tts" },
+      { id: "phonon:40m-es",           name: "Phonon 40M Spanish",      type: "tts" },
+      { id: "phonon:fr",               name: "Phonon French",           type: "tts" },
+      { id: "phonon:40m-fr",           name: "Phonon 40M French",       type: "tts" },
+      { id: "phonon:pt",               name: "Phonon Portuguese",       type: "tts" },
+      { id: "phonon:40m-pt",           name: "Phonon 40M Portuguese",   type: "tts" },
     ],
     voices: {
-      "phonon:multilingual": [
-        { id: "default", name: "Default", type: "tts" },
+      "phonon:latest": [
+        { id: "default", name: "Default (Neutral)", type: "tts" },
+        { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
+        { id: "Easton",  name: "Easton (Male)",     type: "tts" },
+        { id: "Freya",   name: "Freya (Female)",    type: "tts" },
       ],
       phonon: [
         { id: "default", name: "Default (Neutral)", type: "tts" },
         { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
         { id: "Easton",  name: "Easton (Male)",     type: "tts" },
         { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+      ],
+      "phonon:en": [
+        { id: "default", name: "Default (Neutral)", type: "tts" },
+        { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
+        { id: "Easton",  name: "Easton (Male)",     type: "tts" },
+        { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+      ],
+      "phonon:31m-en": [
+        { id: "default", name: "Default (Neutral)", type: "tts" },
+        { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
+        { id: "Easton",  name: "Easton (Male)",     type: "tts" },
+        { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+      ],
+      "phonon:40m-en": [
+        { id: "default", name: "Default (Neutral)", type: "tts" },
+        { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
+        { id: "Easton",  name: "Easton (Male)",     type: "tts" },
+        { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+      ],
+      "phonon:multilingual": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:40m-multilingual": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:de": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:40m-de": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:es": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:40m-es": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:fr": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:40m-fr": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:pt": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
+      "phonon:40m-pt": [
+        { id: "default", name: "Default", type: "tts" },
       ],
     },
     allVoices: [

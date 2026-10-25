@@ -1,0 +1,28 @@
+name: Regenerate lockfile (temporary)
+on:
+  push:
+    branches:
+      - chore/commit-lockfile
+permissions:
+  contents: write
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    container: node:22-alpine
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Generate lockfile for current manifest
+        run: |
+          apk add --no-cache git
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if git diff --quiet -- package-lock.json; then
+            echo "Lockfile already matches package.json"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "build: regenerate lockfile for current master"
+          git push origin HEAD:chore/commit-lockfile

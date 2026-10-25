@@ -17,6 +17,7 @@
 /.next/
 /.next-cli-build/
 /out/
+AGENTS.md
 cli/.build-home/
 product
 # production

@@ -18,11 +18,19 @@ export default {
   models: [
     { id: "clef", name: "Clef", kind: "systemone" },
     { id: "clef-flash", name: "Clef Flash", kind: "systemone" },
+    { id: "phonon", name: "Phonon", kind: "tts", params: ["voice", "response_format"] },
   ],
-  serviceKinds: ["llm", "systemone"],
+  serviceKinds: ["llm", "systemone", "tts"],
   systemoneConfig: {
     baseUrl: "http://localhost:11434/v1/systemone",
     // Saved host (providerSpecificData.baseUrl) is joined with this path.
     path: "/v1/systemone",
+  },
+  ttsConfig: {
+    baseUrl: "http://localhost:11434/v1/audio/speech",
+    path: "/v1/audio/speech",
+    defaultModel: "phonon",
+    authType: "apikey",
+    format: "openai",
   },
 };

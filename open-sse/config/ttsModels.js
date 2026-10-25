@@ -130,6 +130,25 @@ export const TTS_MODELS_CONFIG = {
       "mimo-v2.5-tts": MIMO_VOICES,
     },
   },
+  "ollama-local": {
+    models: [
+      { id: "phonon", name: "Phonon", type: "tts" },
+    ],
+    voices: {
+      phonon: [
+        { id: "default", name: "Default (Neutral)", type: "tts" },
+        { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
+        { id: "Easton",  name: "Easton (Male)",     type: "tts" },
+        { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+      ],
+    },
+    allVoices: [
+      { id: "default", name: "Default (Neutral)", type: "tts" },
+      { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
+      { id: "Easton",  name: "Easton (Male)",     type: "tts" },
+      { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+    ],
+  },
 };
 
 // ── Helper: get voices for a specific model ────────────────────────────────

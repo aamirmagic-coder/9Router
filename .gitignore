@@ -61,6 +61,7 @@ Thanks.md
 PUBLIC.en.md
 PR/*
 # Root package-lock.json is committed for reproducible npm ci builds.
+# Lockfile is generated against the current manifest in CI.
 cli/package-lock.json
 tests/package-lock.json
 

@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     container: node:22-alpine
     steps:
-      - name: Install git before checkout
-        run: apk add --no-cache git
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-      - name: Generate lockfile for current manifest
+      - name: Generate and commit lockfile
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          apk add --no-cache git
+          git clone --branch chore/commit-lockfile https://x-access-token:${GH_TOKEN}@github.com/nitsuah/9router.git /tmp/9router
+          cd /tmp/9router
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           if git diff --quiet -- package-lock.json; then
             echo "Lockfile already matches package.json"

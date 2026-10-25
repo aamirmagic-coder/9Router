@@ -1,0 +1,16 @@
+import { handleImageGeneration } from "@/sse/handlers/imageGeneration.js";
+
+export async function OPTIONS() {
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+    },
+  });
+}
+
+/** POST /v1/images/variations - OpenAI-compatible image variation endpoint */
+export async function POST(request) {
+  return await handleImageGeneration(request);
+}

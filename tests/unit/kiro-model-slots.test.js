@@ -31,6 +31,29 @@ describe("Kiro MITM model slots", () => {
     const simpleTask = kiro.defaultModels.find((m) => m.id === "simple-task");
     expect(simpleTask).toBeTruthy();
     expect(simpleTask.alias).toBe("simple-task");
+    // Its label must not read "Qwen3 Coder Next" — that label belongs to the editor slot below
+    // and made users overwrite the background mapping by mistake.
+    expect(simpleTask.name).not.toBe("Qwen3 Coder Next");
+  });
+
+  it("offers a dedicated slot for the editor model id 'qwen3-coder-next'", () => {
+    const qwen = kiro.defaultModels.find((m) => m.id === "qwen3-coder-next");
+    expect(qwen).toBeTruthy();
+    expect(qwen.alias).toBe("qwen3-coder-next");
+    expect(qwen.name).toBe("Qwen3 Coder Next");
+    // The two ids are distinct models and must never collapse into one slot
+    expect(qwen.alias).not.toBe("simple-task");
+  });
+
+  it("keeps every defaultModels alias unique", () => {
+    const aliases = kiro.defaultModels.map((m) => m.alias);
+    expect(new Set(aliases).size).toBe(aliases.length);
+  });
+
+  it("declares modelAliases covering every default slot", () => {
+    for (const m of kiro.defaultModels) {
+      expect(kiro.modelAliases).toContain(m.alias);
+    }
   });
 
   it("offers mappable slots for GPT-5.6 family models", () => {

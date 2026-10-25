@@ -14,7 +14,13 @@ const { getMitmAlias } = require("./dbReader");
 const { applyAntigravityIdeVersionOverride } = require("./antigravityIdeVersion");
 const LOCAL_PORT = 443;
 const IS_WIN = process.platform === "win32";
-const ENABLE_FILE_LOG = IS_DEV;
+// File dump of request/response bodies. Enabled in dev, OR explicitly via MITM_DUMP=1
+// (recon mode: inspect traffic from a new tool before building its handler).
+function dumpEnvEnabled() {
+  const v = (process.env.MITM_DUMP || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on" || v === "yes";
+}
+const ENABLE_FILE_LOG = IS_DEV || dumpEnvEnabled();
 
 // Verbose request-routing trace. Enabled by MITM_KIRO_DEBUG so we can see WHY a
 // Kiro request never reaches the intercept handler (wrong host match, not
@@ -158,8 +164,15 @@ function getMappedModel(tool, model) {
     const normalizedModel = String(model).replace(/^models\//, "");
     const lookup = MODEL_SYNONYMS?.[tool]?.[normalizedModel] || normalizedModel;
     if (aliases[lookup]) return aliases[lookup];
-    // Prefix match fallback
-    const prefixKey = Object.keys(aliases).find(k => k && aliases[k] && (lookup.startsWith(k) || k.startsWith(lookup)));
+    // Prefix match fallback. Restricted to a separator boundary ("-" / "_" / ":" / "/") so a
+    // short key like "auto" cannot swallow an unrelated model, and two sibling ids sharing a
+    // stem (e.g. "qwen3-coder-next" vs a future "qwen3-coder-plus-…") stay unambiguous.
+    const isBoundary = (shorter, longer) =>
+      longer.length > shorter.length &&
+      ["-", "_", ":", "/", "."].includes(longer[shorter.length]);
+    const prefixKey = Object.keys(aliases).find(
+      (k) => k && aliases[k] && (isBoundary(k, lookup) || isBoundary(lookup, k))
+    );
     if (prefixKey) return aliases[prefixKey];
     // Pattern fallback: catches AG renamed variants (e.g. deprecated pro IDs → gemini-pro-agent)
     const patterns = MODEL_PATTERNS?.[tool] || [];
@@ -380,6 +393,15 @@ const server = https.createServer(sslOptions, async (req, res) => {
     // Kiro IDE posts chat to `/` with x-amz-target (not path /generateAssistantResponse)
     if (!isChatRequest(tool, req)) {
       routeDbg(`→ passthrough (not a chat request for tool=${tool}; url=${req.url} x-amz-target=${req.headers["x-amz-target"] || "-"})`);
+      return passthrough(req, res, bodyBuffer);
+    }
+
+    // RECON (grok): decrypt + dump request/response, then forward unchanged to the
+    // real upstream. No interception — this is reconnaissance to discover the exact
+    // chat endpoint + body format before a real handler exists. passthrough() already
+    // dumps req/res to data/logs/mitm when ENABLE_FILE_LOG is on (MITM_DUMP=1).
+    if (tool === "grok") {
+      routeDbg(`→ RECON passthrough+dump (grok) host=${host} url=${req.url} bytes=${bodyBuffer.length}`);
       return passthrough(req, res, bodyBuffer);
     }
 

@@ -179,16 +179,71 @@ export class AntigravityExecutor extends BaseExecutor {
     // ─── Image generation: completely different request structure ───
     if (isImageModel(model)) {
       const imageConfig = parseImageConfig(model);
-      // Strip model name suffixes for the actual API model name
-      const cleanModel = model.replace(/-(\d+)x(\d+)$/, "");
+      // Strip provider prefixes and model name resolution suffixes for the actual API model name
+      const cleanModel = model.replace(/^(ag|antigravity)\//, "").replace(/-(\d+)x(\d+)$/, "");
 
-      // Build simplified contents — text-only, merge all user messages
+      // Build contents — preserve text and multimodal parts (inlineData / fileData) for image generation & editing
       const contents = [];
-      const srcContents = body.request?.contents || body.contents || [];
+      let srcContents = body.request?.contents || body.contents || [];
+      if (srcContents.length === 0 && (body.prompt || body.image || body.images)) {
+        const fallbackParts = [];
+        const rawImages = Array.isArray(body.images)
+          ? body.images
+          : Array.isArray(body.image)
+          ? body.image
+          : body.image
+          ? [body.image]
+          : [];
+        for (const img of rawImages) {
+          if (!img) continue;
+          if (typeof img === "object") {
+            if (img.inlineData) {
+              fallbackParts.push(img.inlineData.data ? img : { inlineData: img.inlineData });
+            } else if (img.b64_json) {
+              fallbackParts.push({ inlineData: { mimeType: "image/png", data: img.b64_json.replace(/\s+/g, "") } });
+            } else if (img.data) {
+              fallbackParts.push({ inlineData: { mimeType: img.mimeType || img.mime_type || "image/png", data: img.data } });
+            }
+          } else if (typeof img === "string") {
+            const dataUriMatch = img.match(/^data:(image\/[^;]+);base64,(.+)$/);
+            if (dataUriMatch) {
+              fallbackParts.push({ inlineData: { mimeType: dataUriMatch[1], data: dataUriMatch[2] } });
+            } else if (!img.startsWith("http")) {
+              fallbackParts.push({ inlineData: { mimeType: "image/png", data: img.replace(/\s+/g, "") } });
+            }
+          }
+        }
+        if (body.prompt) {
+          fallbackParts.push({ text: body.prompt });
+        }
+        if (fallbackParts.length > 0) {
+          srcContents = [{ role: "user", parts: fallbackParts }];
+        }
+      }
+
       for (const c of srcContents) {
-        const textParts = (c.parts || []).filter(p => p.text !== undefined).map(p => ({ text: p.text }));
-        if (textParts.length > 0) {
-          contents.push({ role: c.role || "user", parts: textParts });
+        const parts = [];
+        for (const p of c.parts || []) {
+          if (p.text !== undefined) {
+            parts.push({ text: p.text });
+          } else if (p.inlineData || p.inline_data) {
+            const inline = p.inlineData || p.inline_data;
+            const mimeType = inline.mimeType || inline.mime_type || "image/png";
+            const data = inline.data;
+            if (data) {
+              parts.push({ inlineData: { mimeType, data } });
+            }
+          } else if (p.fileData || p.file_data) {
+            const fd = p.fileData || p.file_data;
+            const mimeType = fd.mimeType || fd.mime_type || "image/png";
+            const fileUri = fd.fileUri || fd.file_uri;
+            if (fileUri) {
+              parts.push({ fileData: { mimeType, fileUri } });
+            }
+          }
+        }
+        if (parts.length > 0) {
+          contents.push({ role: c.role || "user", parts });
         }
       }
 

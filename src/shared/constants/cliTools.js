@@ -43,11 +43,19 @@ export const MITM_TOOLS = {
     description: "Kiro IDE with MITM",
     configType: "mitm",
     mitmDomain: "runtime.us-east-1.kiro.dev",
+    modelAliases: ["auto", "claude-sonnet-5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "deepseek-3.2", "minimax-m2.1", "qwen3-coder-next", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "simple-task"],
     defaultModels: [
       // Kiro's agent/"vibe" mode sends modelId "auto" for the main turn and "simple-task"
       // for background sub-tasks (verified via MITM request dump of generateAssistantResponse).
       // Both need a mappable slot — otherwise getMappedModel returns null and the chat call
       // is passed through to AWS instead of being routed to the chosen provider.
+      //
+      // NOTE: "qwen3-coder-next" and "simple-task" are DISTINCT model ids sent by Kiro.
+      // They used to share one slot (id/alias "simple-task", label "Qwen3 Coder Next"), which
+      // meant a mapping saved from the dashboard was stored under the key "simple-task" while
+      // the editor's chat turn arrived as "qwen3-coder-next" → getMappedModel() returned null
+      // and the request leaked to AWS. The background/git-commit slot ("simple-task") was also
+      // effectively invisible because its label read "Qwen3 Coder Next". Keep them separate.
       { id: "auto", name: "Auto (Kiro Agent)", alias: "auto" },
       { id: "claude-sonnet-5", name: "Claude Sonnet 5", alias: "claude-sonnet-5" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4.5" },
@@ -55,10 +63,11 @@ export const MITM_TOOLS = {
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
       { id: "deepseek-3.2", name: "DeepSeek 3.2", alias: "deepseek-3.2" },
       { id: "minimax-m2.1", name: "MiniMax M2.1", alias: "minimax-m2.1" },
+      { id: "qwen3-coder-next", name: "Qwen3 Coder Next", alias: "qwen3-coder-next" },
       { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", alias: "gpt-5.6-sol", contextLength: 272000, rateMultiplier: 2.4 },
       { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", alias: "gpt-5.6-terra", contextLength: 272000, rateMultiplier: 1.2 },
       { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", alias: "gpt-5.6-luna", contextLength: 272000, rateMultiplier: 0.6 },
-      { id: "simple-task", name: "Qwen3 Coder Next", alias: "simple-task" },
+      { id: "simple-task", name: "Simple Task (Background / Git commit)", alias: "simple-task" },
     ],
   },
   // cursor: {

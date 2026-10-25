@@ -21,6 +21,10 @@ const TARGET_HOSTS = [
   "codewhisperer.us-east-1.amazonaws.com",
   "runtime.us-east-1.kiro.dev",
   "api2.cursor.sh",
+  // RECON: Grok Bot candidate hosts (passthrough+dump only for now)
+  "grok.com",
+  "chat.x.com",
+  "x.ai",
 ];
 
 const URL_PATTERNS = {
@@ -30,6 +34,10 @@ const URL_PATTERNS = {
   // see isChatRequest() for the header-based match.
   kiro: ["/generateAssistantResponse"],
   cursor: ["/BidiAppend", "/RunSSE", "/RunPoll", "/Run"],
+  // RECON: match-all so every grok request is flagged as "chat" and reaches the
+  // recon branch in server.js (which passthroughs + dumps). "" is a substring of
+  // any URL, so isChatRequest() always returns true for grok.
+  grok: [""],
 };
 
 /**
@@ -57,6 +65,20 @@ function isChatRequest(tool, req) {
 
 // Synonym map: rawModel from request → canonical alias key in mitmAlias DB
 const MODEL_SYNONYMS = {
+  kiro: {
+    // Kiro IDE has shipped this slot under several ids over time. All of them must land on
+    // the single canonical alias key "qwen3-coder-next" so a mapping saved once keeps working.
+    "qwen3-coder-next": "qwen3-coder-next",
+    "qwen3-coder": "qwen3-coder-next",
+    "qwen3-coder-next-1": "qwen3-coder-next",
+    "qwen-3-coder-next": "qwen3-coder-next",
+    "qwen3coder-next": "qwen3-coder-next",
+    // Legacy configs stored the editor model under the background slot's key. Requests that
+    // still arrive as "simple-task" are background/git-commit turns and keep their own mapping;
+    // only dot/dash variants of the background slot are normalized here.
+    "simple-task": "simple-task",
+    "simple_task": "simple-task",
+  },
   antigravity: {
     "gemini-default": "gemini-3.8-flash-medium",
     "gemini-3.5-flash-high": "gemini-3.8-flash-high",
@@ -105,6 +127,13 @@ const MODEL_SYNONYMS = {
 // Pattern fallback: rawModel regex → canonical alias key (when exact + prefix match fail)
 // Order matters: more specific patterns first. Catches AG renamed variants (e.g. gemini-pro-agent)
 const MODEL_PATTERNS = {
+  kiro: [
+    // Catch any Qwen coder variant the IDE invents (version suffixes, provider prefixes,
+    // "models/" prefixes) and route it to the qwen3-coder-next slot.
+    { match: /qwen.*coder/i, alias: "qwen3-coder-next" },
+    // Background sub-task turns: git commit messages, summarization, simple-task jobs.
+    { match: /simple.*task/i, alias: "simple-task" },
+  ],
   antigravity: [
     { match: /flash.*extra.*low|extra.*low.*flash|flash.*low|low.*flash/i, alias: "gemini-3.8-flash-low" },
     { match: /flash.*medium|medium.*flash/i,                       alias: "gemini-3.8-flash-medium" },
@@ -150,6 +179,8 @@ function getToolForHost(host) {
   if (h === "daily-cloudcode-pa.googleapis.com" || h === "cloudcode-pa.googleapis.com") return "antigravity";
   if (h === "q.us-east-1.amazonaws.com" || h === "codewhisperer.us-east-1.amazonaws.com" || h === "runtime.us-east-1.kiro.dev") return "kiro";
   if (h === "api2.cursor.sh") return "cursor";
+  // RECON: Grok Bot candidate hosts → "grok" (handled as passthrough+dump in server.js)
+  if (h === "grok.com" || h === "chat.x.com" || h === "x.ai") return "grok";
   return null;
 }
 

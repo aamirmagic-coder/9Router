@@ -39,6 +39,36 @@ function recordImageRequestUsage({ provider, model, connectionId, apiKey, endpoi
   }).catch(() => {});
 }
 
+async function parseImageRequestBody(request) {
+  const contentType = (request.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("multipart/form-data") || contentType.includes("application/x-www-form-urlencoded")) {
+    const formData = await request.formData();
+    const body = {};
+    for (const [key, value] of formData.entries()) {
+      let resolvedValue = value;
+      if (value && typeof value === "object" && typeof value.arrayBuffer === "function") {
+        const buf = Buffer.from(await value.arrayBuffer());
+        const mimeType = value.type || "image/png";
+        resolvedValue = `data:${mimeType};base64,${buf.toString("base64")}`;
+      }
+      if (body[key] !== undefined) {
+        if (!Array.isArray(body[key])) {
+          body[key] = [body[key]];
+        }
+        body[key].push(resolvedValue);
+      } else {
+        body[key] = resolvedValue;
+      }
+    }
+    if (body.n && typeof body.n === "string") {
+      const parsedN = parseInt(body.n, 10);
+      if (!Number.isNaN(parsedN)) body.n = parsedN;
+    }
+    return body;
+  }
+  return await request.json();
+}
+
 /**
  * Handle image generation request
  * @param {Request} request
@@ -46,16 +76,16 @@ function recordImageRequestUsage({ provider, model, connectionId, apiKey, endpoi
 export async function handleImageGeneration(request) {
   let body;
   try {
-    body = await request.json();
-  } catch {
-    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
+    body = await parseImageRequestBody(request);
+  } catch (err) {
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, err?.message?.includes?.("JSON") ? "Invalid JSON body" : "Invalid request body");
   }
 
   const url = new URL(request.url);
   const preferredConnectionId = request.headers.get("x-connection-id") || null;
   const wantsStream = (request.headers.get("accept") || "").includes("text/event-stream");
   const binaryOutput = url.searchParams.get("response_format") === "binary";
-  const modelStr = body.model;
+  let modelStr = body.model;
 
   const apiKey = extractApiKey(request);
   const settings = await getSettings();
@@ -65,8 +95,23 @@ export async function handleImageGeneration(request) {
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
   }
 
+  const isEdit = url.pathname.includes("/edits");
+  const isVariation = url.pathname.includes("/variations");
+
+  if (!modelStr && (isEdit || isVariation)) {
+    modelStr = "gemini-3.1-flash-image";
+  }
+
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
+
+  if (isVariation && !body.prompt) {
+    body.prompt = "Generate a variation of this image";
+  }
+
   if (!body.prompt) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");
+  if (isEdit && !body.image && !body.images) {
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: image");
+  }
 
   // Per-key access control: requested target, before combo expansion.
   const keyAccessDenied = await enforceKeyAccess(await getKeyAccessContext(request), modelStr);
@@ -97,7 +142,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
-  const { provider, model } = modelInfo;
+  let { provider, model } = modelInfo;
 
   // noAuth providers — no credential needed
   if (NO_AUTH_PROVIDERS.has(provider)) {
@@ -117,7 +162,16 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
+    let credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
+
+    // Fallback: if gemini-3.1-flash-image was inferred as gemini but has no credentials, try antigravity
+    if ((!credentials || credentials.allRateLimited) && provider === "gemini" && model === "gemini-3.1-flash-image" && excludeConnectionIds.size === 0) {
+      const agCreds = await getProviderCredentials("antigravity", excludeConnectionIds, model, { preferredConnectionId });
+      if (agCreds && !agCreds.allRateLimited) {
+        provider = "antigravity";
+        credentials = agCreds;
+      }
+    }
 
     if (!credentials || credentials.allRateLimited) {
       if (credentials?.allRateLimited) {

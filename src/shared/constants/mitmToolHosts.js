@@ -7,6 +7,9 @@ const TOOL_HOSTS = {
   copilot: ["api.individual.githubcopilot.com"],
   kiro: ["runtime.us-east-1.kiro.dev", "q.us-east-1.amazonaws.com", "codewhisperer.us-east-1.amazonaws.com"],
   cursor: ["api2.cursor.sh"],
+  // RECON: Grok Bot (Electron). Candidate hosts pulled from app.asar string scan.
+  // Currently routed to passthrough+dump only (see server.js) — no interception yet.
+  grok: ["grok.com", "chat.x.com", "x.ai"],
 };
 
 module.exports = { TOOL_HOSTS };

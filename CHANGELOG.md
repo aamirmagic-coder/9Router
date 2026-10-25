@@ -1,3 +1,8 @@
+# v0.5.110 (2026-10-25)
+
+## Fixes
+- **CodeBuddy**: send `X-Conversation-*` header family (`X-Conversation-ID`, `X-Conversation-Request-ID`, `X-Root-Request-ID`, `X-Conversation-Message-ID`, `X-Request-ID`) to pass upstream channel verification gate (HTTP 400 code 11128 "conversation id missing") across `codebuddy-intl` and `codebuddy-cn` (#381, #5005)
+
 # v0.5.109 (2026-10-23)
 
 ## Features

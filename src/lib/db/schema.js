@@ -83,6 +83,9 @@ export const TABLES = {
       machineId: "TEXT",
       isActive: "INTEGER DEFAULT 1",
       createdAt: "TEXT NOT NULL",
+      // JSON arrays; NULL/empty = unrestricted
+      allowedModels: "TEXT",
+      allowedEndpoints: "TEXT",
       // Per-key access control. Additive columns, picked up by
       // syncSchemaFromTables() on boot; existing rows read as unrestricted (0).
       accessRestricted: "INTEGER DEFAULT 0",
@@ -154,6 +157,35 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_rd_provider ON requestDetails(provider)",
       "CREATE INDEX IF NOT EXISTS idx_rd_model ON requestDetails(model)",
       "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",
+    ],
+  },
+  requestLogs: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      timestamp: "TEXT NOT NULL",
+      apiKeyId: "TEXT",
+      apiKeyName: "TEXT",
+      apiKeyMasked: "TEXT",
+      ip: "TEXT",
+      method: "TEXT",
+      path: "TEXT",
+      endpointKind: "TEXT",
+      model: "TEXT",
+      provider: "TEXT",
+      resolvedModel: "TEXT",
+      status: "INTEGER",
+      stream: "INTEGER DEFAULT 0",
+      promptTokens: "INTEGER DEFAULT 0",
+      completionTokens: "INTEGER DEFAULT 0",
+      durationMs: "INTEGER DEFAULT 0",
+      ttftMs: "INTEGER DEFAULT 0",
+      tps: "REAL DEFAULT 0",
+      userAgent: "TEXT",
+      error: "TEXT",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_rl_ts ON requestLogs(timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_rl_key ON requestLogs(apiKeyId)",
     ],
   },
 };

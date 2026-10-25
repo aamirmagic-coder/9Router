@@ -1,7 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
+import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
 import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
+
+const listCol = (v) => (Array.isArray(v) && v.length ? stringifyJson(v) : null);
 
 function rowToKey(row) {
   if (!row) return null;
@@ -12,6 +15,8 @@ function rowToKey(row) {
     machineId: row.machineId,
     isActive: row.isActive === 1 || row.isActive === true,
     createdAt: row.createdAt,
+    allowedModels: parseJson(row.allowedModels, []) || [],
+    allowedEndpoints: parseJson(row.allowedEndpoints, []) || [],
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
 }
@@ -67,8 +72,8 @@ export async function updateApiKey(id, data) {
     const merged = { ...rowToKey(row), ...data };
     const cols = keyAccessToColumns(merged.access);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
-      [merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0, cols.accessRestricted, cols.accessAllow, id]
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, allowedModels = ?, allowedEndpoints = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
+      [merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0, listCol(merged.allowedModels), listCol(merged.allowedEndpoints), cols.accessRestricted, cols.accessAllow, id]
     );
     result = rowToKey(db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]));
   });

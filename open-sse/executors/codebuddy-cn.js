@@ -1,4 +1,5 @@
 import { DefaultExecutor } from "./default.js";
+import { withConversationHeaders } from "./codebuddy-intl.js";
 
 /**
  * CodeBuddyExecutor — talks to https://copilot.tencent.com/v2/chat/completions
@@ -12,6 +13,19 @@ import { DefaultExecutor } from "./default.js";
 export class CodeBuddyExecutor extends DefaultExecutor {
   constructor() {
     super("codebuddy-cn");
+  }
+
+  buildHeaders(credentials, stream = true, url, model, body = null) {
+    const headers = super.buildHeaders(credentials, stream, url, model, body);
+    try {
+      return withConversationHeaders(headers, body);
+    } catch (error) {
+      throw new Error(
+        `CodeBuddy channel verification: could not attach the X-Conversation-* family `
+        + `(${error?.message || error}). The gateway rejects requests without it `
+        + `(HTTP 400 code 11128 "conversation id missing"), so this request cannot succeed.`,
+      );
+    }
   }
 
   transformRequest(model, body, stream, credentials) {
@@ -85,6 +99,18 @@ export class CodeBuddyExecutor extends DefaultExecutor {
             status: 429,
             message: msg || "CodeBuddy frequency limit (6004)",
             resetsAtMs,
+          };
+        }
+        if (data?.code === 11128 && /conversation id missing/i.test(msg)) {
+          const tip = data?.displayTips?.en || data?.displayMsg?.en || "";
+          return {
+            status: 400,
+            message:
+              "CodeBuddy channel verification failed (11128 \"conversation id missing\"): "
+              + "the upstream gateway requires the X-Conversation-* header family the official "
+              + "client sends, supplied by CodeBuddyExecutor.buildHeaders(). If this appears, "
+              + "the gate likely changed (e.g. a new required header)."
+              + (tip ? ` Upstream said: ${tip}` : ""),
           };
         }
       } catch {}

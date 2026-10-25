@@ -18,6 +18,7 @@ import EndpointRow from "./components/EndpointRow";
 import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
+import KeyPermissionsModal from "./components/KeyPermissionsModal";
 import KeyAccessControls from "./components/KeyAccessControls";
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
@@ -26,6 +27,7 @@ export default function APIPageClient({ machineId }) {
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+  const [permKey, setPermKey] = useState(null);
 
   const [requireApiKey, setRequireApiKey] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
@@ -1056,6 +1058,11 @@ export default function APIPageClient({ machineId }) {
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
+                  {(key.allowedModels?.length > 0 || key.allowedEndpoints?.length > 0) && (
+                    <p className="text-xs text-brand-500 mt-1">
+                      Restricted: {key.allowedModels?.length ? `${key.allowedModels.length} model(s)` : "all models"} · {key.allowedEndpoints?.length ? key.allowedEndpoints.join(", ") : "all endpoints"}
+                    </p>
+                  )}
                   <KeyAccessControls
                     apiKey={key}
                     onChange={(access) => handleUpdateKeyAccess(key.id, access)}
@@ -1070,6 +1077,14 @@ export default function APIPageClient({ machineId }) {
                   />
                 </div>
                 <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                  <button
+                    onClick={() => setPermKey(key)}
+                    className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                    title="Model & endpoint permissions"
+                    aria-label="Edit permissions"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">tune</span>
+                  </button>
                   <Toggle
                     size="sm"
                     checked={key.isActive ?? true}
@@ -1103,6 +1118,14 @@ export default function APIPageClient({ machineId }) {
       </Card>
 
       {/* Add Key Modal */}
+      {permKey && (
+        <KeyPermissionsModal
+          key={permKey.id}
+          apiKey={permKey}
+          onClose={() => setPermKey(null)}
+          onSaved={(updated) => setKeys((prev) => prev.map((k) => (k.id === updated.id ? { ...k, ...updated } : k)))}
+        />
+      )}
       <Modal
         isOpen={showAddModal}
         title="Create API Key"

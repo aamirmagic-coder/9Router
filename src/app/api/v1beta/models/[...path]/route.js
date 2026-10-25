@@ -1,3 +1,4 @@
+import { withRequestLog } from "@/lib/requestLog.js";
 import { handleChat } from "@/sse/handlers/chat.js";
 import {
   clearAccountError,
@@ -51,7 +52,7 @@ export async function OPTIONS() {
  * The upstream handleChat returns OpenAI SSE format; we transform it to
  * Gemini SSE format on the fly via transformOpenAISSEToGeminiSSE().
  */
-export async function POST(request, { params }) {
+async function _POST(request, { params }) {
   await ensureInitialized();
 
   try {
@@ -589,3 +590,5 @@ async function convertOpenAIResponseToGemini(response, model) {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
   });
 }
+
+export const POST = withRequestLog("chat", _POST);

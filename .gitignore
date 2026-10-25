@@ -105,5 +105,3 @@ graphify-out/*
 start-dev-silent.cjs
 debug.log
 .scratch/
-
-# Trigger lockfile regeneration after fixing the workflow checkout.

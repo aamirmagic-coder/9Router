@@ -60,6 +60,39 @@ export default {
         headers,
         body: JSON.stringify(payload),
       });
+
+      // If "phonon" 404s, seamlessly try "phonon:multilingual" (or vice-versa)
+      if (!res.ok && res.status === 404) {
+        const altModel = ttsModel === "phonon" ? "phonon:multilingual" : ttsModel === "phonon:multilingual" ? "phonon" : null;
+        if (altModel) {
+          const retryModelRes = await fetch(`${host}/v1/audio/speech`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ ...payload, model: altModel }),
+          });
+          if (retryModelRes.ok) {
+            return responseToBase64(retryModelRes, responseFormat || "wav");
+          }
+          // If altModel gave a 400 (e.g. voice mismatch), continue to voice fallback below using retryModelRes
+          res = retryModelRes;
+          ttsModel = altModel;
+        }
+      }
+
+      // If requested voice is not supported by this checkpoint, fallback to "default" voice
+      if (!res.ok && res.status === 400 && voice !== DEFAULT_VOICE) {
+        const errText = await res.clone().text().catch(() => "");
+        if (errText.includes("voice") && errText.includes("not found")) {
+          const retryVoiceRes = await fetch(`${host}/v1/audio/speech`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ ...payload, model: ttsModel, voice: DEFAULT_VOICE }),
+          });
+          if (retryVoiceRes.ok) {
+            return responseToBase64(retryVoiceRes, responseFormat || "wav");
+          }
+        }
+      }
     } catch (err) {
       if (err.cause?.code === "ECONNREFUSED" || err.code === "ECONNREFUSED" || err.message?.includes("fetch failed")) {
         throw new Error(`Cannot connect to Ollama at ${host}. Please ensure Ollama is running (e.g. 'ollama serve').`);

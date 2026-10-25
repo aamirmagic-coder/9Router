@@ -18,6 +18,7 @@ export default {
   models: [
     { id: "clef", name: "Clef", kind: "systemone" },
     { id: "clef-flash", name: "Clef Flash", kind: "systemone" },
+    { id: "phonon:multilingual", name: "Phonon Multilingual", kind: "tts", params: ["voice", "response_format"] },
     { id: "phonon", name: "Phonon", kind: "tts", params: ["voice", "response_format"] },
   ],
   serviceKinds: ["llm", "systemone", "tts"],

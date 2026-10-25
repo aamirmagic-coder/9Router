@@ -127,7 +127,10 @@ describe("Ollama Local TTS", () => {
   it("exposes Phonon TTS models + preset voices in the TTS catalog", () => {
     const entries = buildTtsProviderModels();
 
-    expect(entries["ollama-local-tts-models"].map((model) => model.id)).toEqual(["phonon"]);
+    expect(entries["ollama-local-tts-models"].map((model) => model.id)).toEqual([
+      "phonon:multilingual",
+      "phonon",
+    ]);
 
     const voices = getTtsVoicesForModel("ollama-local", "phonon");
     expect(voices.map((v) => v.id)).toEqual(["default", "Zoey", "Easton", "Freya"]);

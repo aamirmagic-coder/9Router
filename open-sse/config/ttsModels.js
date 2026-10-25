@@ -132,9 +132,13 @@ export const TTS_MODELS_CONFIG = {
   },
   "ollama-local": {
     models: [
-      { id: "phonon", name: "Phonon", type: "tts" },
+      { id: "phonon:multilingual", name: "Phonon Multilingual", type: "tts" },
+      { id: "phonon",              name: "Phonon",              type: "tts" },
     ],
     voices: {
+      "phonon:multilingual": [
+        { id: "default", name: "Default", type: "tts" },
+      ],
       phonon: [
         { id: "default", name: "Default (Neutral)", type: "tts" },
         { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
@@ -143,10 +147,10 @@ export const TTS_MODELS_CONFIG = {
       ],
     },
     allVoices: [
-      { id: "default", name: "Default (Neutral)", type: "tts" },
-      { id: "Zoey",    name: "Zoey (Female)",     type: "tts" },
-      { id: "Easton",  name: "Easton (Male)",     type: "tts" },
-      { id: "Freya",   name: "Freya (Female)",    type: "tts" },
+      { id: "default", name: "Default",        type: "tts" },
+      { id: "Zoey",    name: "Zoey (Female)",  type: "tts" },
+      { id: "Easton",  name: "Easton (Male)",  type: "tts" },
+      { id: "Freya",   name: "Freya (Female)", type: "tts" },
     ],
   },
 };

@@ -45,6 +45,8 @@ export default function TokenSaverClient() {
   const [cavemanLevel, setCavemanLevel] = useState("full");
   const [ponytailEnabled, setPonytailEnabled] = useState(false);
   const [ponytailLevel, setPonytailLevel] = useState("full");
+  const [customPromptEnabled, setCustomPromptEnabled] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState("");
   const [pxpipeEnabled, setPxpipeEnabled] = useState(false);
   const [toolDisclosureEnabled, setToolDisclosureEnabled] = useState(false);
   const [toolDisclosureFilterEnabled, setToolDisclosureFilterEnabled] = useState(false);
@@ -358,6 +360,15 @@ export default function TokenSaverClient() {
     patchSetting({ ponytailLevel: level });
   };
 
+  const handleCustomPromptEnabled = (value) => {
+    setCustomPromptEnabled(value);
+    patchSetting({ customPromptEnabled: value });
+  };
+
+  const handleCustomPromptBlur = () => {
+    patchSetting({ customPrompt });
+  };
+
   const refreshPxpipeStatus = useCallback(async () => {
     setPxpipeStatus((s) => ({ ...s, loading: true }));
     try {
@@ -411,26 +422,10 @@ export default function TokenSaverClient() {
     patchSetting({ pxpipeMinChars: next });
   };
 
-  const handleToolDisclosureEnabled = (value) => {
-    setToolDisclosureEnabled(value);
-    patchSetting({ toolDisclosureEnabled: value });
-  };
-  const handleToolDisclosureFilterEnabled = (value) => {
-    setToolDisclosureFilterEnabled(value);
-    patchSetting({ toolDisclosureFilterEnabled: value });
-  };
-  const handleToolDisclosureMaxToolsBlur = () => {
-    const next = Math.max(1, Number(toolDisclosureMaxTools) || 20);
-    setToolDisclosureMaxTools(next);
-    patchSetting({ toolDisclosureMaxTools: next });
-  };
-
-  const refreshDisclosureStats = async () => {
-    try {
-      const res = await fetch("/api/tool-disclosure/stats");
-      if (res.ok) setDisclosureStats(await res.json());
-    } catch {}
-  };
+  const handleToolDisclosureEnabled = (value) => { setToolDisclosureEnabled(value); patchSetting({ toolDisclosureEnabled: value }); };
+  const handleToolDisclosureFilterEnabled = (value) => { setToolDisclosureFilterEnabled(value); patchSetting({ toolDisclosureFilterEnabled: value }); };
+  const handleToolDisclosureMaxToolsBlur = () => { const next = Math.max(1, Number(toolDisclosureMaxTools) || 20); setToolDisclosureMaxTools(next); patchSetting({ toolDisclosureMaxTools: next }); };
+  const refreshDisclosureStats = async () => { try { const res = await fetch("/api/tool-disclosure/stats"); if (res.ok) setDisclosureStats(await res.json()); } catch {} };
 
   const handleHeadroomTimeoutBlur = () => {
     const raw = Math.round(Number(headroomTimeoutMs));
@@ -455,15 +450,17 @@ export default function TokenSaverClient() {
           setCavemanLevel(data.cavemanLevel || "full");
           setPonytailEnabled(!!data.ponytailEnabled);
           setPonytailLevel(data.ponytailLevel || "full");
+          setCustomPromptEnabled(!!data.customPromptEnabled);
+          setCustomPrompt(data.customPrompt || "");
           setPxpipeEnabled(!!data.pxpipeEnabled);
-          if (typeof data.pxpipeMinChars === "number") setPxpipeMinChars(data.pxpipeMinChars);
           setToolDisclosureEnabled(!!data.toolDisclosureEnabled);
           setToolDisclosureFilterEnabled(!!data.toolDisclosureFilterEnabled);
           if (typeof data.toolDisclosureMaxTools === "number") setToolDisclosureMaxTools(data.toolDisclosureMaxTools);
+          refreshDisclosureStats();
+          if (typeof data.pxpipeMinChars === "number") setPxpipeMinChars(data.pxpipeMinChars);
           refreshHeadroomStatus();
           // PRD: run the PXPIPE health check automatically when the page opens
           refreshPxpipeStatus().then(runPxpipeHealth);
-          refreshDisclosureStats();
         }
       } catch {}
     };
@@ -770,47 +767,48 @@ export default function TokenSaverClient() {
             />
           </div>
         </div>
-        {/* Tool Disclosure (Phase 1+2) */}
         <div className="flex items-center justify-between pt-4 mt-4 border-t border-border gap-4 flex-wrap">
           <div className="min-w-0 flex-1">
-            <p className="font-medium">Filter MCP tool schemas</p>
+            <p className="font-medium">Custom system prompt</p>
             <p className="text-sm text-text-muted">
-              Static config-driven exclusion of irrelevant MCP server schemas
+              Appends your own instruction to every request, independently of
+              the savers above
             </p>
           </div>
           <Toggle
-            checked={toolDisclosureFilterEnabled}
-            onChange={() => handleToolDisclosureFilterEnabled(!toolDisclosureFilterEnabled)}
+            checked={customPromptEnabled}
+            onChange={() => handleCustomPromptEnabled(!customPromptEnabled)}
           />
         </div>
-        <div className="flex items-center justify-between pt-4 mt-4 border-t border-border gap-4 flex-wrap">
-          <div className="min-w-0 flex-1">
-            <p className="font-medium">BM25 tool relevance</p>
-            <p className="text-sm text-text-muted">
-              Per-turn BM25 ranking — sends only the most relevant schemas (zero new deps)
-            </p>
-          </div>
-          <Toggle
-            checked={toolDisclosureEnabled}
-            onChange={() => handleToolDisclosureEnabled(!toolDisclosureEnabled)}
-          />
-        </div>
-        {toolDisclosureEnabled && (
-          <div className="ml-1 pl-3 border-l-2 border-border mt-2 flex flex-col gap-2">
-            <p className="text-sm font-medium">Max tools per turn</p>
-            <Input
-              value={String(toolDisclosureMaxTools)}
-              onChange={(e) => setToolDisclosureMaxTools(e.target.value)}
-              onBlur={handleToolDisclosureMaxToolsBlur}
-              placeholder="20"
-              className="font-mono text-sm"
+        {customPromptEnabled && (
+          <div className="pt-3">
+            <textarea
+              id="custom-prompt"
+              aria-label="Custom system prompt"
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              onBlur={handleCustomPromptBlur}
+              rows={4}
+              placeholder="e.g. Prefer editing existing files over creating new ones."
+              className="w-full rounded border border-border bg-transparent p-2 text-xs"
             />
-            <p className="text-xs text-text-muted">
-              BM25 runs when the tool count exceeds this threshold; top-K are kept.
+            <p className="text-xs text-text-muted mt-1">
+              Applied to every provider and model. Sent as-is to upstream; an
+              empty prompt injects nothing.
             </p>
           </div>
         )}
-
+        {/* Progressive tool disclosure */}
+        <div className="flex items-center justify-between pt-4 mt-4 border-t border-border gap-4 flex-wrap">
+          <div className="min-w-0 flex-1"><p className="font-medium">Filter MCP tool schemas</p><p className="text-sm text-text-muted">Exclude irrelevant MCP tool schemas before sending requests.</p></div>
+          <Toggle checked={toolDisclosureFilterEnabled} onChange={() => handleToolDisclosureFilterEnabled(!toolDisclosureFilterEnabled)} />
+        </div>
+        <div className="flex items-center justify-between pt-4 mt-4 border-t border-border gap-4 flex-wrap">
+          <div className="min-w-0 flex-1"><p className="font-medium">BM25 tool relevance</p><p className="text-sm text-text-muted">Send only tools relevant to the current request.</p></div>
+          <Toggle checked={toolDisclosureEnabled} onChange={() => handleToolDisclosureEnabled(!toolDisclosureEnabled)} />
+        </div>
+        {toolDisclosureEnabled && <div className="mt-2 flex flex-col gap-2"><label className="text-sm font-medium" htmlFor="tool-disclosure-max">Max tools per turn</label><Input id="tool-disclosure-max" value={String(toolDisclosureMaxTools)} onChange={(e) => setToolDisclosureMaxTools(e.target.value)} onBlur={handleToolDisclosureMaxToolsBlur} placeholder="20" className="font-mono text-sm" /></div>}
+        {disclosureStats.length > 0 && <p className="text-xs text-text-muted mt-2">Recent disclosure samples: {disclosureStats.length}</p>}
         {/* PXPIPE hidden from UI — experimental, not exposed to users yet */}
         {false && (
         <div className="flex items-center justify-between pt-4 mt-4 border-t border-border gap-4 flex-wrap">
@@ -858,70 +856,6 @@ export default function TokenSaverClient() {
         </div>
         )}
       </Card>
-
-      {(toolDisclosureEnabled || toolDisclosureFilterEnabled) && (
-        <Card id="tool-disclosure-stats">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary">build</span>
-              MCP Tools
-            </h2>
-            <button
-              type="button"
-              onClick={refreshDisclosureStats}
-              className="text-xs text-primary underline hover:opacity-80"
-            >
-              Refresh
-            </button>
-          </div>
-
-          {disclosureStats.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              No tool disclosure events yet. Send a request with MCP tools attached to see stats.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {disclosureStats.slice(0, 5).map((entry, idx) => {
-                const savedPct = entry.before > 0
-                  ? Math.round((entry.stripped / entry.before) * 100)
-                  : 0;
-                const ago = Math.round((Date.now() - entry.ts) / 1000);
-                const agoLabel = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
-                return (
-                  <div key={idx} className="rounded border border-border p-3 flex flex-col gap-2">
-                    <div className="flex items-center justify-between text-xs text-text-muted">
-                      <span className="font-mono truncate max-w-[60%]">
-                        {entry.connectionId ? `session:${entry.connectionId.slice(-8)}` : "no session"}
-                      </span>
-                      <span>{agoLabel}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <span className="font-medium font-mono">{entry.before}</span>
-                      <span className="text-text-muted">→</span>
-                      <span className="font-medium font-mono text-success">{entry.after}</span>
-                      {entry.stripped > 0 && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-warning/15 text-warning ml-auto">
-                          −{entry.stripped} schemas ({savedPct}%)
-                        </span>
-                      )}
-                    </div>
-                    {entry.keptNames?.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {entry.keptNames.map((n) => (
-                          <span key={n} className="text-xs px-1.5 py-0.5 rounded bg-success/10 text-success font-mono truncate max-w-[180px]">{n}</span>
-                        ))}
-                        {(entry.strippedNames || []).map((n) => (
-                          <span key={n} className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-mono truncate max-w-[180px] line-through">{n}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      )}
 
       <Modal
         isOpen={showHeadroomInstallModal}

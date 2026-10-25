@@ -2,7 +2,7 @@ import { detectFormat, getTargetFormat, resolveTransport } from "../services/pro
 import { translateRequest } from "../translator/index.js";
 import { applyThinking, extractThinking, stripThinkingSuffix } from "../translator/concerns/thinkingUnified.js";
 import { FORMATS } from "../translator/formats.js";
-import { normalizeClaudePassthrough, anchorClaudeCache, lastCacheableToolIndex } from "../translator/formats/claude.js";
+import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
@@ -27,6 +27,7 @@ import { budgetToolsToContext } from "../utils/toolBudget.js";
 import { takeRenamedToolNames } from "../utils/opencodeFingerprint.js";
 import { injectCaveman } from "../rtk/caveman.js";
 import { injectPonytail } from "../rtk/ponytail.js";
+import { injectCustomPrompt } from "../rtk/customPrompt.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
 import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
 import { compressWithPxpipe } from "../rtk/pxpipe.js";
@@ -63,7 +64,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerOverrides, toolDisclosure }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerOverrides, toolDisclosure }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
   // Stable per-session color so all lines of one CLI conversation share a tag
@@ -113,7 +114,6 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const targetFormat = useTransport?.format || modelTargetFormat || getTargetFormat(provider, credentials);
   if (useTransport && credentials) credentials.runtimeTransport = useTransport;
   const stripList = getModelStrip(alias, model);
-  const upstreamModel = getModelUpstreamId(alias, model);
 
   // Inject provider-level thinking config override (only if client hasn't set)
   // on/off → extended type (body.thinking), none/low/medium/high → effort type (body.reasoning_effort)
@@ -128,6 +128,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       body = { ...body, reasoning_effort: mode };
     }
   }
+
+  const upstreamModel = getModelUpstreamId(alias, model, body);
 
   // Per-request opt-out: client can bypass all token savers via header
   const tokenSaverEnabled = clientRawRequest?.headers?.[TOKEN_SAVER_HEADER]?.toLowerCase() !== "off";
@@ -238,11 +240,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
   }
 
-  // Progressive tool disclosure: static filter (Phase 1) + BM25 selection (Phase 2).
+  // Progressive tool disclosure: static filter, BM25 relevance, and context-budget safeguards.
   if (Array.isArray(translatedBody.tools) && translatedBody.tools.length > 0) {
     const beforeN = translatedBody.tools.length;
     const beforeBytes = log?.debug ? JSON.stringify(translatedBody.tools).length : 0;
-
     if (tokenSaverEnabled) {
       if (toolDisclosure?.filterEnabled) {
         const filtered = toolFilter(translatedBody.tools, toolDisclosure);
@@ -269,7 +270,6 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         }
       }
     }
-
     const caps = getCapabilitiesForModel(provider, model);
     const budgeted = budgetToolsToContext(translatedBody.tools, translatedBody, connectionId, caps);
     if (budgeted.stats?.changed) {
@@ -278,18 +278,15 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     } else if (budgeted.stats?.messagesOverBudget) {
       log?.warn?.("TOOLDISCLOSE", `context: messages alone ≈ ${budgeted.stats.messageTokens} tokens exceeds input budget ${budgeted.stats.inputBudgetTokens}; tool disclosure cannot solve history overflow`);
     }
-
     const outFormat = passthrough ? sourceFormat : targetFormat;
     if (outFormat === FORMATS.CLAUDE && translatedBody.tools.length > 0 && (!passthrough || translatedBody.tools.length !== beforeN)) {
       for (const t of translatedBody.tools) delete t.cache_control;
       const anchor = lastCacheableToolIndex(translatedBody.tools);
       if (anchor !== -1) translatedBody.tools[anchor].cache_control = { type: "ephemeral", ttl: "1h" };
     }
-
-    const afterN = translatedBody.tools.length;
     if (log?.debug) {
       const afterBytes = JSON.stringify(translatedBody.tools).length;
-      log.debug("TOOLDISCLOSE", `measure: ${beforeN}tools ${beforeBytes}B → ${afterN}tools ${afterBytes}B`);
+      log.debug("TOOLDISCLOSE", `measure: ${beforeN} tools ${beforeBytes}B → ${translatedBody.tools.length} tools ${afterBytes}B`);
     }
   }
 
@@ -364,6 +361,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (tokenSaverEnabled && ponytailEnabled && ponytailLevel) {
     injectPonytail(translatedBody, finalFormat, ponytailLevel);
     xf.push(`PONYTAIL:${ponytailLevel}`);
+  }
+
+  // Custom prompt: user-authored instruction, independent of the savers above
+  if (customPromptEnabled && injectCustomPrompt(translatedBody, finalFormat, customPrompt)) {
+    xf.push(`CUSTOMPROMPT:${customPrompt.trim().length}c`);
   }
 
   // PXPIPE: image bulky context (Claude-format bodies only), last saver before dispatch
